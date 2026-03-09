@@ -124,11 +124,12 @@ xmj_render_notice_line() {
 xmj_update_stage_order() {
   case "${1:-}" in
     prepare) printf '%s' '1' ;;
-    env) printf '%s' '2' ;;
-    repo) printf '%s' '3' ;;
+    env|repo) printf '%s' '2' ;;
+    local) printf '%s' '3' ;;
     pull) printf '%s' '4' ;;
     deps) printf '%s' '5' ;;
-    done) printf '%s' '6' ;;
+    restore) printf '%s' '6' ;;
+    done) printf '%s' '7' ;;
     *) printf '%s' '0' ;;
   esac
 }
@@ -136,12 +137,20 @@ xmj_update_stage_order() {
 xmj_update_stage_label() {
   case "${1:-}" in
     prepare) printf '%s' '准备中' ;;
-    env) printf '%s' '检查环境' ;;
-    repo) printf '%s' '检查仓库' ;;
+    env|repo) printf '%s' '检查环境' ;;
+    local) printf '%s' '整理本地改动' ;;
     pull) printf '%s' '拉取更新' ;;
     deps) printf '%s' '同步依赖' ;;
+    restore) printf '%s' '放回本地改动' ;;
     done) printf '%s' '更新完成' ;;
     *) printf '%s' '更新中' ;;
+  esac
+}
+
+xmj_update_display_stage() {
+  case "${1:-}" in
+    repo) printf '%s' 'env' ;;
+    *) printf '%s' "${1:-prepare}" ;;
   esac
 }
 
@@ -192,45 +201,36 @@ xmj_render_update_stage_line() {
 xmj_render_update_progress() {
   local current_stage="${1:-prepare}"
   local stage_mode="${2:-running}"
-  local headline="${3:-准备更新}"
+  local headline="${3:-准备中}"
   local detail_text="${4:-猫猫正在安静整理更新步骤。}"
-  local branch_name="${5:-}"
-  local repo_path="${6:-}"
-  local log_path="${7:-}"
+  local stage_for_display='prepare'
+
+  stage_for_display="$(xmj_update_display_stage "$current_stage")"
 
   xmj_clear_screen
   xmj_render_header
   xmj_render_section_title 'update'
   printf '\n'
-  xmj_render_page_identity '01' "${XMJ_MENU_LABEL['01']}"
-  printf '\n'
   xmj_render_page_intro \
-    '更新进行中，命令细节会悄悄写进日志本，不会直接刷满前台。' \
-    '你现在看到的是阶段状态页，适合安静等猫猫把酒馆整理好。'
+    '一键更新进行中，详细命令会悄悄写进日志本。' \
+    '前台只保留简洁阶段提示。'
   printf '\n'
-  xmj_render_fact_line '当前阶段' "$headline"
-  xmj_render_fact_line '阶段说明' "$detail_text"
-
-  if [ -n "$branch_name" ]; then
-    xmj_render_fact_line '当前分支' "$branch_name"
-  fi
-
-  if [ -n "$repo_path" ]; then
-    xmj_render_fact_line '酒馆路径' "$(xmj_display_path "$repo_path")"
-  fi
-
-  if [ -n "$log_path" ]; then
-    xmj_render_fact_line '日志位置' "$(xmj_display_path "$log_path")"
-  fi
-
+  xmj_render_setting_card "$headline" "$detail_text" ''
   printf '\n'
   printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
-  xmj_render_update_stage_line 'prepare' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'env' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'repo' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'pull' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'deps' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'done' "$current_stage" "$stage_mode"
+  xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
+    || [ "$stage_for_display" = 'restore' ] \
+    || [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ]; then
+    xmj_render_update_stage_line 'restore' "$stage_for_display" "$stage_mode"
+  fi
+
+  xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
 }
@@ -238,64 +238,56 @@ xmj_render_update_progress() {
 xmj_render_update_result() {
   local result_mode="${1:-success}"
   local current_stage="${2:-done}"
-  local summary_text="${3:-当前已经是最新版本。}"
+  local summary_text="${3:-当前已是最新版本。}"
   local detail_text="${4:-}"
-  local branch_name="${5:-}"
   local before_commit="${6:-}"
   local after_commit="${7:-}"
-  local log_path="${8:-}"
-  local repo_path="${9:-}"
   local result_title='更新完成'
-  local result_intro='酒馆更新已经整理好啦，前台没有刷出大段命令输出。'
-  local result_hint='详细命令已安静写入日志本，方便需要时再查看。'
+  local result_intro='猫猫已经把一键更新整理好了。'
+  local result_hint=''
   local stage_mode='success'
+  local stage_for_display='done'
 
   if [ "$result_mode" = 'failure' ]; then
     result_title='更新失败'
-    result_intro='这次更新没有顺利完成，但猫猫已经把详细经过收进日志本。'
-    result_hint='前台只保留简洁提示，避免 Git / npm 输出刷满屏幕。'
+    result_intro='这次更新没有顺利完成。'
+    result_hint='需要时可温和查看日志。'
     stage_mode='failure'
   fi
+
+  stage_for_display="$(xmj_update_display_stage "$current_stage")"
 
   xmj_clear_screen
   xmj_render_header
   xmj_render_section_title 'update'
   printf '\n'
-  xmj_render_page_identity '01' "${XMJ_MENU_LABEL['01']}"
-  printf '\n'
   xmj_render_page_intro "$result_intro" "$result_hint"
   printf '\n'
-  xmj_render_fact_line '结果状态' "$result_title"
-  xmj_render_fact_line '结果摘要' "$summary_text"
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
 
-  if [ -n "$detail_text" ]; then
-    xmj_render_fact_line '补充说明' "$detail_text"
-  fi
-
-  if [ -n "$branch_name" ]; then
-    xmj_render_fact_line '当前分支' "$branch_name"
-  fi
-
-  if [ -n "$before_commit" ] || [ -n "$after_commit" ]; then
-    xmj_render_fact_line '提交变化' "${before_commit:-unknown} → ${after_commit:-unknown}"
-  fi
-
-  if [ -n "$repo_path" ]; then
-    xmj_render_fact_line '酒馆路径' "$(xmj_display_path "$repo_path")"
-  fi
-
-  if [ -n "$log_path" ]; then
-    xmj_render_fact_line '日志位置' "$(xmj_display_path "$log_path")"
+  if [ "$result_mode" = 'success' ] \
+    && [ -n "$before_commit" ] \
+    && [ -n "$after_commit" ] \
+    && [ "$before_commit" != "$after_commit" ]; then
+    printf '  %b版本变化%b：%b%s → %s%b\n' \
+      "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_WHITE" "$before_commit" "$after_commit" "$XMJ_RESET"
   fi
 
   printf '\n'
   printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
-  xmj_render_update_stage_line 'prepare' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'env' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'repo' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'pull' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'deps' "$current_stage" "$stage_mode"
-  xmj_render_update_stage_line 'done' "$current_stage" "$stage_mode"
+  xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
+    || [ "$stage_for_display" = 'restore' ] \
+    || [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ]; then
+    xmj_render_update_stage_line 'restore' "$stage_for_display" "$stage_mode"
+  fi
+
+  xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -349,7 +341,7 @@ xmj_render_menu_row() {
 xmj_render_setting_home_block() {
   xmj_render_section_title 'setting'
   printf '\n'
-  xmj_render_menu_row '17' '18'
+  xmj_render_menu_row '19' '20'
   printf '\n'
 }
 
@@ -448,7 +440,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前仅 01 一键更新酒馆已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前仅 02 一键更新已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -490,7 +482,7 @@ xmj_render_about_status_page() {
   xmj_render_header
   xmj_render_section_title 'about'
   printf '\n'
-  xmj_render_page_identity '21' "${XMJ_MENU_LABEL['21']}"
+  xmj_render_page_identity '23' "${XMJ_MENU_LABEL['23']}"
   printf '\n'
   xmj_render_page_intro \
     '这里收纳当前脚本的运行状态和关键目录。' \
@@ -538,19 +530,19 @@ xmj_setting_view_id() {
 
   case "$view" in
     basic)
-      printf '%s' '17-1'
+      printf '%s' '19-1'
       ;;
     theme)
-      printf '%s' '17-2'
+      printf '%s' '19-2'
       ;;
     font)
-      printf '%s' '17-3'
+      printf '%s' '19-3'
       ;;
     advanced)
-      printf '%s' '17-4'
+      printf '%s' '19-4'
       ;;
     *)
-      printf '%s' '17'
+      printf '%s' '19'
       ;;
   esac
 }
@@ -695,7 +687,7 @@ xmj_render_tavern_setting_page() {
   xmj_render_header
   xmj_render_section_title 'setting'
   printf '\n'
-  xmj_render_page_identity '18' "${XMJ_MENU_LABEL['18']}"
+  xmj_render_page_identity '20' "${XMJ_MENU_LABEL['20']}"
   printf '\n'
   xmj_render_page_intro '功能预留，后续完善。' ''
   printf '\n'
@@ -731,11 +723,11 @@ xmj_render_about_panel_page() {
   xmj_render_header
   xmj_render_section_title 'about'
   printf '\n'
-  xmj_render_page_identity '22' "${XMJ_MENU_LABEL['22']}"
+  xmj_render_page_identity '24' "${XMJ_MENU_LABEL['24']}"
   printf '\n'
   xmj_render_page_intro \
     '小猫卷目前是一个运行在 Termux 里的 Bash 面板框架。' \
-    '首页仍以功能分组为主，其中 01 一键更新酒馆已经接入真实逻辑。'
+    '首页仍以功能分组为主，其中 02 一键更新已经接入真实逻辑。'
   printf '\n'
   xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
   xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
@@ -750,7 +742,7 @@ xmj_render_author_page() {
   xmj_render_header
   xmj_render_section_title 'about'
   printf '\n'
-  xmj_render_page_identity '23' "${XMJ_MENU_LABEL['23']}"
+  xmj_render_page_identity '25' "${XMJ_MENU_LABEL['25']}"
   printf '\n'
   xmj_render_page_intro \
     '这里保留作者和这套预览页面的视觉备注。' \
@@ -762,7 +754,7 @@ xmj_render_author_page() {
   printf '\n'
   xmj_render_page_intro \
     '当前版本主要用于确认配置、面板结构和已接入的更新流程。' \
-    '目前只实现了 01 一键更新酒馆，备份、恢复、回退等功能仍未开放。'
+    '目前只实现了 02 一键更新，备份、恢复、回退等功能仍未开放。'
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -770,16 +762,16 @@ xmj_render_menu_page() {
   local id="${1:-}"
 
   case "$id" in
-    18)
+    20)
       xmj_render_tavern_setting_page
       ;;
-    21)
+    23)
       xmj_render_about_status_page
       ;;
-    22)
+    24)
       xmj_render_about_panel_page
       ;;
-    23)
+    25)
       xmj_render_author_page
       ;;
     *)
@@ -808,7 +800,7 @@ xmj_render_placeholder_page() {
   printf '\n'
   xmj_render_page_intro \
     '你现在看到的是视觉占位页，后续会在这里补上对应业务逻辑。' \
-    '目前仅 01 一键更新酒馆已接入真实流程，其余入口仍在整理。'
+    '目前仅 02 一键更新已接入真实流程，其余入口仍在整理。'
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -817,6 +809,6 @@ xmj_render_invalid_input() {
 
   printf '\n'
   printf '  %b输入无效%b：%b%s%b\n' "$XMJ_WARN" "$XMJ_RESET" "$XMJ_PINK" "$input" "$XMJ_RESET"
-  printf '  %b仅支持输入 00 - 23 的菜单编号。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '  %b仅支持输入 00 - 25 的菜单编号。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
   xmj_wait_for_enter '按回车返回首页'
 }

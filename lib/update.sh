@@ -17,7 +17,13 @@ xmj_update_reset_state() {
   XMJ_UPDATE_BRANCH=''
   XMJ_UPDATE_BEFORE_COMMIT=''
   XMJ_UPDATE_AFTER_COMMIT=''
-  XMJ_UPDATE_DEPENDENCY_NOTE='依赖阶段尚未开始。'
+  XMJ_UPDATE_DEPENDENCY_NOTE=''
+  XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
+  XMJ_UPDATE_LOCAL_NOTE=''
+  XMJ_UPDATE_STASH_CREATED='0'
+  XMJ_UPDATE_STASH_REF=''
+  XMJ_UPDATE_STASH_LABEL=''
+  XMJ_UPDATE_RESTORE_NOTE=''
 }
 
 xmj_update_log_line() {
@@ -75,12 +81,12 @@ xmj_update_check_environment() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
   if [ -z "$repo_path" ]; then
-    xmj_update_fail 'env' '未设置酒馆路径' '请先在配置文件里填写 SillyTavern 的真实目录。'
+    xmj_update_fail 'env' '未设置酒馆路径' '请先在配置里填写 SillyTavern 目录。'
     return 1
   fi
 
   if [ ! -d "$repo_path" ]; then
-    xmj_update_fail 'env' '未找到酒馆目录' "当前路径：$(xmj_display_path "$repo_path")"
+    xmj_update_fail 'env' '未找到酒馆目录' '请先确认配置里的 SillyTavern 目录是否正确。'
     return 1
   fi
 
@@ -97,6 +103,7 @@ xmj_update_check_environment() {
 xmj_update_check_repository() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local repo_flag=''
+  local worktree_state=''
 
   repo_flag="$(git -C "$repo_path" rev-parse --is-inside-work-tree 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
   if [ "$repo_flag" != 'true' ]; then
@@ -105,19 +112,89 @@ xmj_update_check_repository() {
   fi
 
   if ! XMJ_UPDATE_BRANCH="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE")"; then
-    xmj_update_fail 'repo' '无法识别当前分支' '当前仓库可能处于 detached HEAD，请先手动检查仓库状态。'
-    return 1
-  fi
-
-  if [ -n "$(git -C "$repo_path" status --porcelain 2>>"$XMJ_UPDATE_LOG_FILE")" ]; then
-    xmj_update_fail 'repo' '仓库存在未提交改动' '为避免覆盖本地修改，本次没有继续执行更新。'
+    xmj_update_fail 'repo' '无法识别当前分支' '当前仓库状态暂时无法直接更新。'
     return 1
   fi
 
   XMJ_UPDATE_BEFORE_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  worktree_state="$(git -C "$repo_path" status --porcelain 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+
+  if [ -n "$worktree_state" ]; then
+    XMJ_UPDATE_HAS_LOCAL_CHANGES='1'
+    XMJ_UPDATE_LOCAL_NOTE='检测到本地改动，更新前会先临时收好。'
+    xmj_update_log_line '检测到本地改动，将在更新前自动 stash。'
+    printf '%s\n' "$worktree_state" >>"$XMJ_UPDATE_LOG_FILE"
+  else
+    XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
+    XMJ_UPDATE_LOCAL_NOTE='工作区干净，无需整理本地改动。'
+    xmj_update_log_line "$XMJ_UPDATE_LOCAL_NOTE"
+  fi
+
   xmj_update_log_line "当前分支：$XMJ_UPDATE_BRANCH"
   xmj_update_log_line "更新前提交：${XMJ_UPDATE_BEFORE_COMMIT:-unknown}"
   return 0
+}
+
+xmj_update_prepare_local_changes() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local stash_before=''
+  local stash_after=''
+  local stash_stamp=''
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" != '1' ]; then
+    XMJ_UPDATE_LOCAL_NOTE='本地改动无需整理。'
+    xmj_update_log_line "$XMJ_UPDATE_LOCAL_NOTE"
+    return 0
+  fi
+
+  stash_before="$(git -C "$repo_path" rev-parse --verify -q refs/stash 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  stash_stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stash_stamp" ]; then
+    stash_stamp='manual'
+  fi
+
+  XMJ_UPDATE_STASH_LABEL="xmj-auto-update-$stash_stamp"
+  xmj_update_log_line "开始整理本地改动：${XMJ_UPDATE_STASH_LABEL}"
+
+  if ! git -C "$repo_path" stash push --include-untracked -m "$XMJ_UPDATE_STASH_LABEL" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+    xmj_update_fail 'local' '整理本地改动失败' '未能临时收好本地改动，本次更新已停止。'
+    return 1
+  fi
+
+  stash_after="$(git -C "$repo_path" rev-parse --verify -q refs/stash 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  if [ -z "$stash_after" ] || [ "$stash_after" = "$stash_before" ]; then
+    xmj_update_fail 'local' '整理本地改动失败' '检测到本地改动，但没有成功生成临时保存记录。'
+    return 1
+  fi
+
+  XMJ_UPDATE_STASH_CREATED='1'
+  XMJ_UPDATE_STASH_REF='stash@{0}'
+  XMJ_UPDATE_LOCAL_NOTE='本地改动已临时收好。'
+  xmj_update_log_line "$XMJ_UPDATE_LOCAL_NOTE"
+  return 0
+}
+
+xmj_update_restore_local_changes() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if [ "${XMJ_UPDATE_STASH_CREATED:-0}" != '1' ]; then
+    XMJ_UPDATE_RESTORE_NOTE='无需放回本地改动。'
+    xmj_update_log_line "$XMJ_UPDATE_RESTORE_NOTE"
+    return 0
+  fi
+
+  xmj_update_log_line "开始放回本地改动：${XMJ_UPDATE_STASH_REF}"
+  if git -C "$repo_path" stash pop --index "$XMJ_UPDATE_STASH_REF" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+    XMJ_UPDATE_STASH_CREATED='0'
+    XMJ_UPDATE_STASH_REF=''
+    XMJ_UPDATE_RESTORE_NOTE='本地改动已自动放回。'
+    xmj_update_log_line "$XMJ_UPDATE_RESTORE_NOTE"
+    return 0
+  fi
+
+  XMJ_UPDATE_RESTORE_NOTE='本地改动没有顺利自动放回。'
+  xmj_update_fail 'restore' '本地改动未自动放回' '原始改动仍保存在临时记录里，可温和查看日志。'
+  return 1
 }
 
 xmj_update_pull_repository() {
@@ -127,18 +204,18 @@ xmj_update_pull_repository() {
   if upstream_ref="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>>"$XMJ_UPDATE_LOG_FILE")"; then
     xmj_update_log_line "检测到上游分支：$upstream_ref"
     if ! git -C "$repo_path" pull --ff-only >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
-      xmj_update_fail 'pull' '拉取更新失败' 'Git 没有顺利完成快进更新，请查看日志确认原因。'
+      xmj_update_fail 'pull' '拉取更新失败' '远程内容没有顺利同步，可温和查看日志。'
       return 1
     fi
   else
     xmj_update_log_line '当前分支未配置上游，尝试使用 origin/<当前分支>。'
     if ! git -C "$repo_path" remote get-url origin >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
-      xmj_update_fail 'pull' '未找到可用的远程仓库' '当前分支没有上游，也没有可用的 origin 远程源。'
+      xmj_update_fail 'pull' '未找到可用的远程仓库' '没有找到可用的远程更新来源。'
       return 1
     fi
 
     if ! git -C "$repo_path" pull --ff-only origin "$XMJ_UPDATE_BRANCH" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
-      xmj_update_fail 'pull' '拉取更新失败' 'Git 没有顺利完成快进更新，请查看日志确认原因。'
+      xmj_update_fail 'pull' '拉取更新失败' '远程内容没有顺利同步，可温和查看日志。'
       return 1
     fi
   fi
@@ -152,7 +229,7 @@ xmj_update_sync_dependencies() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
   if [ ! -f "$repo_path/package.json" ]; then
-    XMJ_UPDATE_DEPENDENCY_NOTE='仓库中未发现 package.json，已跳过依赖同步。'
+    XMJ_UPDATE_DEPENDENCY_NOTE='未发现 package.json，已跳过依赖同步。'
     xmj_update_log_line "$XMJ_UPDATE_DEPENDENCY_NOTE"
     return 0
   fi
@@ -166,7 +243,7 @@ xmj_update_sync_dependencies() {
   fi
 
   if ! command -v npm >/dev/null 2>&1; then
-    xmj_update_fail 'deps' '未检测到 npm' '仓库代码已同步，但当前环境无法继续安装依赖。'
+    xmj_update_fail 'deps' '未检测到 npm' '代码已同步，但当前环境无法完成依赖整理。'
     return 1
   fi
 
@@ -174,7 +251,7 @@ xmj_update_sync_dependencies() {
     cd "$repo_path" || exit 1
     npm install --no-audit --no-fund
   ) >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
-    xmj_update_fail 'deps' '依赖同步失败' 'Git 更新已执行，但 npm 没有顺利完成，请查看日志。'
+    xmj_update_fail 'deps' '同步依赖失败' '依赖整理没有顺利完成，可温和查看日志。'
     return 1
   fi
 
@@ -187,11 +264,21 @@ xmj_update_success_summary() {
   if [ -n "${XMJ_UPDATE_BEFORE_COMMIT:-}" ] \
     && [ -n "${XMJ_UPDATE_AFTER_COMMIT:-}" ] \
     && [ "$XMJ_UPDATE_BEFORE_COMMIT" != "$XMJ_UPDATE_AFTER_COMMIT" ]; then
-    printf '已从 %s 更新到 %s。' "$XMJ_UPDATE_BEFORE_COMMIT" "$XMJ_UPDATE_AFTER_COMMIT"
+    printf '%s' '已更新完成。'
     return 0
   fi
 
-  printf '%s' '当前已经是最新版本。'
+  printf '%s' '当前已是最新版本。'
+}
+
+xmj_update_success_detail() {
+  if [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ] \
+    && [ "$XMJ_UPDATE_RESTORE_NOTE" = '本地改动已自动放回。' ]; then
+    printf '%s' "$XMJ_UPDATE_RESTORE_NOTE"
+    return 0
+  fi
+
+  printf '%s' ''
 }
 
 xmj_run_tavern_update() {
@@ -200,8 +287,8 @@ xmj_run_tavern_update() {
   xmj_render_update_progress \
     'prepare' \
     'running' \
-    '准备更新' \
-    '猫猫正在整理更新篮子与日志纸条。' \
+    '准备中' \
+    '猫猫正在收拾更新篮子与日志纸条。' \
     '' \
     "${XMJ_SILLYTAVERN_PATH:-}" \
     ''
@@ -220,13 +307,13 @@ xmj_run_tavern_update() {
     return 0
   fi
 
-  xmj_update_log_line '开始执行 01 一键更新酒馆。'
+  xmj_update_log_line '开始执行 02 一键更新。'
 
   xmj_render_update_progress \
     'env' \
     'running' \
     '检查环境' \
-    '正在确认路径和 Git 环境是否就绪。' \
+    '正在确认路径、Git 和仓库状态。' \
     '' \
     "${XMJ_SILLYTAVERN_PATH:-}" \
     "$XMJ_UPDATE_LOG_FILE"
@@ -245,16 +332,30 @@ xmj_run_tavern_update() {
     return 0
   fi
 
+  if ! xmj_update_check_repository; then
+    xmj_render_update_result \
+      'failure' \
+      "$XMJ_UPDATE_STAGE" \
+      "$XMJ_UPDATE_SUMMARY" \
+      "$XMJ_UPDATE_DETAIL" \
+      "$XMJ_UPDATE_BRANCH" \
+      "$XMJ_UPDATE_BEFORE_COMMIT" \
+      "$XMJ_UPDATE_AFTER_COMMIT" \
+      "$XMJ_UPDATE_LOG_FILE" \
+      "${XMJ_SILLYTAVERN_PATH:-}"
+    return 0
+  fi
+
   xmj_render_update_progress \
-    'repo' \
+    'local' \
     'running' \
-    '检查仓库' \
-    '正在确认 Git 仓库状态与当前分支。' \
-    '' \
+    '整理本地改动' \
+    '若检测到未提交内容，会先轻轻收进临时口袋。' \
+    "$XMJ_UPDATE_BRANCH" \
     "${XMJ_SILLYTAVERN_PATH:-}" \
     "$XMJ_UPDATE_LOG_FILE"
 
-  if ! xmj_update_check_repository; then
+  if ! xmj_update_prepare_local_changes; then
     xmj_render_update_result \
       'failure' \
       "$XMJ_UPDATE_STAGE" \
@@ -272,12 +373,30 @@ xmj_run_tavern_update() {
     'pull' \
     'running' \
     '拉取更新' \
-    '正在使用安全模式同步远程提交。' \
+    '正在同步远程新内容。' \
     "$XMJ_UPDATE_BRANCH" \
     "${XMJ_SILLYTAVERN_PATH:-}" \
     "$XMJ_UPDATE_LOG_FILE"
 
   if ! xmj_update_pull_repository; then
+    if [ "${XMJ_UPDATE_STASH_CREATED:-0}" = '1' ]; then
+      xmj_render_update_progress \
+        'restore' \
+        'running' \
+        '放回本地改动' \
+        '更新没有完成，先把刚才收好的内容放回去。' \
+        "$XMJ_UPDATE_BRANCH" \
+        "${XMJ_SILLYTAVERN_PATH:-}" \
+        "$XMJ_UPDATE_LOG_FILE"
+
+      if xmj_update_restore_local_changes; then
+        XMJ_UPDATE_STAGE='pull'
+        XMJ_UPDATE_SUMMARY='拉取更新失败'
+        XMJ_UPDATE_DETAIL='远程内容没有顺利同步，本地改动已自动放回。可查看日志。'
+        xmj_update_log_line "失败后恢复说明：$XMJ_UPDATE_DETAIL"
+      fi
+    fi
+
     xmj_render_update_result \
       'failure' \
       "$XMJ_UPDATE_STAGE" \
@@ -295,12 +414,30 @@ xmj_run_tavern_update() {
     'deps' \
     'running' \
     '同步依赖' \
-    '正在安静整理依赖内容，请稍等一下。' \
+    '需要时会安静补齐依赖内容。' \
     "$XMJ_UPDATE_BRANCH" \
     "${XMJ_SILLYTAVERN_PATH:-}" \
     "$XMJ_UPDATE_LOG_FILE"
 
   if ! xmj_update_sync_dependencies; then
+    if [ "${XMJ_UPDATE_STASH_CREATED:-0}" = '1' ]; then
+      xmj_render_update_progress \
+        'restore' \
+        'running' \
+        '放回本地改动' \
+        '依赖整理没有完成，先把刚才收好的内容放回去。' \
+        "$XMJ_UPDATE_BRANCH" \
+        "${XMJ_SILLYTAVERN_PATH:-}" \
+        "$XMJ_UPDATE_LOG_FILE"
+
+      if xmj_update_restore_local_changes; then
+        XMJ_UPDATE_STAGE='deps'
+        XMJ_UPDATE_SUMMARY='同步依赖失败'
+        XMJ_UPDATE_DETAIL='依赖整理没有完成，本地改动已自动放回。可查看日志。'
+        xmj_update_log_line "失败后恢复说明：$XMJ_UPDATE_DETAIL"
+      fi
+    fi
+
     xmj_render_update_result \
       'failure' \
       "$XMJ_UPDATE_STAGE" \
@@ -314,11 +451,38 @@ xmj_run_tavern_update() {
     return 0
   fi
 
+  if [ "${XMJ_UPDATE_STASH_CREATED:-0}" = '1' ]; then
+    xmj_render_update_progress \
+      'restore' \
+      'running' \
+      '放回本地改动' \
+      '正在把刚才收好的内容放回原位。' \
+      "$XMJ_UPDATE_BRANCH" \
+      "${XMJ_SILLYTAVERN_PATH:-}" \
+      "$XMJ_UPDATE_LOG_FILE"
+
+    if ! xmj_update_restore_local_changes; then
+      xmj_render_update_result \
+        'failure' \
+        "$XMJ_UPDATE_STAGE" \
+        "$XMJ_UPDATE_SUMMARY" \
+        "$XMJ_UPDATE_DETAIL" \
+        "$XMJ_UPDATE_BRANCH" \
+        "$XMJ_UPDATE_BEFORE_COMMIT" \
+        "$XMJ_UPDATE_AFTER_COMMIT" \
+        "$XMJ_UPDATE_LOG_FILE" \
+        "${XMJ_SILLYTAVERN_PATH:-}"
+      return 0
+    fi
+  fi
+
   XMJ_UPDATE_STAGE='done'
   XMJ_UPDATE_SUMMARY="$(xmj_update_success_summary)"
-  XMJ_UPDATE_DETAIL="$XMJ_UPDATE_DEPENDENCY_NOTE"
+  XMJ_UPDATE_DETAIL="$(xmj_update_success_detail)"
   xmj_update_log_line "结果摘要：$XMJ_UPDATE_SUMMARY"
-  xmj_update_log_line "结果说明：$XMJ_UPDATE_DETAIL"
+  if [ -n "$XMJ_UPDATE_DETAIL" ]; then
+    xmj_update_log_line "结果说明：$XMJ_UPDATE_DETAIL"
+  fi
 
   xmj_render_update_result \
     'success' \
