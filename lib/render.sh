@@ -291,6 +291,168 @@ xmj_render_update_result() {
   xmj_render_page_footer '按回车返回首页'
 }
 
+xmj_launch_stage_order() {
+  case "${1:-}" in
+    prepare) printf '%s' '1' ;;
+    env) printf '%s' '2' ;;
+    boot) printf '%s' '3' ;;
+    running) printf '%s' '4' ;;
+    *) printf '%s' '0' ;;
+  esac
+}
+
+xmj_launch_stage_label() {
+  case "${1:-}" in
+    prepare) printf '%s' '准备启动' ;;
+    env) printf '%s' '检查环境' ;;
+    boot) printf '%s' '启动中' ;;
+    running) printf '%s' '运行中' ;;
+    *) printf '%s' '启动中' ;;
+  esac
+}
+
+xmj_render_launch_stage_line() {
+  local stage="${1:-prepare}"
+  local current_stage="${2:-prepare}"
+  local stage_mode="${3:-running}"
+  local stage_order='0'
+  local current_order='0'
+  local marker='·'
+  local state_text='等待中'
+  local color="$XMJ_MIST"
+
+  stage_order="$(xmj_launch_stage_order "$stage")"
+  current_order="$(xmj_launch_stage_order "$current_stage")"
+
+  if [ "$stage_order" -lt "$current_order" ]; then
+    marker='✓'
+    state_text='已完成'
+    color="$XMJ_CREAM"
+  elif [ "$stage_order" -eq "$current_order" ]; then
+    case "$stage_mode" in
+      failure)
+        marker='✕'
+        state_text='失败'
+        color="$XMJ_WARN"
+        ;;
+      success)
+        marker='✓'
+        state_text='已完成'
+        color="$XMJ_CREAM"
+        ;;
+      *)
+        marker='➜'
+        state_text='进行中'
+        color="$XMJ_PINK"
+        ;;
+    esac
+  fi
+
+  printf '  %b%s%b %b%s%b %b·%b %b%s%b\n' \
+    "$color" "$marker" "$XMJ_RESET" \
+    "$XMJ_WHITE" "$(xmj_launch_stage_label "$stage")" "$XMJ_RESET" \
+    "$XMJ_MIST" "$XMJ_RESET" \
+    "$color" "$state_text" "$XMJ_RESET"
+}
+
+xmj_render_launch_progress() {
+  local current_stage="${1:-prepare}"
+  local headline="${2:-准备启动}"
+  local detail_text="${3:-₍˄·͈༝·͈˄₎◞ 猫猫正在安静整理启动步骤喵~}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_intro \
+    '₍ᐢ..ᐢ₎♡ 启动酒馆进行中喵~ 前台不会直接刷出 Node / npm 输出。' \
+    '详细内容会悄悄写进日志本，只保留简洁状态页。'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" '按 Ctrl+C 可以结束这次启动的酒馆，然后回到首页喵~'
+  printf '\n'
+  printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_launch_stage_line 'prepare' "$current_stage" 'running'
+  xmj_render_launch_stage_line 'env' "$current_stage" 'running'
+  xmj_render_launch_stage_line 'boot' "$current_stage" 'running'
+  xmj_render_launch_stage_line 'running' "$current_stage" 'running'
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_LAUNCH_LOG_FILE")"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+}
+
+xmj_render_launch_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-running}"
+  local summary_text="${3:-酒馆已经开始运行喵~}"
+  local detail_text="${4:-}"
+  local result_title='运行状态'
+  local result_intro='₍˄·͈༝·͈˄₎◞ 猫猫已经把状态整理好了喵~'
+  local result_hint=''
+  local stage_mode='success'
+  local auto_back='0'
+
+  case "$result_mode" in
+    failure)
+      result_title='启动失败'
+      result_intro='₍ᐢ..ᐢ₎♡ 这次启动没有顺利完成喵~'
+      result_hint='需要时可温和查看日志本。'
+      stage_mode='failure'
+      ;;
+    stopped)
+      result_title='已停止运行'
+      result_intro='₍˄·͈༝·͈˄₎◞ 已收到 Ctrl+C，猫猫正在把酒馆收起来喵~'
+      result_hint='马上就会回到首页。'
+      stage_mode='success'
+      auto_back='1'
+      ;;
+    exited)
+      result_title='运行已结束'
+      result_intro='₍ᐢ..ᐢ₎♡ 酒馆已经结束本次运行喵~'
+      result_hint='需要时可温和查看日志本。'
+      stage_mode='success'
+      ;;
+    *)
+      result_title='运行状态'
+      result_intro='₍˄·͈༝·͈˄₎◞ 猫猫已经把状态整理好了喵~'
+      result_hint=''
+      stage_mode='success'
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_intro "$result_intro" "$result_hint"
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_launch_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_launch_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_launch_stage_line 'boot' "$current_stage" "$stage_mode"
+  xmj_render_launch_stage_line 'running' "$current_stage" "$stage_mode"
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_LAUNCH_LOG_FILE")"
+  fi
+
+  if [ "$auto_back" = '1' ]; then
+    printf '\n'
+    xmj_rule_line "$XMJ_BORDER" '─' 68
+    printf '  %b马上回到首页喵~%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+    return 0
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
 xmj_render_page_footer() {
   local prompt="${1:-按回车返回首页}"
 
@@ -440,7 +602,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前仅 02 一键更新已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 启动酒馆与 02 一键更新已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -727,7 +889,7 @@ xmj_render_about_panel_page() {
   printf '\n'
   xmj_render_page_intro \
     '小猫卷目前是一个运行在 Termux 里的 Bash 面板框架。' \
-    '首页仍以功能分组为主，其中 02 一键更新已经接入真实逻辑。'
+    '首页仍以功能分组为主，其中 01 启动酒馆和 02 一键更新已经接入真实逻辑。'
   printf '\n'
   xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
   xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
@@ -754,7 +916,7 @@ xmj_render_author_page() {
   printf '\n'
   xmj_render_page_intro \
     '当前版本主要用于确认配置、面板结构和已接入的更新流程。' \
-    '目前只实现了 02 一键更新，备份、恢复、回退等功能仍未开放。'
+    '目前已实现 01 启动酒馆与 02 一键更新，备份、恢复、回退等功能仍未开放。'
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -800,7 +962,7 @@ xmj_render_placeholder_page() {
   printf '\n'
   xmj_render_page_intro \
     '你现在看到的是视觉占位页，后续会在这里补上对应业务逻辑。' \
-    '目前仅 02 一键更新已接入真实流程，其余入口仍在整理。'
+    '目前仅 01 启动酒馆与 02 一键更新已接入真实流程，其余入口仍在整理。'
   xmj_render_page_footer '按回车返回首页'
 }
 

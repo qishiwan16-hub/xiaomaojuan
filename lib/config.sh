@@ -146,7 +146,7 @@ XMJ_SILLYTAVERN_PATH="$HOME/SillyTavern"
 XMJ_BACKUP_DIR="backups"
 
 # 日志目录。
-# 更新日志等详细输出会写到这里，避免直接刷满前台。
+# 启动 / 更新日志等详细输出会写到这里，避免直接刷满前台。
 XMJ_LOG_DIR="logs"
 
 # 主题模式。
