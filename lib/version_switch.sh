@@ -90,12 +90,7 @@ xmj_render_version_result() {
   xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
 
   printf '\n'
-  if [ -n "${XMJ_VERSION_CURRENT_LABEL:-}" ]; then
-    xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL}"
-  fi
-  if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
-    xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH}"
-  fi
+  xmj_render_version_focus_fact
   if [ -n "${XMJ_VERSION_CURRENT_COMMIT:-}" ]; then
     xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT}"
   fi
@@ -165,7 +160,7 @@ xmj_render_version_list_page() {
   printf '\n'
   xmj_render_setting_card '推荐版本' "优先试 $(xmj_version_recommended_summary)。" ''
   printf '\n'
-  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL:-未知}"
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
   xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
   xmj_render_fact_line '版本总数' "$total"
   xmj_render_fact_line '当前页' "${page}/${total_pages}"
@@ -245,7 +240,6 @@ xmj_render_branch_list_page() {
   printf '\n'
   xmj_render_setting_card '常用分支' "默认常用分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" ''
   printf '\n'
-  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
   xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
   xmj_render_fact_line '分支总数' "$total"
   xmj_render_fact_line '当前页' "${page}/${total_pages}"
@@ -343,6 +337,25 @@ xmj_version_reset_state() {
   declare -ga XMJ_VERSION_BRANCHES=()
   declare -ga XMJ_VERSION_BRANCH_SOURCES=()
   declare -ga XMJ_VERSION_BRANCH_COMMITS=()
+}
+
+xmj_version_clear_execution_artifacts() {
+  XMJ_VERSION_STAGE='prepare'
+  XMJ_VERSION_SUMMARY=''
+  XMJ_VERSION_DETAIL=''
+  XMJ_VERSION_DEPENDENCY_NOTE=''
+  XMJ_VERSION_BACKUP_FILE=''
+  XMJ_VERSION_BACKUP_NOTE=''
+  XMJ_VERSION_RECOVER_NOTE=''
+  XMJ_VERSION_STASH_CREATED='0'
+  XMJ_VERSION_STASH_REF=''
+  XMJ_VERSION_STASH_LABEL=''
+  XMJ_VERSION_RESTORE_NOTE=''
+  XMJ_VERSION_TARGET_TAG=''
+  XMJ_VERSION_TARGET_BRANCH=''
+  XMJ_VERSION_TARGET_KIND=''
+  XMJ_VERSION_TARGET_DATE=''
+  XMJ_VERSION_TARGET_COMMIT=''
 }
 
 xmj_version_log_line() {
@@ -1008,19 +1021,56 @@ xmj_version_stage_order() {
   esac
 }
 
+xmj_version_display_kind() {
+  case "${XMJ_VERSION_TARGET_KIND:-${XMJ_VERSION_ACTIVE_MODE:-version}}" in
+    branch) printf '%s' 'branch' ;;
+    *) printf '%s' 'version' ;;
+  esac
+}
+
+xmj_render_version_focus_fact() {
+  case "$(xmj_version_display_kind)" in
+    branch)
+      if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
+        xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH}"
+      fi
+      ;;
+    *)
+      if [ -n "${XMJ_VERSION_CURRENT_VERSION:-}" ]; then
+        xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION}"
+      fi
+      ;;
+  esac
+}
+
 xmj_version_stage_label() {
   case "${1:-}" in
     prepare) printf '%s' '准备中' ;;
     env) printf '%s' '检查环境' ;;
-    fetch) printf '%s' '整理版本列表' ;;
+    fetch)
+      case "$(xmj_version_display_kind)" in
+        branch) printf '%s' '整理分支列表' ;;
+        *) printf '%s' '整理版本列表' ;;
+      esac
+      ;;
     backup) printf '%s' '自动备份' ;;
     local) printf '%s' '整理本地改动' ;;
-    switch) printf '%s' '切换版本' ;;
+    switch)
+      case "$(xmj_version_display_kind)" in
+        branch) printf '%s' '切换分支' ;;
+        *) printf '%s' '切换版本' ;;
+      esac
+      ;;
     deps) printf '%s' '同步依赖' ;;
     recover) printf '%s' '恢复备份' ;;
     restore) printf '%s' '放回本地改动' ;;
     done) printf '%s' '完成' ;;
-    *) printf '%s' '切换版本' ;;
+    *)
+      case "$(xmj_version_display_kind)" in
+        branch) printf '%s' '切换分支' ;;
+        *) printf '%s' '切换版本' ;;
+      esac
+      ;;
   esac
 }
 
@@ -1941,6 +1991,7 @@ xmj_run_version_catalog() {
   XMJ_VERSION_ACTIVE_MODE='version'
   XMJ_VERSION_PAGE='1'
   xmj_version_clear_notice
+  xmj_version_clear_execution_artifacts
 
   if ! xmj_version_refresh_catalog; then
     xmj_render_version_result \
@@ -1962,6 +2013,7 @@ xmj_run_version_catalog() {
         ;;
       0)
         xmj_version_clear_notice
+        xmj_version_clear_execution_artifacts
         return 0
         ;;
       n|N)
@@ -2011,6 +2063,7 @@ xmj_run_branch_catalog() {
   XMJ_VERSION_ACTIVE_MODE='branch'
   XMJ_VERSION_PAGE='1'
   xmj_version_clear_notice
+  xmj_version_clear_execution_artifacts
 
   if ! xmj_branch_refresh_catalog; then
     xmj_render_version_result \
@@ -2032,6 +2085,7 @@ xmj_run_branch_catalog() {
         ;;
       0)
         xmj_version_clear_notice
+        xmj_version_clear_execution_artifacts
         return 0
         ;;
       n|N)
@@ -2236,12 +2290,7 @@ xmj_render_version_result() {
   xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
 
   printf '\n'
-  if [ -n "${XMJ_VERSION_CURRENT_LABEL:-}" ]; then
-    xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL}"
-  fi
-  if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
-    xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH}"
-  fi
+  xmj_render_version_focus_fact
   if [ -n "${XMJ_VERSION_CURRENT_COMMIT:-}" ]; then
     xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT}"
   fi
@@ -2311,7 +2360,7 @@ xmj_render_version_list_page() {
   printf '\n'
   xmj_render_setting_card '推荐版本' "优先试 $(xmj_version_recommended_summary)。" ''
   printf '\n'
-  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL:-未知}"
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
   xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
   xmj_render_fact_line '版本总数' "$total"
   xmj_render_fact_line '当前页' "${page}/${total_pages}"
@@ -2391,7 +2440,6 @@ xmj_render_branch_list_page() {
   printf '\n'
   xmj_render_setting_card '常用分支' "默认常用分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" ''
   printf '\n'
-  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
   xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
   xmj_render_fact_line '分支总数' "$total"
   xmj_render_fact_line '当前页' "${page}/${total_pages}"

@@ -723,7 +723,7 @@ xmj_render_page_title() {
   local section="${3:-update}"
   local decor="${XMJ_SECTION_DECOR[$section]}"
 
-  printf '%b%s%b %b%s%b %b--%b %b%s%b %b脳 . *%b\n' \
+  printf '%b%s%b %b%s%b %b--%b %b%s%b %b. *%b\n' \
     "$XMJ_PINK" "$decor" "$XMJ_RESET" \
     "$XMJ_BLUE_SOFT" "$phrase" "$XMJ_RESET" \
     "$XMJ_MIST" "$XMJ_RESET" \
