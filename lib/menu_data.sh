@@ -118,7 +118,7 @@ xmj_load_menu_data() {
   XMJ_MENU_LABEL['15']='后续追加'
   XMJ_MENU_LABEL['16']='预留空位'
   XMJ_MENU_LABEL['17']='设置中心'
-  XMJ_MENU_LABEL['18']='主题 / 外观'
+  XMJ_MENU_LABEL['18']='酒馆设置'
   XMJ_MENU_LABEL['19']='字体管理'
   XMJ_MENU_LABEL['20']='基础设置'
   XMJ_MENU_LABEL['21']='状态信息'

@@ -179,15 +179,11 @@ xmj_render_menu_row() {
 
 xmj_render_setting_home_block() {
   xmj_render_section_title 'setting'
-  xmj_render_page_intro \
-    '首页设置区现在只保留一个收纳入口，详细项已经放进设置中心。' \
-    '基础设置、主题外观、字体管理和高级预留都会在里面分开展示。'
   printf '\n'
   xmj_render_fact_line '当前摘要' "$(xmj_theme_label) · $(xmj_termux_font_status_text)"
   xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
   printf '\n'
-  xmj_render_action_item '17' "${XMJ_MENU_LABEL['17']}"
-  printf '  %b· 已收纳%b：%b基础设置 / 主题外观 / 字体管理 / 高级项预留%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_WHITE" "$XMJ_RESET"
+  xmj_render_menu_row '17' '18'
   printf '\n'
 }
 
@@ -219,13 +215,13 @@ xmj_render_menu_block() {
 
 xmj_render_input_hint() {
   local panel_width
-  local hint='  请输入编号，17 可进入设置中心，00 退出。'
+  local hint='  请输入编号，00 退出。'
 
   panel_width="$(xmj_panel_width)"
   if [ "$panel_width" -lt 30 ]; then
-    hint='  编号 / 17设置 / 00退出'
+    hint='  编号 / 00退出'
   elif [ "$panel_width" -lt 42 ]; then
-    hint='  输入编号，17 设置，00 退出。'
+    hint='  输入编号，00 退出。'
   fi
 
   printf '%b%s%b\n' "$XMJ_BLUE" "$hint" "$XMJ_RESET"
@@ -380,13 +376,13 @@ xmj_setting_view_id() {
 
   case "$view" in
     basic)
-      printf '%s' '20'
+      printf '%s' '17-1'
       ;;
     theme)
-      printf '%s' '18'
+      printf '%s' '17-2'
       ;;
     font)
-      printf '%s' '19'
+      printf '%s' '17-3'
       ;;
     advanced)
       printf '%s' '17-4'
@@ -404,34 +400,18 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_page_identity "$(xmj_setting_view_id 'home')" "$(xmj_setting_view_title 'home')"
   printf '\n'
-  xmj_render_page_intro \
-    '设置相关内容已经收纳到这个内部页，不再把路径、主题和字体细项铺在首页外层。' \
-    '你可以从这里进入基础设置、主题外观、字体管理和高级项预留。'
-  printf '\n'
   xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
   xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
   xmj_render_fact_line '配置状态' "$(xmj_config_status_text)"
   xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
   printf '\n'
-  xmj_render_setting_card \
-    '1 · 基础设置' \
-    '集中看脚本名称、运行环境、SillyTavern 路径和备份目录。' \
-    "当前：$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}") / $(xmj_display_path "${XMJ_BACKUP_DIR:-}")"
+  xmj_render_setting_card '1 · 基础设置' '' '脚本信息 / 路径'
   printf '\n'
-  xmj_render_setting_card \
-    '2 · 主题 / 外观' \
-    '延续粉蓝白浅色系与可爱卡片风，顶部主标题样式保持当前版本。' \
-    "当前：$(xmj_theme_label)"
+  xmj_render_setting_card '2 · 主题 / 外观' '' "当前：$(xmj_theme_label)"
   printf '\n'
-  xmj_render_setting_card \
-    '3 · 字体管理' \
-    '内置字体安装、恢复默认字体、重新加载 Termux 设置都集中在这里。' \
-    "当前：$(xmj_termux_font_status_text)"
+  xmj_render_setting_card '3 · 字体管理' '' "当前：$(xmj_termux_font_status_text)"
   printf '\n'
-  xmj_render_setting_card \
-    '4 · 高级项预留' \
-    '先把结构和收纳位留好，本次不会顺手接入更新、回退、备份、依赖安装等无关业务。' \
-    '当前：占位说明页'
+  xmj_render_setting_card '4 · 高级项预留' '' '功能预留'
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入基础设置'
@@ -449,10 +429,6 @@ xmj_render_setting_basic_page() {
   printf '\n'
   xmj_render_page_identity "$(xmj_setting_view_id 'basic')" "$(xmj_setting_view_title 'basic')"
   printf '\n'
-  xmj_render_page_intro \
-    '这里集中展示当前脚本的基础配置，不再把路径细项散放在首页外层。' \
-    '当前版本只做展示和状态确认，不会在这里直接改写配置文件。'
-  printf '\n'
   xmj_render_fact_line '脚本名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
   xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
   xmj_render_fact_line '目标项目' "${XMJ_TARGET_PROJECT:-SillyTavern}"
@@ -467,9 +443,7 @@ xmj_render_setting_basic_page() {
     "$(xmj_display_path "${XMJ_BACKUP_DIR:-}")" \
     "$(xmj_dir_state "${XMJ_BACKUP_DIR:-}" '已就绪' '待创建')"
   printf '\n'
-  xmj_render_page_intro \
-    '如果你要改这些值，请直接编辑 config/xiaomaojuan.conf。' \
-    '这里的目的是让你在面板里先确认配置有没有读对。'
+  xmj_render_page_intro '修改配置请编辑 config/xiaomaojuan.conf。' ''
   xmj_render_notice_line
   xmj_render_action_footer '输入 0 返回设置中心。'
 }
@@ -481,28 +455,16 @@ xmj_render_setting_theme_page() {
   printf '\n'
   xmj_render_page_identity "$(xmj_setting_view_id 'theme')" "$(xmj_setting_view_title 'theme')"
   printf '\n'
-  xmj_render_page_intro \
-    '主题 / 外观页主要负责展示当前视觉方案，不在这里直接改动顶部主标题样式。' \
-    '既定方向仍然是粉蓝白浅色系、可爱展示卡风格，只保留同系列柔和分支。'
-  printf '\n'
   xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
   xmj_render_fact_line '主题字段' "${XMJ_THEME_MODE:-pastel}"
   xmj_render_fact_line '边框风格' '软糖感分隔线 / 浅色渐柔边框'
-  xmj_render_fact_line '标题状态' '保持当前主标题装饰，不额外重做'
+  xmj_render_fact_line '标题状态' '保持当前主标题装饰'
   printf '\n'
-  xmj_render_setting_card \
-    'pastel · 粉蓝白系' \
-    '更贴合当前首页与设置中心的默认外观，适合保留轻柔可爱感。' \
-    '推荐：默认主题'
+  xmj_render_setting_card 'pastel · 粉蓝白系' '' '默认主题'
   printf '\n'
-  xmj_render_setting_card \
-    'moonlight · 月光蓝紫系' \
-    '在同一套卡片结构里换成更偏蓝紫的柔和配色。' \
-    '可通过配置项 XMJ_THEME_MODE 手动切换'
+  xmj_render_setting_card 'moonlight · 月光蓝紫系' '' '可通过 XMJ_THEME_MODE 切换'
   printf '\n'
-  xmj_render_page_intro \
-    '如果你要切换主题，请编辑 config/xiaomaojuan.conf 里的 XMJ_THEME_MODE。' \
-    '这里暂时只做展示，不额外加入热切换逻辑。'
+  xmj_render_page_intro '切换主题请编辑 config/xiaomaojuan.conf。' ''
   xmj_render_notice_line
   xmj_render_action_footer '输入 0 返回设置中心。'
 }
@@ -534,10 +496,6 @@ xmj_render_setting_font_page() {
   printf '\n'
   xmj_render_page_identity "$(xmj_setting_view_id 'font')" "$(xmj_setting_view_title 'font')"
   printf '\n'
-  xmj_render_page_intro \
-    '字体管理现在独立收纳在设置中心内部，所有真实可执行动作都集中在这里。' \
-    '安装会写入整个 Termux 的字体文件，不只是改小猫卷当前页面。'
-  printf '\n'
   xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
   xmj_render_fact_line '字体路径' "$(xmj_display_path "$font_file")"
   xmj_render_fact_line '备份状态' "$backup_state"
@@ -545,19 +503,7 @@ xmj_render_setting_font_page() {
   xmj_render_fact_line '下载来源' "$(xmj_termux_font_source_host)"
   xmj_render_fact_line '资源格式' "$preset_format"
   printf '\n'
-  xmj_render_setting_card \
-    '安装策略' \
-    '会先创建 ~/.termux 目录，再下载字体到临时文件，校验成功后写入 font.ttf。' \
-    '失败时不会把错误页面或空文件写成字体'
-  printf '\n'
-  xmj_render_setting_card \
-    '恢复策略' \
-    '删除当前自定义字体后尝试重新加载 Termux 设置。' \
-    '若没有 termux-reload-settings，会提示你手动重开 Termux'
-  printf '\n'
-  xmj_render_page_intro \
-    '如果你后面要自定义别的字体，只需要改配置里的预设名称、直链和 MD5。' \
-    '当前内置字体优先使用真实可访问的中文资源，避免旧直链失效导致无法下载。'
+  xmj_render_page_intro '字体操作会影响整个 Termux。' '自定义预设请编辑 config/xiaomaojuan.conf。'
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' "安装内置字体：${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
@@ -574,20 +520,26 @@ xmj_render_setting_advanced_page() {
   printf '\n'
   xmj_render_page_identity "$(xmj_setting_view_id 'advanced')" "$(xmj_setting_view_title 'advanced')"
   printf '\n'
-  xmj_render_page_intro \
-    '这里先保留高级项的结构位置，避免以后又把细项重新摊回首页。' \
-    '本次仍然严格限定范围，不在这里接入更新、回退、备份、依赖安装等无关业务。'
+  xmj_render_page_intro '功能预留，后续完善。' ''
   printf '\n'
   xmj_render_fact_line '功能状态' '占位中'
-  xmj_render_fact_line '当前定位' '只保留结构，不执行真实业务动作'
-  xmj_render_fact_line '收纳原则' '设置相关内容统一留在设置中心内部'
-  printf '\n'
-  xmj_render_setting_card \
-    '后续可放入的内容' \
-    '例如更细的显示偏好、实验项开关、额外字体策略说明。' \
-    '当前：仍为说明页'
+  xmj_render_fact_line '当前定位' '仅保留结构'
   xmj_render_notice_line
   xmj_render_action_footer '输入 0 返回设置中心。'
+}
+
+xmj_render_tavern_setting_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'setting'
+  printf '\n'
+  xmj_render_page_identity '18' "${XMJ_MENU_LABEL['18']}"
+  printf '\n'
+  xmj_render_page_intro '功能预留，后续完善。' ''
+  printf '\n'
+  xmj_render_fact_line '页面状态' '占位页'
+  xmj_render_fact_line '业务逻辑' '暂未接入'
+  xmj_render_page_footer '按回车返回首页'
 }
 
 xmj_render_setting_center_page() {
@@ -656,6 +608,9 @@ xmj_render_menu_page() {
   local id="${1:-}"
 
   case "$id" in
+    18)
+      xmj_render_tavern_setting_page
+      ;;
     21)
       xmj_render_about_status_page
       ;;

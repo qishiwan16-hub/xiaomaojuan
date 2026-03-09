@@ -19,8 +19,8 @@ xmj_handle_route() {
       xmj_run_script_setting_page 'home'
       return 0
       ;;
-    18)
-      xmj_run_script_setting_page 'theme'
+    18|21|22|23)
+      xmj_render_menu_page "$input"
       return 0
       ;;
     19)
@@ -31,7 +31,7 @@ xmj_handle_route() {
       xmj_run_script_setting_page 'basic'
       return 0
       ;;
-    01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|21|22|23)
+    01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16)
       xmj_render_menu_page "$input"
       return 0
       ;;
