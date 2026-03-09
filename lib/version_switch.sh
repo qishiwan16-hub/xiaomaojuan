@@ -1032,7 +1032,7 @@ xmj_render_version_focus_fact() {
   case "$(xmj_version_display_kind)" in
     branch)
       if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
-        xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH}"
+        xmj_render_fact_line '酒馆分支' "${XMJ_VERSION_CURRENT_BRANCH}"
       fi
       ;;
     *)
@@ -2309,7 +2309,7 @@ xmj_render_switch_mode_page() {
   xmj_render_page_title '版本 / 分支' 'switch mode' 'update'
   printf '\n'
   xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
-  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '酒馆分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
   xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
   printf '\n'
   xmj_render_setting_card '1 · 切换版本' '按标签切换版本，并显示发行日期。' "推荐：$(xmj_version_recommended_summary)"
@@ -2440,7 +2440,7 @@ xmj_render_branch_list_page() {
   printf '\n'
   xmj_render_setting_card '常用分支' "默认常用分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" ''
   printf '\n'
-  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '酒馆分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
   xmj_render_fact_line '分支总数' "$total"
   xmj_render_fact_line '当前页' "${page}/${total_pages}"
 
