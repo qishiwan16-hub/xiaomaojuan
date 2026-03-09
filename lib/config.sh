@@ -149,6 +149,13 @@ XMJ_BACKUP_DIR="backups"
 # 启动 / 更新日志等详细输出会写到这里，避免直接刷满前台。
 XMJ_LOG_DIR="logs"
 
+# 酒馆前台访问地址。
+# 用于启动成功判定，以及运行中页面里的进入链接。
+# 如果服务监听的是 0.0.0.0，这里仍建议填写 127.0.0.1。
+XMJ_TAVERN_HOST="127.0.0.1"
+XMJ_TAVERN_PORT="8000"
+XMJ_TAVERN_ENTRY_PATH="/"
+
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -214,11 +221,58 @@ xmj_apply_config_defaults() {
   : "${XMJ_SILLYTAVERN_PATH:=$HOME/SillyTavern}"
   : "${XMJ_BACKUP_DIR:=backups}"
   : "${XMJ_LOG_DIR:=logs}"
+  : "${XMJ_TAVERN_HOST:=127.0.0.1}"
+  : "${XMJ_TAVERN_PORT:=8000}"
+  : "${XMJ_TAVERN_ENTRY_PATH:=/}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
   : "${XMJ_TERMUX_FONT_PRESET_URL:=https://raw.githubusercontent.com/lxgw/LxgwWenKai/main/fonts/TTF/LXGWWenKaiMono-Regular.ttf}"
   : "${XMJ_TERMUX_FONT_PRESET_MD5:=612c16a3b40d91695635749c1493e02f}"
+}
+
+xmj_validate_port_value() {
+  local var_name="${1:-}"
+  local label="${2:-端口}"
+  local fallback="${3:-8000}"
+  local current_value="${!var_name-}"
+
+  case "$current_value" in
+    ''|*[!0-9]*)
+      printf -v "$var_name" '%s' "$fallback"
+      xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
+      return 0
+      ;;
+  esac
+
+  if [ "$current_value" -lt 1 ] || [ "$current_value" -gt 65535 ]; then
+    printf -v "$var_name" '%s' "$fallback"
+    xmj_add_boot_warning "${label}超出范围，已自动回退为默认值：$fallback"
+  fi
+}
+
+xmj_normalize_web_path_value() {
+  local var_name="${1:-}"
+  local label="${2:-入口路径}"
+  local current_value="${!var_name-}"
+  local compact_value="${current_value//[[:space:]]/}"
+
+  if [ -z "$compact_value" ]; then
+    printf -v "$var_name" '%s' '/'
+    xmj_add_boot_warning "${label}为空，已自动回退为默认值：/"
+    return 0
+  fi
+
+  case "$current_value" in
+    /*)
+      ;;
+    *)
+      current_value="/$current_value"
+      xmj_add_boot_warning "${label}未以 / 开头，已自动补全为：$current_value"
+      ;;
+  esac
+
+  printf -v "$var_name" '%s' "$current_value"
 }
 
 xmj_validate_theme_mode() {
@@ -255,6 +309,9 @@ xmj_validate_config() {
   xmj_validate_required_text 'XMJ_SILLYTAVERN_PATH' 'SillyTavern 路径' "$HOME/SillyTavern"
   xmj_validate_required_text 'XMJ_BACKUP_DIR' '备份目录' 'backups'
   xmj_validate_required_text 'XMJ_LOG_DIR' '日志目录' 'logs'
+  xmj_validate_required_text 'XMJ_TAVERN_HOST' '酒馆访问主机' '127.0.0.1'
+  xmj_validate_port_value 'XMJ_TAVERN_PORT' '酒馆访问端口' '8000'
+  xmj_normalize_web_path_value 'XMJ_TAVERN_ENTRY_PATH' '酒馆入口路径'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 

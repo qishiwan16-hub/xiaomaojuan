@@ -385,6 +385,48 @@ xmj_render_launch_progress() {
   xmj_rule_line "$XMJ_BORDER" '─' 68
 }
 
+xmj_render_launch_running_screen() {
+  local entry_url="${XMJ_LAUNCH_ENTRY_URL:-}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_intro \
+    '₍ᐢ..ᐢ₎♡ 酒馆已经进入运行中喵~ 下面会实时展示后台日志输出。' \
+    '按 Ctrl+C 会结束这次启动的酒馆，并回到首页。'
+  printf '\n'
+  xmj_render_setting_card \
+    '运行中' \
+    '现在可以直接进入酒馆，也可以继续看下面的实时日志。' \
+    '日志会持续追加，方便直接检查报错。'
+  printf '\n'
+  printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_launch_stage_line 'prepare' 'running' 'running'
+  xmj_render_launch_stage_line 'env' 'running' 'running'
+  xmj_render_launch_stage_line 'boot' 'running' 'running'
+  xmj_render_launch_stage_line 'running' 'running' 'running'
+
+  printf '\n'
+  if [ -n "$entry_url" ]; then
+    xmj_render_fact_line '进入链接' "$entry_url"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_LAUNCH_LOG_FILE")"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_PID:-}" ]; then
+    xmj_render_fact_line 'PID' "${XMJ_LAUNCH_PID}"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  printf '  %b♡ 实时日志%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '  %b以下开始持续追加后台输出，方便直接看报错。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+}
+
 xmj_render_launch_result() {
   local result_mode="${1:-success}"
   local current_stage="${2:-running}"

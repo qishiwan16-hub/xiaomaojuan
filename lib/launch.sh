@@ -11,6 +11,7 @@ xmj_launch_timestamp() {
 
 xmj_launch_reset_state() {
   XMJ_LAUNCH_LOG_FILE=''
+  XMJ_LAUNCH_LOG_CURSOR='0'
   XMJ_LAUNCH_STAGE='prepare'
   XMJ_LAUNCH_SUMMARY=''
   XMJ_LAUNCH_DETAIL=''
@@ -18,6 +19,7 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_METHOD_TEXT=''
   XMJ_LAUNCH_COMMAND=''
   XMJ_LAUNCH_ENTRY_FILE=''
+  XMJ_LAUNCH_ENTRY_URL=''
   XMJ_LAUNCH_PID=''
   XMJ_LAUNCH_EXIT_CODE=''
   XMJ_LAUNCH_INTERRUPT='0'
@@ -74,6 +76,69 @@ xmj_launch_fail() {
   xmj_launch_log_line "失败阶段：$stage"
   xmj_launch_log_line "失败摘要：$summary"
   xmj_launch_log_line "失败说明：$detail"
+  return 1
+}
+
+xmj_launch_access_host() {
+  local host="${XMJ_TAVERN_HOST:-127.0.0.1}"
+
+  case "$host" in
+    ''|0.0.0.0|::|'[::]')
+      printf '%s' '127.0.0.1'
+      ;;
+    *)
+      printf '%s' "$host"
+      ;;
+  esac
+}
+
+xmj_launch_entry_url() {
+  local host=''
+  local port="${XMJ_TAVERN_PORT:-8000}"
+  local path="${XMJ_TAVERN_ENTRY_PATH:-/}"
+
+  host="$(xmj_launch_access_host)"
+
+  case "$host" in
+    \[*\])
+      ;;
+    *:*)
+      host="[$host]"
+      ;;
+  esac
+
+  printf 'http://%s:%s%s' "$host" "$port" "$path"
+}
+
+xmj_launch_can_probe_url() {
+  if command -v curl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
+}
+
+xmj_launch_endpoint_available() {
+  local url="${1:-}"
+
+  if [ -z "$url" ]; then
+    return 1
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -sS --connect-timeout 2 --max-time 3 -o /dev/null "$url" >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -T 3 -O /dev/null "$url" >/dev/null 2>&1
+    return $?
+  fi
+
   return 1
 }
 
@@ -295,16 +360,104 @@ xmj_launch_stop_process() {
   return 1
 }
 
+xmj_launch_log_line_count() {
+  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local count='0'
+
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  count="$(wc -l <"$file" 2>/dev/null || true)"
+  count="${count//[[:space:]]/}"
+
+  case "$count" in
+    ''|*[!0-9]*)
+      count='0'
+      ;;
+  esac
+
+  printf '%s' "$count"
+}
+
+xmj_launch_print_log_lines() {
+  local start_line="${1:-1}"
+  local end_line="${2:-0}"
+  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local line=''
+
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    return 0
+  fi
+
+  if [ "$end_line" -lt "$start_line" ]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    printf '  %b%s%b\n' "$XMJ_WHITE" "$line" "$XMJ_RESET"
+  done < <(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null)
+}
+
+xmj_launch_render_log_snapshot() {
+  local snapshot_size="${1:-18}"
+  local total_lines='0'
+  local start_line='1'
+
+  total_lines="$(xmj_launch_log_line_count)"
+  if [ "$snapshot_size" -lt 1 ]; then
+    snapshot_size='18'
+  fi
+
+  if [ "$total_lines" -gt "$snapshot_size" ]; then
+    start_line=$((total_lines - snapshot_size + 1))
+  fi
+
+  if [ "$total_lines" -gt 0 ]; then
+    xmj_launch_print_log_lines "$start_line" "$total_lines"
+  else
+    printf '  %b日志还没有输出，新的后台日志会实时追加在这里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  fi
+
+  XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+}
+
+xmj_launch_print_new_log_lines() {
+  local total_lines='0'
+  local start_line='1'
+  local cursor="${XMJ_LAUNCH_LOG_CURSOR:-0}"
+
+  total_lines="$(xmj_launch_log_line_count)"
+  if [ "$total_lines" -lt "$cursor" ]; then
+    cursor='0'
+  fi
+
+  if [ "$total_lines" -le "$cursor" ]; then
+    XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+    return 0
+  fi
+
+  start_line=$((cursor + 1))
+  xmj_launch_print_log_lines "$start_line" "$total_lines"
+  XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+}
+
 xmj_launch_wait_for_running() {
-  local step=''
+  local step='0'
+  local wait_limit='45'
+  local should_probe='0'
 
-  for step in 1 2; do
-    if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
-      return 130
-    fi
+  XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
+  if xmj_launch_can_probe_url; then
+    should_probe='1'
+    xmj_launch_log_line "准备检测酒馆入口：${XMJ_LAUNCH_ENTRY_URL}"
+  else
+    xmj_launch_log_line '当前环境未检测到 curl 或 wget，将按进程存活判定启动完成。'
+  fi
 
-    sleep 1
-
+  for ((step = 1; step <= wait_limit; step += 1)); do
     if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
       return 130
     fi
@@ -314,9 +467,34 @@ xmj_launch_wait_for_running() {
       xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
       return 1
     fi
+
+    if [ "$should_probe" = '1' ]; then
+      if xmj_launch_endpoint_available "$XMJ_LAUNCH_ENTRY_URL"; then
+        xmj_launch_log_line "酒馆入口已可访问：${XMJ_LAUNCH_ENTRY_URL}"
+        xmj_launch_log_line '酒馆进程已进入运行阶段。'
+        return 0
+      fi
+    elif [ "$step" -ge 2 ]; then
+      xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
+      xmj_launch_log_line "进入链接：${XMJ_LAUNCH_ENTRY_URL}"
+      return 0
+    fi
+
+    sleep 1 || true
   done
 
-  xmj_launch_log_line '酒馆进程已进入运行阶段。'
+  if ! xmj_launch_process_alive; then
+    xmj_launch_wait_process >/dev/null
+    xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
+    return 1
+  fi
+
+  if [ "$should_probe" = '1' ]; then
+    xmj_launch_fail 'boot' '启动超时' '后台进程仍在运行，但酒馆入口暂时还无法访问，可温和查看日志。'
+    return 1
+  fi
+
+  xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
   return 0
 }
 
@@ -335,37 +513,60 @@ xmj_launch_handle_interrupt() {
   sleep 1
 }
 
-xmj_launch_monitor_running() {
-  local exit_code='0'
+xmj_launch_follow_running_log() {
+  xmj_render_launch_running_screen
+  xmj_launch_render_log_snapshot '18'
 
   while true; do
     if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
-      xmj_launch_handle_interrupt
-      return 0
+      return 130
     fi
 
     if ! xmj_launch_process_alive; then
-      exit_code="$(xmj_launch_wait_process)"
-      xmj_launch_log_line "酒馆进程已结束，退出码：$exit_code"
-
-      if [ "$exit_code" = '0' ]; then
-        xmj_render_launch_result \
-          'exited' \
-          'running' \
-          '酒馆已结束运行' \
-          '本次运行已经结束，可按回车回到首页。'
-      else
-        xmj_render_launch_result \
-          'failure' \
-          'running' \
-          '酒馆已退出' \
-          '运行过程中已结束，可温和查看日志。'
-      fi
+      xmj_launch_print_new_log_lines
       return 0
     fi
 
-    sleep 1
+    sleep 1 || true
+
+    if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
+      return 130
+    fi
+
+    xmj_launch_print_new_log_lines
   done
+}
+
+xmj_launch_monitor_running() {
+  local exit_code='0'
+  local follow_status='0'
+
+  xmj_launch_follow_running_log
+  follow_status=$?
+
+  if [ "$follow_status" = '130' ] || [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
+    xmj_launch_handle_interrupt
+    return 0
+  fi
+
+  exit_code="$(xmj_launch_wait_process)"
+  xmj_launch_log_line "酒馆进程已结束，退出码：$exit_code"
+
+  if [ "$exit_code" = '0' ]; then
+    xmj_render_launch_result \
+      'exited' \
+      'running' \
+      '酒馆已结束运行' \
+      '本次运行已经结束，可按回车回到首页。'
+  else
+    xmj_render_launch_result \
+      'failure' \
+      'running' \
+      '酒馆已退出' \
+      '运行过程中已结束，可温和查看日志。'
+  fi
+
+  return 0
 }
 
 xmj_run_tavern_launch() {
@@ -442,11 +643,6 @@ xmj_run_tavern_launch() {
       "$XMJ_LAUNCH_DETAIL"
     return 0
   fi
-
-  xmj_render_launch_progress \
-    'running' \
-    '运行中' \
-    '₍ᐢ..ᐢ₎♡ 酒馆已经在后台安静运行喵~ 前台不会直接刷出命令输出。'
 
   xmj_launch_monitor_running
   xmj_launch_restore_int_trap
