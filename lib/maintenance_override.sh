@@ -887,3 +887,934 @@ xmj_run_tavern_reinstall() {
       ;;
   esac
 }
+
+xmj_maintenance_backup_dir() {
+  if [ -n "${XMJ_BACKUP_DIR:-}" ]; then
+    printf '%s' "$XMJ_BACKUP_DIR"
+    return 0
+  fi
+
+  printf '%s/备份' "${XMJ_ROOT_DIR:-.}"
+}
+
+declare -ga XMJ_BACKUP_ARCHIVE_FILES=()
+
+xmj_backup_notice_color() {
+  case "${1:-info}" in
+    warn)
+      printf '%s' "$XMJ_WARN"
+      ;;
+    success)
+      printf '%s' "$XMJ_CREAM"
+      ;;
+    *)
+      printf '%s' "$XMJ_BLUE_SOFT"
+      ;;
+  esac
+}
+
+xmj_backup_clear_notice() {
+  XMJ_BACKUP_NOTICE=''
+  XMJ_BACKUP_NOTICE_KIND='info'
+}
+
+xmj_backup_set_notice() {
+  XMJ_BACKUP_NOTICE_KIND="${1:-info}"
+  XMJ_BACKUP_NOTICE="${2:-}"
+}
+
+xmj_render_backup_notice() {
+  local notice_text="${XMJ_BACKUP_NOTICE:-}"
+  local notice_color=''
+
+  if [ -z "$notice_text" ]; then
+    return 0
+  fi
+
+  notice_color="$(xmj_backup_notice_color "${XMJ_BACKUP_NOTICE_KIND:-info}")"
+  printf '\n'
+  printf '  %b%s%b\n' "$notice_color" "$notice_text" "$XMJ_RESET"
+}
+
+xmj_backup_page_size() {
+  printf '%s' '5'
+}
+
+xmj_backup_total_pages() {
+  local total="${1:-0}"
+  local page_size="${2:-5}"
+
+  case "$total" in
+    ''|*[!0-9]*)
+      total='0'
+      ;;
+  esac
+
+  case "$page_size" in
+    ''|*[!0-9]*)
+      page_size='5'
+      ;;
+  esac
+
+  if [ "$page_size" -le 0 ]; then
+    page_size='5'
+  fi
+
+  if [ "$total" -le 0 ]; then
+    printf '%s' '1'
+    return 0
+  fi
+
+  printf '%s' "$(((total + page_size - 1) / page_size))"
+}
+
+xmj_backup_normalize_page() {
+  local page="${1:-1}"
+  local total_pages="${2:-1}"
+
+  case "$page" in
+    ''|*[!0-9]*)
+      page='1'
+      ;;
+  esac
+
+  case "$total_pages" in
+    ''|*[!0-9]*)
+      total_pages='1'
+      ;;
+  esac
+
+  if [ "$page" -lt 1 ]; then
+    page='1'
+  fi
+
+  if [ "$total_pages" -lt 1 ]; then
+    total_pages='1'
+  fi
+
+  if [ "$page" -gt "$total_pages" ]; then
+    page="$total_pages"
+  fi
+
+  printf '%s' "$page"
+}
+
+xmj_backup_archive_size_text() {
+  local archive_file="${1:-}"
+  local bytes='0'
+
+  if [ -z "$archive_file" ] || [ ! -f "$archive_file" ]; then
+    printf '%s' '未知'
+    return 0
+  fi
+
+  bytes="$(wc -c <"$archive_file" 2>/dev/null || true)"
+  bytes="${bytes//[[:space:]]/}"
+  case "$bytes" in
+    ''|*[!0-9]*)
+      bytes='0'
+      ;;
+  esac
+
+  if [ "$bytes" -ge 1048576 ]; then
+    printf '%s MB' "$(((bytes + 1048575) / 1048576))"
+    return 0
+  fi
+
+  if [ "$bytes" -ge 1024 ]; then
+    printf '%s KB' "$(((bytes + 1023) / 1024))"
+    return 0
+  fi
+
+  printf '%s B' "$bytes"
+}
+
+xmj_backup_archive_time_text() {
+  local archive_file="${1:-}"
+  local archive_name=''
+  local time_text=''
+
+  if [ -z "$archive_file" ]; then
+    printf '%s' '未知时间'
+    return 0
+  fi
+
+  time_text="$(date -r "$archive_file" '+%Y-%m-%d %H:%M' 2>/dev/null || true)"
+  if [ -n "$time_text" ]; then
+    printf '%s' "$time_text"
+    return 0
+  fi
+
+  archive_name="$(basename "$archive_file")"
+  printf '%s' "${archive_name%.zip}"
+}
+
+xmj_backup_refresh_archives() {
+  local backup_dir=''
+  local archive_file=''
+
+  XMJ_BACKUP_ARCHIVE_FILES=()
+  backup_dir="$(xmj_maintenance_backup_dir)"
+
+  if [ -z "$backup_dir" ] || [ ! -d "$backup_dir" ]; then
+    return 0
+  fi
+
+  while IFS= read -r archive_file || [ -n "$archive_file" ]; do
+    if [ -z "$archive_file" ]; then
+      continue
+    fi
+
+    XMJ_BACKUP_ARCHIVE_FILES+=("$archive_file")
+  done < <(find "$backup_dir" -maxdepth 1 -type f -name '*.zip' 2>/dev/null | LC_ALL=C sort -r)
+
+  return 0
+}
+
+xmj_render_backup_archive_lines() {
+  local page="${1:-1}"
+  local page_size="${2:-5}"
+  local total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+  local start_index='0'
+  local end_index='0'
+  local i='0'
+  local archive_file=''
+  local archive_name=''
+
+  if [ "$total" -eq 0 ]; then
+    xmj_render_setting_card \
+      '还没有备份档' \
+      '当前备份目录里还没有 zip 备份。' \
+      '可以先进入 07 创建备份，再回来查看。'
+    return 0
+  fi
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size))
+  if [ "$end_index" -gt "$total" ]; then
+    end_index="$total"
+  fi
+
+  printf '  %b♡ 备份档案%b\n' "$XMJ_PINK" "$XMJ_RESET"
+
+  for ((i = start_index; i < end_index; i++)); do
+    archive_file="${XMJ_BACKUP_ARCHIVE_FILES[$i]}"
+    archive_name="$(basename "$archive_file")"
+
+    printf '\n'
+    printf '  %b[%02d]%b %b%s%b\n' \
+      "$XMJ_PINK" $((i + 1)) "$XMJ_RESET" \
+      "$XMJ_WHITE" "$archive_name" "$XMJ_RESET"
+    printf '      %b时间%b：%b%s%b   %b大小%b：%b%s%b\n' \
+      "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$(xmj_backup_archive_time_text "$archive_file")" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$(xmj_backup_archive_size_text "$archive_file")" "$XMJ_RESET"
+  done
+}
+
+xmj_backup_prompt_create_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  y 创建备份 / 0 返回 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_render_backup_create_page() {
+  local backup_dir=''
+
+  backup_dir="$(xmj_maintenance_backup_dir)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['07']}" 'create backup' 'backup'
+  printf '\n'
+  xmj_render_page_intro \
+    '会把 data、third-party 和 config.yaml 整理成 1 个压缩备份。' \
+    '缺少的内容会自动跳过，已有内容会一起收进同一个 zip。'
+  printf '\n'
+  xmj_render_fact_line '酒馆目录' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_fact_line '备份目录' "$(xmj_display_path "$backup_dir")"
+  xmj_render_fact_line '打包范围' 'data / third-party / config.yaml'
+  xmj_render_backup_notice
+  printf '\n'
+  xmj_render_action_item 'y' '立即创建手动备份'
+  xmj_render_action_item '0' '取消并返回首页'
+  xmj_render_action_footer '输入 y / 0。'
+}
+
+xmj_render_backup_create_result() {
+  local result_mode="${1:-success}"
+  local summary_text="${2:-手动备份已完成。}"
+  local detail_text="${3:-}"
+  local card_title='创建完成'
+
+  if [ "$result_mode" = 'failure' ]; then
+    card_title='创建失败'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['07']}" 'create backup' 'backup'
+  printf '\n'
+  xmj_render_setting_card "$card_title" "$summary_text" "$detail_text"
+
+  if [ -n "${XMJ_MAINT_BACKUP_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '备份文件' "$(xmj_display_path "$XMJ_MAINT_BACKUP_FILE")"
+  fi
+
+  if [ -n "${XMJ_MAINT_BACKUP_ITEMS:-}" ]; then
+    xmj_render_fact_line '已收纳内容' "$XMJ_MAINT_BACKUP_ITEMS"
+  fi
+
+  if [ -n "${XMJ_MAINT_BACKUP_MISSING_ITEMS:-}" ]; then
+    xmj_render_fact_line '本次跳过' "$XMJ_MAINT_BACKUP_MISSING_ITEMS"
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_run_backup_create_page() {
+  local input=''
+
+  xmj_backup_clear_notice
+  xmj_maintenance_clear_state
+
+  while true; do
+    xmj_render_backup_create_page
+    xmj_backup_prompt_create_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      y|Y|yes|YES|Yes)
+        break
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        xmj_backup_set_notice 'warn' '请输入 y / 0。'
+        ;;
+    esac
+  done
+
+  if ! xmj_maintenance_create_backup "$XMJ_SILLYTAVERN_PATH" '' '' '手动备份'; then
+    xmj_render_backup_create_result \
+      'failure' \
+      '手动备份没有顺利完成。' \
+      "${XMJ_MAINT_LAST_ERROR:-请检查当前目录与权限。}"
+    return 0
+  fi
+
+  if [ -n "${XMJ_MAINT_BACKUP_FILE:-}" ]; then
+    xmj_render_backup_create_result \
+      'success' \
+      '手动备份已经打包完成。' \
+      "${XMJ_MAINT_BACKUP_NOTE:-已生成 1 个备份压缩包。}"
+    return 0
+  fi
+
+  xmj_render_backup_create_result \
+    'success' \
+    '当前没有可打包的备份内容。' \
+    "${XMJ_MAINT_BACKUP_NOTE:-这次没有生成新的备份档。}"
+  return 0
+}
+
+xmj_backup_prompt_list_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  输入 n / p / 0 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_render_backup_list_page() {
+  local page="${1:-1}"
+  local backup_dir=''
+  local page_size='0'
+  local total='0'
+  local total_pages='1'
+
+  backup_dir="$(xmj_maintenance_backup_dir)"
+  page_size="$(xmj_backup_page_size)"
+  total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+  total_pages="$(xmj_backup_total_pages "$total" "$page_size")"
+  page="$(xmj_backup_normalize_page "$page" "$total_pages")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['08']}" 'backup list' 'backup'
+  printf '\n'
+  xmj_render_page_intro \
+    '这里会按时间从新到旧收纳现有备份。' \
+    '可以先快速确认数量，再决定是否恢复或清理旧档。'
+  printf '\n'
+  xmj_render_fact_line '备份目录' "$(xmj_display_path "$backup_dir")"
+  xmj_render_fact_line '备份总数' "$total"
+  xmj_render_fact_line '当前页码' "${page}/${total_pages}"
+  printf '\n'
+  xmj_render_backup_archive_lines "$page" "$page_size"
+  xmj_render_backup_notice
+  printf '\n'
+  xmj_render_action_item 'n' '下一页'
+  xmj_render_action_item 'p' '上一页'
+  xmj_render_action_item '0' '返回首页'
+  xmj_render_action_footer '输入 n / p / 0。'
+}
+
+xmj_run_backup_list_page() {
+  local input=''
+  local page='1'
+  local total_pages='1'
+
+  xmj_backup_clear_notice
+
+  while true; do
+    xmj_backup_refresh_archives
+    total_pages="$(xmj_backup_total_pages "${#XMJ_BACKUP_ARCHIVE_FILES[@]}" "$(xmj_backup_page_size)")"
+    page="$(xmj_backup_normalize_page "$page" "$total_pages")"
+
+    xmj_render_backup_list_page "$page"
+    xmj_backup_prompt_list_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      ''|0)
+        return 0
+        ;;
+      n|N)
+        if [ "$page" -lt "$total_pages" ]; then
+          page=$((page + 1))
+          xmj_backup_clear_notice
+        else
+          xmj_backup_set_notice 'warn' '已经是最后一页了。'
+        fi
+        ;;
+      p|P)
+        if [ "$page" -gt 1 ]; then
+          page=$((page - 1))
+          xmj_backup_clear_notice
+        else
+          xmj_backup_set_notice 'warn' '已经是第一页了。'
+        fi
+        ;;
+      *)
+        xmj_backup_set_notice 'warn' '这里只支持输入 n / p / 0。'
+        ;;
+    esac
+  done
+}
+
+xmj_backup_prompt_restore_select_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  备份序号 / n / p / 0 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_backup_prompt_confirm_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  输入 y 确认 / 0 取消 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_render_backup_restore_page() {
+  local page="${1:-1}"
+  local backup_dir=''
+  local page_size='0'
+  local total='0'
+  local total_pages='1'
+
+  backup_dir="$(xmj_maintenance_backup_dir)"
+  page_size="$(xmj_backup_page_size)"
+  total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+  total_pages="$(xmj_backup_total_pages "$total" "$page_size")"
+  page="$(xmj_backup_normalize_page "$page" "$total_pages")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['09']}" 'restore data' 'backup'
+  printf '\n'
+  xmj_render_page_intro \
+    '恢复时会把备份中的 data、third-party 和 config.yaml 覆盖回酒馆目录。' \
+    '请选择目标备份后再确认，避免把较旧的数据盖回去。'
+  printf '\n'
+  xmj_render_fact_line '酒馆目录' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_fact_line '备份总数' "$total"
+  xmj_render_fact_line '当前页码' "${page}/${total_pages}"
+  printf '\n'
+  xmj_render_backup_archive_lines "$page" "$page_size"
+  xmj_render_backup_notice
+  printf '\n'
+
+  if [ "$total" -gt 0 ]; then
+    xmj_render_action_item '序号' '选择对应备份并进入恢复确认'
+    xmj_render_action_item 'n' '下一页'
+    xmj_render_action_item 'p' '上一页'
+  fi
+
+  xmj_render_action_item '0' '取消并返回首页'
+  if [ "$total" -gt 0 ]; then
+    xmj_render_action_footer '输入备份序号 / n / p / 0。'
+  else
+    xmj_render_action_footer '输入 0 返回首页。'
+  fi
+}
+
+xmj_render_backup_restore_confirm_page() {
+  local archive_file="${1:-}"
+  local archive_name=''
+
+  archive_name="$(basename "$archive_file")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['09']}" 'restore data' 'backup'
+  printf '\n'
+  xmj_render_page_intro \
+    '这次会把所选备份覆盖恢复到当前酒馆目录。' \
+    '同名内容会被直接覆盖，请确认已经选对备份档。'
+  printf '\n'
+  xmj_render_fact_line '备份文件' "$archive_name"
+  xmj_render_fact_line '备份时间' "$(xmj_backup_archive_time_text "$archive_file")"
+  xmj_render_fact_line '备份大小' "$(xmj_backup_archive_size_text "$archive_file")"
+  xmj_render_fact_line '恢复到' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_backup_notice
+  printf '\n'
+  xmj_render_action_item 'y' '确认恢复这个备份'
+  xmj_render_action_item '0' '取消并返回上一页'
+  xmj_render_action_footer '输入 y / 0。'
+}
+
+xmj_render_backup_restore_result() {
+  local result_mode="${1:-success}"
+  local summary_text="${2:-恢复已完成。}"
+  local detail_text="${3:-}"
+  local archive_file="${4:-}"
+  local card_title='恢复完成'
+
+  if [ "$result_mode" = 'failure' ]; then
+    card_title='恢复失败'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['09']}" 'restore data' 'backup'
+  printf '\n'
+  xmj_render_setting_card "$card_title" "$summary_text" "$detail_text"
+
+  if [ -n "$archive_file" ]; then
+    printf '\n'
+    xmj_render_fact_line '恢复来源' "$(xmj_display_path "$archive_file")"
+  fi
+
+  xmj_render_fact_line '恢复到' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_run_backup_restore_confirm() {
+  local archive_file="${1:-}"
+  local input=''
+
+  while true; do
+    xmj_render_backup_restore_confirm_page "$archive_file"
+    xmj_backup_prompt_confirm_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      y|Y|yes|YES|Yes)
+        break
+        ;;
+      0)
+        return 1
+        ;;
+      *)
+        xmj_backup_set_notice 'warn' '请输入 y / 0。'
+        ;;
+    esac
+  done
+
+  xmj_maintenance_clear_state
+  XMJ_MAINT_BACKUP_DIR="$(dirname "$archive_file")"
+  XMJ_MAINT_BACKUP_FILE="$archive_file"
+  XMJ_MAINT_BACKUP_NAME="$(basename "$archive_file")"
+
+  if ! xmj_maintenance_restore_backup "$XMJ_SILLYTAVERN_PATH" '' ''; then
+    xmj_render_backup_restore_result \
+      'failure' \
+      '备份恢复没有顺利完成。' \
+      "${XMJ_MAINT_LAST_ERROR:-请检查备份档与目标目录。}" \
+      "$archive_file"
+    return 0
+  fi
+
+  xmj_render_backup_restore_result \
+    'success' \
+    '备份内容已经覆盖恢复到酒馆目录。' \
+    "${XMJ_MAINT_BACKUP_RESTORE_NOTE:-恢复动作已完成。}" \
+    "$archive_file"
+  return 0
+}
+
+xmj_run_backup_restore_page() {
+  local input=''
+  local page='1'
+  local total='0'
+  local total_pages='1'
+  local selected_index='0'
+
+  xmj_backup_clear_notice
+
+  while true; do
+    xmj_backup_refresh_archives
+    total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+    total_pages="$(xmj_backup_total_pages "$total" "$(xmj_backup_page_size)")"
+    page="$(xmj_backup_normalize_page "$page" "$total_pages")"
+
+    xmj_render_backup_restore_page "$page"
+    xmj_backup_prompt_restore_select_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      0)
+        return 0
+        ;;
+      n|N)
+        if [ "$page" -lt "$total_pages" ]; then
+          page=$((page + 1))
+          xmj_backup_clear_notice
+        else
+          xmj_backup_set_notice 'warn' '已经是最后一页了。'
+        fi
+        ;;
+      p|P)
+        if [ "$page" -gt 1 ]; then
+          page=$((page - 1))
+          xmj_backup_clear_notice
+        else
+          xmj_backup_set_notice 'warn' '已经是第一页了。'
+        fi
+        ;;
+      ''|*[!0-9]*)
+        if [ "$total" -gt 0 ]; then
+          xmj_backup_set_notice 'warn' '请输入备份序号 / n / p / 0。'
+        else
+          xmj_backup_set_notice 'warn' '当前没有可恢复的备份，请输入 0 返回。'
+        fi
+        ;;
+      *)
+        if [ "$total" -eq 0 ]; then
+          xmj_backup_set_notice 'warn' '当前没有可恢复的备份，请输入 0 返回。'
+          continue
+        fi
+
+        selected_index=$((10#$input))
+        if [ "$selected_index" -lt 1 ] || [ "$selected_index" -gt "$total" ]; then
+          xmj_backup_set_notice 'warn' '这个备份序号超出范围了。'
+          continue
+        fi
+
+        xmj_backup_clear_notice
+        if xmj_run_backup_restore_confirm "${XMJ_BACKUP_ARCHIVE_FILES[$((selected_index - 1))]}"; then
+          return 0
+        fi
+        ;;
+    esac
+  done
+}
+
+xmj_backup_cleanup_keep_count() {
+  printf '%s' '5'
+}
+
+xmj_backup_delete_archive() {
+  local archive_file="${1:-}"
+
+  if [ -z "$archive_file" ] || [ ! -f "$archive_file" ]; then
+    XMJ_MAINT_LAST_ERROR='没有找到要删除的备份档。'
+    return 1
+  fi
+
+  if ! rm -f "$archive_file" 2>/dev/null; then
+    XMJ_MAINT_LAST_ERROR="删除备份失败：$(basename "$archive_file")"
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_backup_cleanup_old_archives() {
+  local keep_count="${1:-5}"
+  local total='0'
+  local i='0'
+  local archive_file=''
+
+  XMJ_BACKUP_CLEANUP_REMOVED='0'
+  XMJ_BACKUP_CLEANUP_NOTE=''
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      keep_count='5'
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    keep_count='1'
+  fi
+
+  xmj_backup_refresh_archives
+  total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+
+  if [ "$total" -le "$keep_count" ]; then
+    XMJ_BACKUP_CLEANUP_NOTE="当前共有 ${total} 个备份，少于或等于保留数量，无需清理。"
+    return 0
+  fi
+
+  for ((i = keep_count; i < total; i++)); do
+    archive_file="${XMJ_BACKUP_ARCHIVE_FILES[$i]}"
+    if ! rm -f "$archive_file" 2>/dev/null; then
+      XMJ_MAINT_LAST_ERROR="删除备份失败：$(basename "$archive_file")"
+      return 1
+    fi
+
+    XMJ_BACKUP_CLEANUP_REMOVED="$((XMJ_BACKUP_CLEANUP_REMOVED + 1))"
+  done
+
+  XMJ_BACKUP_CLEANUP_NOTE="已清理 ${XMJ_BACKUP_CLEANUP_REMOVED} 个旧备份，保留最新 ${keep_count} 个。"
+  return 0
+}
+
+xmj_backup_prompt_cleanup_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  序号删除 / a 自动清理 / n / p / 0 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_render_backup_cleanup_page() {
+  local page="${1:-1}"
+  local backup_dir=''
+  local page_size='0'
+  local total='0'
+  local total_pages='1'
+  local keep_count=''
+
+  backup_dir="$(xmj_maintenance_backup_dir)"
+  page_size="$(xmj_backup_page_size)"
+  total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+  total_pages="$(xmj_backup_total_pages "$total" "$page_size")"
+  page="$(xmj_backup_normalize_page "$page" "$total_pages")"
+  keep_count="$(xmj_backup_cleanup_keep_count)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['10']}" 'cleanup archive' 'backup'
+  printf '\n'
+  xmj_render_page_intro \
+    '可以按序号删除单个旧档，也可以一键只保留最近几份备份。' \
+    '清理只作用于备份目录里的 zip 档案，不会修改酒馆目录本身。'
+  printf '\n'
+  xmj_render_fact_line '备份目录' "$(xmj_display_path "$backup_dir")"
+  xmj_render_fact_line '备份总数' "$total"
+  xmj_render_fact_line '自动策略' "保留最新 ${keep_count} 个"
+  printf '\n'
+  xmj_render_backup_archive_lines "$page" "$page_size"
+  xmj_render_backup_notice
+  printf '\n'
+
+  if [ "$total" -gt 0 ]; then
+    xmj_render_action_item '序号' '删除指定旧备份'
+    xmj_render_action_item 'a' '自动清理，只保留最新几份'
+    xmj_render_action_item 'n' '下一页'
+    xmj_render_action_item 'p' '上一页'
+  fi
+
+  xmj_render_action_item '0' '返回首页'
+  if [ "$total" -gt 0 ]; then
+    xmj_render_action_footer '输入序号 / a / n / p / 0。'
+  else
+    xmj_render_action_footer '输入 0 返回首页。'
+  fi
+}
+
+xmj_render_backup_cleanup_confirm_page() {
+  local mode="${1:-single}"
+  local archive_file="${2:-}"
+  local keep_count=''
+  local summary_text=''
+  local detail_text=''
+
+  keep_count="$(xmj_backup_cleanup_keep_count)"
+
+  case "$mode" in
+    auto)
+      summary_text="会保留最新 ${keep_count} 个备份。"
+      detail_text='更旧的 zip 备份会被直接删除，删除后不会自动恢复。'
+      ;;
+    *)
+      summary_text="即将删除：$(basename "$archive_file")"
+      detail_text='这个操作只删除备份档，不会影响酒馆目录本身。'
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['10']}" 'cleanup archive' 'backup'
+  printf '\n'
+  xmj_render_setting_card '执行前确认' "$summary_text" "$detail_text"
+
+  if [ "$mode" = 'single' ] && [ -n "$archive_file" ]; then
+    printf '\n'
+    xmj_render_fact_line '备份时间' "$(xmj_backup_archive_time_text "$archive_file")"
+    xmj_render_fact_line '备份大小' "$(xmj_backup_archive_size_text "$archive_file")"
+  fi
+
+  xmj_render_backup_notice
+  printf '\n'
+  xmj_render_action_item 'y' '确认执行这次清理'
+  xmj_render_action_item '0' '取消并返回上一页'
+  xmj_render_action_footer '输入 y / 0。'
+}
+
+xmj_render_backup_cleanup_result() {
+  local result_mode="${1:-success}"
+  local summary_text="${2:-清理已完成。}"
+  local detail_text="${3:-}"
+  local card_title='清理完成'
+
+  if [ "$result_mode" = 'failure' ]; then
+    card_title='清理失败'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['10']}" 'cleanup archive' 'backup'
+  printf '\n'
+  xmj_render_setting_card "$card_title" "$summary_text" "$detail_text"
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_run_backup_cleanup_confirm() {
+  local mode="${1:-single}"
+  local archive_file="${2:-}"
+  local input=''
+
+  while true; do
+    xmj_render_backup_cleanup_confirm_page "$mode" "$archive_file"
+    xmj_backup_prompt_confirm_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      y|Y|yes|YES|Yes)
+        break
+        ;;
+      0)
+        return 1
+        ;;
+      *)
+        xmj_backup_set_notice 'warn' '请输入 y / 0。'
+        ;;
+    esac
+  done
+
+  case "$mode" in
+    auto)
+      if ! xmj_backup_cleanup_old_archives "$(xmj_backup_cleanup_keep_count)"; then
+        xmj_render_backup_cleanup_result \
+          'failure' \
+          '自动清理没有顺利完成。' \
+          "${XMJ_MAINT_LAST_ERROR:-请检查备份目录权限。}"
+        return 0
+      fi
+
+      xmj_render_backup_cleanup_result \
+        'success' \
+        '旧备份整理已完成。' \
+        "$XMJ_BACKUP_CLEANUP_NOTE"
+      return 0
+      ;;
+    *)
+      if ! xmj_backup_delete_archive "$archive_file"; then
+        xmj_render_backup_cleanup_result \
+          'failure' \
+          '删除旧备份没有顺利完成。' \
+          "${XMJ_MAINT_LAST_ERROR:-请检查备份目录权限。}"
+        return 0
+      fi
+
+      xmj_render_backup_cleanup_result \
+        'success' \
+        '指定旧备份已经删除。' \
+        "已移除：$(basename "$archive_file")"
+      return 0
+      ;;
+  esac
+}
+
+xmj_run_backup_cleanup_page() {
+  local input=''
+  local page='1'
+  local total='0'
+  local total_pages='1'
+  local selected_index='0'
+
+  xmj_backup_clear_notice
+
+  while true; do
+    xmj_backup_refresh_archives
+    total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+    total_pages="$(xmj_backup_total_pages "$total" "$(xmj_backup_page_size)")"
+    page="$(xmj_backup_normalize_page "$page" "$total_pages")"
+
+    xmj_render_backup_cleanup_page "$page"
+    xmj_backup_prompt_cleanup_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      0)
+        return 0
+        ;;
+      a|A)
+        if [ "$total" -eq 0 ]; then
+          xmj_backup_set_notice 'warn' '当前没有可清理的备份。'
+          continue
+        fi
+
+        xmj_backup_clear_notice
+        if xmj_run_backup_cleanup_confirm 'auto' ''; then
+          return 0
+        fi
+        ;;
+      n|N)
+        if [ "$page" -lt "$total_pages" ]; then
+          page=$((page + 1))
+          xmj_backup_clear_notice
+        else
+          xmj_backup_set_notice 'warn' '已经是最后一页了。'
+        fi
+        ;;
+      p|P)
+        if [ "$page" -gt 1 ]; then
+          page=$((page - 1))
+          xmj_backup_clear_notice
+        else
+          xmj_backup_set_notice 'warn' '已经是第一页了。'
+        fi
+        ;;
+      ''|*[!0-9]*)
+        if [ "$total" -gt 0 ]; then
+          xmj_backup_set_notice 'warn' '请输入备份序号 / a / n / p / 0。'
+        else
+          xmj_backup_set_notice 'warn' '当前没有可清理的备份，请输入 0 返回。'
+        fi
+        ;;
+      *)
+        if [ "$total" -eq 0 ]; then
+          xmj_backup_set_notice 'warn' '当前没有可清理的备份，请输入 0 返回。'
+          continue
+        fi
+
+        selected_index=$((10#$input))
+        if [ "$selected_index" -lt 1 ] || [ "$selected_index" -gt "$total" ]; then
+          xmj_backup_set_notice 'warn' '这个备份序号超出范围了。'
+          continue
+        fi
+
+        xmj_backup_clear_notice
+        if xmj_run_backup_cleanup_confirm 'single' "${XMJ_BACKUP_ARCHIVE_FILES[$((selected_index - 1))]}"; then
+          return 0
+        fi
+        ;;
+    esac
+  done
+}
