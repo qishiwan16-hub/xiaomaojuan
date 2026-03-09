@@ -16,7 +16,7 @@ xmj_handle_route() {
       return 1
       ;;
     01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23)
-      xmj_render_placeholder_page "$input"
+      xmj_render_menu_page "$input"
       return 0
       ;;
     *)

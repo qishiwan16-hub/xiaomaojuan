@@ -15,14 +15,13 @@ xmj_section_phrase() {
 
 xmj_render_header() {
   local script_name="${XMJ_SCRIPT_NAME:-小猫卷}"
-  local target_project="${XMJ_TARGET_PROJECT:-SillyTavern}"
   local author="${XMJ_SCRIPT_AUTHOR:-meoroll}"
 
-  xmj_rule_line "$XMJ_BORDER" '═' 68
-  printf '%b%s%b\n' "$XMJ_PINK_SOFT" "                    ╭─⋆˚  ${script_name}  ˚⋆─╮" "$XMJ_RESET"
-  printf '%b%s%b\n' "$XMJ_WHITE" '              little panel memory · soft preview' "$XMJ_RESET"
-  printf '%b%s%b\n' "$XMJ_BLUE_SOFT" "               ${author} の preview page · ${target_project}" "$XMJ_RESET"
-  printf '%b%s%b\n' "$XMJ_CREAM" '                    Termux Bash Panel Framework' "$XMJ_RESET"
+  printf '\n'
+  printf '%b%s%b\n' "$XMJ_PINK_SOFT" "  し ~｡ ｡~ っ  ${script_name}  し ~｡ ｡~ っ" "$XMJ_RESET"
+  printf '%b%s%b\n' "$XMJ_WHITE" '  little panel memory' "$XMJ_RESET"
+  printf '%b%s%b\n' "$XMJ_MIST" "  ${author} の preview page" "$XMJ_RESET"
+  printf '\n'
   xmj_rule_line "$XMJ_BORDER" '═' 68
 }
 
@@ -34,6 +33,23 @@ xmj_render_info_block() {
     printf '  %b%s%b｜%b%s%b\n' "$XMJ_BLUE_SOFT" "$key" "$XMJ_RESET" "$XMJ_WHITE" "${XMJ_INFO_VALUE[$key]}" "$XMJ_RESET"
   done
   printf '\n'
+}
+
+xmj_render_fact_line() {
+  local label="${1:-}"
+  local value="${2:-}"
+
+  printf '  %b%s%b：%b%s%b\n' "$XMJ_BLUE_SOFT" "$label" "$XMJ_RESET" "$XMJ_WHITE" "$value" "$XMJ_RESET"
+}
+
+xmj_render_path_block() {
+  local label="${1:-}"
+  local path_value="${2:-}"
+  local state_value="${3:-}"
+
+  printf '  %b%s%b\n' "$XMJ_BLUE_SOFT" "$label" "$XMJ_RESET"
+  printf '    %b路径%b：%b%s%b\n' "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$path_value" "$XMJ_RESET"
+  printf '    %b状态%b：%b%s%b\n' "$XMJ_MIST" "$XMJ_RESET" "$XMJ_CREAM" "$state_value" "$XMJ_RESET"
 }
 
 xmj_render_section_title() {
@@ -96,7 +112,7 @@ xmj_render_home() {
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_info_block
+  printf '\n'
 
   for section in "${XMJ_SECTION_ORDER[@]}"; do
     if [ "$section" = 'info' ]; then
@@ -105,7 +121,6 @@ xmj_render_home() {
     xmj_render_menu_block "$section"
   done
 
-  xmj_rule_line "$XMJ_BORDER" '─' 68
   xmj_render_input_hint
 }
 
@@ -185,6 +200,90 @@ xmj_render_startup_failure() {
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   xmj_wait_for_enter '按回车结束脚本'
+}
+
+xmj_render_about_status_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'about'
+  printf '\n'
+  xmj_render_fact_line '当前编号' '21'
+  xmj_render_fact_line '当前页面' "${XMJ_MENU_LABEL['21']}"
+  printf '\n'
+  xmj_render_fact_line '状态' "$(xmj_config_status_text)"
+  xmj_render_fact_line '主题' "$(xmj_theme_label)"
+  xmj_render_fact_line '配置文件' "${XMJ_CONFIG_FILE:-未生成}"
+  xmj_render_fact_line '脚本根目录' "${XMJ_ROOT_DIR:-未识别}"
+  printf '\n'
+  xmj_render_path_block 'SillyTavern' \
+    "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")" \
+    "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
+  printf '\n'
+  xmj_render_path_block '备份目录' \
+    "$(xmj_display_path "${XMJ_BACKUP_DIR:-}")" \
+    "$(xmj_dir_state "${XMJ_BACKUP_DIR:-}" '已就绪' '待创建')"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  xmj_wait_for_enter '按回车返回首页'
+}
+
+xmj_render_about_panel_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'about'
+  printf '\n'
+  xmj_render_fact_line '当前编号' '22'
+  xmj_render_fact_line '当前页面' "${XMJ_MENU_LABEL['22']}"
+  printf '\n'
+  printf '  %b小猫卷是一个运行在 Termux 里的 Bash 面板预览框架。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b首页原先的信息公开已收纳到关于页，首页只保留功能分组。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
+  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
+  xmj_render_fact_line '目标' "${XMJ_TARGET_PROJECT:-SillyTavern}"
+  xmj_render_fact_line '环境' "${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
+  xmj_render_fact_line '主题' "$(xmj_theme_label)"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  xmj_wait_for_enter '按回车返回首页'
+}
+
+xmj_render_author_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'about'
+  printf '\n'
+  xmj_render_fact_line '当前编号' '23'
+  xmj_render_fact_line '当前页面' "${XMJ_MENU_LABEL['23']}"
+  printf '\n'
+  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
+  xmj_render_fact_line '标题副文' 'little panel memory'
+  xmj_render_fact_line '页面定位' 'preview page'
+  printf '\n'
+  printf '  %b当前版本主要用于确认配置、面板结构和占位跳转。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b不会执行更新、备份、安装或 Git 回滚等真实业务操作。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  xmj_wait_for_enter '按回车返回首页'
+}
+
+xmj_render_menu_page() {
+  local id="${1:-}"
+
+  case "$id" in
+    21)
+      xmj_render_about_status_page
+      ;;
+    22)
+      xmj_render_about_panel_page
+      ;;
+    23)
+      xmj_render_author_page
+      ;;
+    *)
+      xmj_render_placeholder_page "$id"
+      ;;
+  esac
 }
 
 xmj_render_placeholder_page() {
