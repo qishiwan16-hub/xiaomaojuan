@@ -355,6 +355,28 @@ xmj_render_launch_stage_line() {
     "$color" "$state_text" "$XMJ_RESET"
 }
 
+xmj_render_launch_tavern_state() {
+  if [ -z "${XMJ_LAUNCH_TAVERN_VERSION:-}" ] \
+    && [ -z "${XMJ_LAUNCH_TAVERN_BRANCH:-}" ] \
+    && [ -z "${XMJ_LAUNCH_TAVERN_COMMIT:-}" ]; then
+    return 0
+  fi
+
+  printf '\n'
+
+  if [ -n "${XMJ_LAUNCH_TAVERN_VERSION:-}" ]; then
+    xmj_render_fact_line '酒馆版本' "${XMJ_LAUNCH_TAVERN_VERSION}"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_TAVERN_BRANCH:-}" ]; then
+    xmj_render_fact_line '酒馆分支' "${XMJ_LAUNCH_TAVERN_BRANCH}"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_TAVERN_COMMIT:-}" ]; then
+    xmj_render_fact_line '当前提交' "${XMJ_LAUNCH_TAVERN_COMMIT}"
+  fi
+}
+
 xmj_render_launch_progress() {
   local current_stage="${1:-prepare}"
   local headline="${2:-准备启动}"
@@ -375,6 +397,7 @@ xmj_render_launch_progress() {
   xmj_render_launch_stage_line 'env' "$current_stage" 'running'
   xmj_render_launch_stage_line 'boot' "$current_stage" 'running'
   xmj_render_launch_stage_line 'running' "$current_stage" 'running'
+  xmj_render_launch_tavern_state
 
   if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
     printf '\n'
@@ -406,6 +429,7 @@ xmj_render_launch_running_screen() {
   xmj_render_launch_stage_line 'env' 'running' 'running'
   xmj_render_launch_stage_line 'boot' 'running' 'running'
   xmj_render_launch_stage_line 'running' 'running' 'running'
+  xmj_render_launch_tavern_state
 
   printf '\n'
   if [ -n "$entry_url" ]; then
@@ -479,6 +503,7 @@ xmj_render_launch_result() {
   xmj_render_launch_stage_line 'env' "$current_stage" "$stage_mode"
   xmj_render_launch_stage_line 'boot' "$current_stage" "$stage_mode"
   xmj_render_launch_stage_line 'running' "$current_stage" "$stage_mode"
+  xmj_render_launch_tavern_state
 
   if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
     printf '\n'
@@ -644,7 +669,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前 01 启动酒馆、02 一键更新、03 切换版本已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 启动酒馆、02 一键更新、03 切换版本 / 分支已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -931,7 +956,7 @@ xmj_render_about_panel_page() {
   printf '\n'
   xmj_render_page_intro \
     '小猫卷目前是一个运行在 Termux 里的 Bash 面板框架。' \
-    '首页仍以功能分组为主，其中 01 启动酒馆、02 一键更新、03 切换版本已经接入真实逻辑。'
+    '首页仍以功能分组为主，其中 01 启动酒馆、02 一键更新、03 切换版本 / 分支已经接入真实逻辑。'
   printf '\n'
   xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
   xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
@@ -958,7 +983,7 @@ xmj_render_author_page() {
   printf '\n'
   xmj_render_page_intro \
     '当前版本主要用于确认配置、面板结构和已接入的更新流程。' \
-    '目前已实现 01 启动酒馆、02 一键更新、03 切换版本，备份、恢复、回退等功能仍未开放。'
+    '目前已实现 01 启动酒馆、02 一键更新、03 切换版本 / 分支，备份、恢复、回退等功能仍未开放。'
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -1004,7 +1029,7 @@ xmj_render_placeholder_page() {
   printf '\n'
   xmj_render_page_intro \
     '你现在看到的是视觉占位页，后续会在这里补上对应业务逻辑。' \
-    '目前仅 01 启动酒馆、02 一键更新、03 切换版本已接入真实流程，其余入口仍在整理。'
+    '目前仅 01 启动酒馆、02 一键更新、03 切换版本 / 分支已接入真实流程，其余入口仍在整理。'
   xmj_render_page_footer '按回车返回首页'
 }
 

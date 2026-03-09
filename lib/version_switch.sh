@@ -14,6 +14,9 @@ xmj_version_reset_state() {
   XMJ_VERSION_STAGE='prepare'
   XMJ_VERSION_SUMMARY=''
   XMJ_VERSION_DETAIL=''
+  XMJ_VERSION_SELECTOR_NOTICE=''
+  XMJ_VERSION_SELECTOR_NOTICE_KIND='info'
+  XMJ_VERSION_ACTIVE_MODE=''
   XMJ_VERSION_HAS_LOCAL_CHANGES='0'
   XMJ_VERSION_LOCAL_NOTE=''
   XMJ_VERSION_FETCH_NOTE=''
@@ -23,9 +26,14 @@ xmj_version_reset_state() {
   XMJ_VERSION_STASH_LABEL=''
   XMJ_VERSION_RESTORE_NOTE=''
   XMJ_VERSION_CURRENT_LABEL=''
+  XMJ_VERSION_CURRENT_VERSION=''
   XMJ_VERSION_CURRENT_TAG=''
+  XMJ_VERSION_CURRENT_BRANCH=''
   XMJ_VERSION_CURRENT_COMMIT=''
+  XMJ_VERSION_CURRENT_DESCRIBE=''
   XMJ_VERSION_TARGET_TAG=''
+  XMJ_VERSION_TARGET_BRANCH=''
+  XMJ_VERSION_TARGET_KIND=''
   XMJ_VERSION_TARGET_DATE=''
   XMJ_VERSION_TARGET_COMMIT=''
   XMJ_VERSION_INPUT_NOTICE=''
@@ -35,10 +43,14 @@ xmj_version_reset_state() {
   XMJ_VERSION_TOTAL_PAGES='1'
   XMJ_VERSION_RECOMMENDED_PRIMARY_TAG=''
   XMJ_VERSION_RECOMMENDED_SECONDARY_TAG=''
+  XMJ_VERSION_RECOMMENDED_BRANCH='release'
 
   declare -ga XMJ_VERSION_TAGS=()
   declare -ga XMJ_VERSION_TAG_DATES=()
   declare -ga XMJ_VERSION_TAG_COMMITS=()
+  declare -ga XMJ_VERSION_BRANCHES=()
+  declare -ga XMJ_VERSION_BRANCH_SOURCES=()
+  declare -ga XMJ_VERSION_BRANCH_COMMITS=()
 }
 
 xmj_version_log_line() {
@@ -105,8 +117,32 @@ xmj_version_set_notice() {
   XMJ_VERSION_INPUT_NOTICE="$message"
 }
 
+xmj_version_clear_selector_notice() {
+  XMJ_VERSION_SELECTOR_NOTICE=''
+  XMJ_VERSION_SELECTOR_NOTICE_KIND='info'
+}
+
+xmj_version_set_selector_notice() {
+  local kind="${1:-info}"
+  local message="${2:-}"
+
+  XMJ_VERSION_SELECTOR_NOTICE_KIND="$kind"
+  XMJ_VERSION_SELECTOR_NOTICE="$message"
+}
+
 xmj_version_notice_color() {
   case "${XMJ_VERSION_INPUT_NOTICE_KIND:-info}" in
+    warn)
+      printf '%s' "$XMJ_WARN"
+      ;;
+    *)
+      printf '%s' "$XMJ_BLUE_SOFT"
+      ;;
+  esac
+}
+
+xmj_version_selector_notice_color() {
+  case "${XMJ_VERSION_SELECTOR_NOTICE_KIND:-info}" in
     warn)
       printf '%s' "$XMJ_WARN"
       ;;
@@ -174,21 +210,37 @@ xmj_version_update_current_state() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local exact_tag=''
   local branch_name=''
+  local describe_name=''
 
   XMJ_VERSION_CURRENT_TAG=''
+  XMJ_VERSION_CURRENT_BRANCH=''
+  XMJ_VERSION_CURRENT_VERSION='未知'
+  XMJ_VERSION_CURRENT_DESCRIBE=''
   XMJ_VERSION_CURRENT_LABEL='未知状态'
   XMJ_VERSION_CURRENT_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_VERSION_LOG_FILE" || true)"
-
+  branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_VERSION_LOG_FILE" || true)"
+  describe_name="$(git -C "$repo_path" describe --tags --always --dirty 2>>"$XMJ_VERSION_LOG_FILE" || true)"
   exact_tag="$(git -C "$repo_path" describe --tags --exact-match 2>>"$XMJ_VERSION_LOG_FILE" || true)"
+
   if [ -n "$exact_tag" ]; then
     XMJ_VERSION_CURRENT_TAG="$exact_tag"
-    XMJ_VERSION_CURRENT_LABEL="$exact_tag"
+    XMJ_VERSION_CURRENT_VERSION="$exact_tag"
+  elif [ -n "$describe_name" ]; then
+    XMJ_VERSION_CURRENT_VERSION="$describe_name"
+  elif [ -n "${XMJ_VERSION_CURRENT_COMMIT:-}" ]; then
+    XMJ_VERSION_CURRENT_VERSION="${XMJ_VERSION_CURRENT_COMMIT}"
+  fi
+
+  XMJ_VERSION_CURRENT_DESCRIBE="${XMJ_VERSION_CURRENT_VERSION}"
+
+  if [ -n "$branch_name" ]; then
+    XMJ_VERSION_CURRENT_BRANCH="$branch_name"
+    XMJ_VERSION_CURRENT_LABEL="分支：$branch_name"
     return 0
   fi
 
-  branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_VERSION_LOG_FILE" || true)"
-  if [ -n "$branch_name" ]; then
-    XMJ_VERSION_CURRENT_LABEL="分支：$branch_name"
+  if [ -n "$exact_tag" ]; then
+    XMJ_VERSION_CURRENT_LABEL="$exact_tag"
     return 0
   fi
 
@@ -404,6 +456,94 @@ xmj_version_refresh_catalog() {
   return 0
 }
 
+xmj_branch_refresh_catalog() {
+  xmj_render_version_progress \
+    'fetch' \
+    'running' \
+    '整理分支列表' \
+    '猫猫正在同步远程分支并整理切换清单喵~'
+
+  xmj_branch_fetch_refs
+  if ! xmj_branch_load_refs; then
+    return 1
+  fi
+
+  xmj_version_ensure_page_range
+  return 0
+}
+
+xmj_branch_fetch_refs() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  XMJ_VERSION_FETCH_NOTE='已同步远程分支。'
+
+  if ! git -C "$repo_path" remote get-url origin >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+    XMJ_VERSION_FETCH_NOTE='未发现 origin，先展示当前仓库已有本地分支。'
+    xmj_version_log_line "$XMJ_VERSION_FETCH_NOTE"
+    return 0
+  fi
+
+  if git -C "$repo_path" fetch origin --prune >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+    xmj_version_log_line '远程分支同步完成。'
+    return 0
+  fi
+
+  XMJ_VERSION_FETCH_NOTE='远程分支同步未完成，先展示本地已知分支。'
+  xmj_version_log_line "$XMJ_VERSION_FETCH_NOTE"
+  return 0
+}
+
+xmj_branch_load_refs() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local branch_name=''
+  local branch_commit=''
+  local branch_source=''
+
+  declare -ga XMJ_VERSION_BRANCHES=()
+  declare -ga XMJ_VERSION_BRANCH_SOURCES=()
+  declare -ga XMJ_VERSION_BRANCH_COMMITS=()
+  declare -A xmj_seen_branches=()
+
+  while IFS='|' read -r branch_name branch_commit branch_source; do
+    if [ -z "$branch_name" ] || [ "$branch_name" = 'HEAD' ]; then
+      continue
+    fi
+
+    if [ -n "${xmj_seen_branches[$branch_name]+x}" ]; then
+      continue
+    fi
+
+    xmj_seen_branches[$branch_name]='1'
+    XMJ_VERSION_BRANCHES+=("$branch_name")
+    XMJ_VERSION_BRANCH_COMMITS+=("${branch_commit:-unknown}")
+    XMJ_VERSION_BRANCH_SOURCES+=("${branch_source:-origin}")
+  done < <(
+    {
+      git -C "$repo_path" for-each-ref \
+        --sort=refname \
+        --format='%(refname:strip=3)|%(objectname:short)|origin' \
+        refs/remotes/origin
+      git -C "$repo_path" for-each-ref \
+        --sort=refname \
+        --format='%(refname:strip=2)|%(objectname:short)|local' \
+        refs/heads
+    } 2>>"$XMJ_VERSION_LOG_FILE"
+  )
+
+  if [ "${#XMJ_VERSION_BRANCHES[@]}" -eq 0 ]; then
+    xmj_version_fail 'fetch' '未找到可切换分支' '当前仓库没有可用的 Git 分支。'
+    return 1
+  fi
+
+  XMJ_VERSION_TOTAL_PAGES=$(((${#XMJ_VERSION_BRANCHES[@]} + XMJ_VERSION_PAGE_SIZE - 1) / XMJ_VERSION_PAGE_SIZE))
+  if [ "$XMJ_VERSION_TOTAL_PAGES" -lt 1 ]; then
+    XMJ_VERSION_TOTAL_PAGES='1'
+  fi
+
+  xmj_version_log_line "已整理分支数量：${#XMJ_VERSION_BRANCHES[@]}"
+  return 0
+}
+
 xmj_version_index_marker_text() {
   local index="${1:-0}"
   local tag_name=''
@@ -448,6 +588,70 @@ xmj_version_index_marker_color() {
       ;;
     *)
       printf '%s' "$XMJ_MIST"
+      ;;
+  esac
+}
+
+xmj_branch_index_marker_text() {
+  local index="${1:-0}"
+  local branch_name=''
+
+  if [ "$index" -lt 0 ] || [ "$index" -ge "${#XMJ_VERSION_BRANCHES[@]}" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  branch_name="${XMJ_VERSION_BRANCHES[$index]}"
+
+  if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ] && [ "$branch_name" = "$XMJ_VERSION_CURRENT_BRANCH" ]; then
+    if [ "$branch_name" = "${XMJ_VERSION_RECOMMENDED_BRANCH:-release}" ]; then
+      printf '%s' '当前 / 默认'
+    else
+      printf '%s' '当前'
+    fi
+    return 0
+  fi
+
+  if [ "$branch_name" = "${XMJ_VERSION_RECOMMENDED_BRANCH:-release}" ]; then
+    printf '%s' '默认'
+    return 0
+  fi
+
+  printf '%s' ''
+}
+
+xmj_branch_index_marker_color() {
+  local index="${1:-0}"
+  local marker_text=''
+
+  marker_text="$(xmj_branch_index_marker_text "$index")"
+  case "$marker_text" in
+    当前* )
+      printf '%s' "$XMJ_CREAM"
+      ;;
+    默认)
+      printf '%s' "$XMJ_PINK"
+      ;;
+    *)
+      printf '%s' "$XMJ_MIST"
+      ;;
+  esac
+}
+
+xmj_branch_source_text() {
+  local index="${1:-0}"
+
+  if [ "$index" -lt 0 ] || [ "$index" -ge "${#XMJ_VERSION_BRANCH_SOURCES[@]}" ]; then
+    printf '%s' 'unknown'
+    return 0
+  fi
+
+  case "${XMJ_VERSION_BRANCH_SOURCES[$index]:-origin}" in
+    local)
+      printf '%s' '本地'
+      ;;
+    *)
+      printf '%s' 'origin'
       ;;
   esac
 }
@@ -601,6 +805,40 @@ xmj_render_version_result() {
   xmj_render_page_footer '按回车返回首页'
 }
 
+xmj_render_switch_mode_page() {
+  local notice_color=''
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_identity '03' "${XMJ_MENU_LABEL['03']}"
+  printf '\n'
+  xmj_render_page_intro \
+    '酒馆的版本和分支是两套东西，这里先选你要切哪一种。' \
+    '分支最常用的是 release，版本则会按标签和发行日期来列出。'
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+  printf '\n'
+  xmj_render_setting_card '1 · 更换版本' '按标签切换版本，并显示发行日期。' "推荐：$(xmj_version_recommended_summary)"
+  printf '\n'
+  xmj_render_setting_card '2 · 更换分支' '按分支切换工作线。' "最常用默认：${XMJ_VERSION_RECOMMENDED_BRANCH:-release}"
+
+  if [ -n "${XMJ_VERSION_SELECTOR_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_selector_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_SELECTOR_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  xmj_render_action_item '1' '进入版本列表'
+  xmj_render_action_item '2' '进入分支列表'
+  xmj_render_action_item '0' '返回首页'
+  xmj_render_action_footer '输入 1 / 2 / 0。'
+}
+
 xmj_render_version_list_page() {
   local total="${#XMJ_VERSION_TAGS[@]}"
   local page="${XMJ_VERSION_PAGE:-1}"
@@ -634,7 +872,7 @@ xmj_render_version_list_page() {
   printf '\n'
   xmj_render_page_intro \
     '这里会列出当前仓库已知的全部版本标签和发行日期。' \
-    '输入对应序号即可切换，n / p 翻页，r 刷新版本列表，0 返回首页。'
+    '输入对应序号即可切换，n / p 翻页，r 刷新版本列表，0 返回上一级。'
   printf '\n'
   xmj_render_setting_card \
     '推荐版本' \
@@ -688,7 +926,162 @@ xmj_render_version_list_page() {
   fi
 
   printf '\n'
-  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回首页。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回上一级。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+}
+
+xmj_render_branch_list_page() {
+  local total="${#XMJ_VERSION_BRANCHES[@]}"
+  local page="${XMJ_VERSION_PAGE:-1}"
+  local page_size="${XMJ_VERSION_PAGE_SIZE:-12}"
+  local total_pages="${XMJ_VERSION_TOTAL_PAGES:-1}"
+  local start_index='0'
+  local end_index='0'
+  local index='0'
+  local display_index=''
+  local number_width='2'
+  local marker_text=''
+  local marker_color=''
+  local notice_color=''
+  local source_text=''
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size - 1))
+  if [ "$end_index" -ge "$total" ]; then
+    end_index=$((total - 1))
+  fi
+
+  number_width="${#total}"
+  if [ "$number_width" -lt 2 ]; then
+    number_width='2'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_identity '03' "${XMJ_MENU_LABEL['03']}"
+  printf '\n'
+  xmj_render_page_intro \
+    '这里会列出当前仓库可切换的分支。' \
+    '输入对应序号即可切换，n / p 翻页，r 刷新分支列表，0 返回上一级。'
+  printf '\n'
+  xmj_render_setting_card \
+    '常用分支' \
+    "最常用默认分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" \
+    '如果列表里存在对应分支，会在后面标出默认。'
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '分支总数' "$total"
+  xmj_render_fact_line '当前页' "${page}/${total_pages}"
+
+  if [ -n "${XMJ_VERSION_FETCH_NOTE:-}" ]; then
+    xmj_render_fact_line '同步说明' "$XMJ_VERSION_FETCH_NOTE"
+  fi
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
+  if [ -n "${XMJ_VERSION_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_VERSION_LOG_FILE")"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  printf '  %b♡ 可切换分支%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+
+  for ((index = start_index; index <= end_index; index += 1)); do
+    display_index="$(printf "%0${number_width}d" $((index + 1)))"
+    marker_text="$(xmj_branch_index_marker_text "$index")"
+    marker_color="$(xmj_branch_index_marker_color "$index")"
+    source_text="$(xmj_branch_source_text "$index")"
+
+    printf '  %b[%s]%b %b%s%b %b·%b %b%s%b %b·%b %b%s%b' \
+      "$XMJ_PINK" "$display_index" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_BRANCHES[$index]}" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_BLUE_SOFT" "$source_text" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_BRANCH_COMMITS[$index]}" "$XMJ_RESET"
+
+    if [ -n "$marker_text" ]; then
+      printf ' %b[%s]%b' "$marker_color" "$marker_text" "$XMJ_RESET"
+    fi
+
+    printf '\n'
+  done
+
+  if [ -n "${XMJ_VERSION_INPUT_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_INPUT_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回上一级。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+}
+
+xmj_render_version_backup_confirm_page() {
+  local target_kind="${1:-version}"
+  local target_name="${2:-}"
+  local target_detail="${3:-}"
+  local title_text='目标版本'
+  local card_title='手动确认备份'
+  local card_desc=''
+  local risk_line='  %b• 切到标签版本后会停留在 detached HEAD。%b\n'
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_identity '03' "${XMJ_MENU_LABEL['03']}"
+  printf '\n'
+  xmj_render_page_intro \
+    '正式切换前，需要你手动确认备份风险。' \
+    '自动备份功能后面再做，这一版不会替你生成版本切换备份。'
+  printf '\n'
+
+  case "$target_kind" in
+    branch)
+      title_text='目标分支'
+      card_desc="准备切到分支 ${target_name}。"
+      risk_line='  %b• 切换后会进入目标分支，并以该分支继续工作。%b\n'
+      ;;
+    *)
+      card_desc="准备切到 ${target_name}（发行日期：${target_detail:-unknown-date}）。"
+      ;;
+  esac
+
+  xmj_render_setting_card \
+    "$card_title" \
+    "$card_desc" \
+    '请先确认你已经自行备份，或明确接受这次不做备份直接切换。'
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line "$title_text" "$target_name"
+
+  if [ "$target_kind" = 'version' ]; then
+    xmj_render_fact_line '发行日期' "${target_detail:-unknown-date}"
+  fi
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
+  printf '\n'
+  printf '  %b♡ 风险提醒%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf "$risk_line" "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b• 当前不会自动做切换前备份。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b• 如检测到本地改动，仍会先自动收好再尽量放回。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '\n'
+  printf '  %b输入 y 继续切换；输入其它任意内容取消并返回列表。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
 }
@@ -698,11 +1091,64 @@ xmj_version_prompt_input() {
   IFS= read -r XMJ_LAST_INPUT
 }
 
+xmj_branch_prompt_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  分支序号 / n / p / r / 0 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_version_prompt_mode_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  选择 1 / 2 / 0 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_version_prompt_backup_confirm_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  我已确认备份风险（y / 其它取消）> ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_version_confirm_backup_ack() {
+  local target_kind="${1:-version}"
+  local target_name="${2:-}"
+  local target_detail="${3:-}"
+  local input=''
+
+  xmj_render_version_backup_confirm_page "$target_kind" "$target_name" "$target_detail"
+  xmj_version_prompt_backup_confirm_input
+  input="${XMJ_LAST_INPUT:-}"
+
+  case "$input" in
+    y|Y|yes|YES|Yes)
+      return 0
+      ;;
+    *)
+      xmj_version_set_notice 'info' '已取消这次切换。等你手动确认备份后再选版本即可。'
+      return 1
+      ;;
+  esac
+}
+
 xmj_version_target_detail() {
   local detail_text=''
 
   detail_text="发行日期：${XMJ_VERSION_TARGET_DATE:-unknown-date}。"
   detail_text="${detail_text} 当前会停留在标签版本上，后续若要继续跟随更新，建议再切回主分支。"
+
+  case "${XMJ_VERSION_RESTORE_NOTE:-}" in
+    ''|'无需放回本地改动。')
+      ;;
+    *)
+      detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+      ;;
+  esac
+
+  printf '%s' "$detail_text"
+}
+
+xmj_branch_target_detail() {
+  local detail_text=''
+
+  detail_text="当前已切到分支 ${XMJ_VERSION_TARGET_BRANCH:-unknown}。"
+  detail_text="${detail_text} 最常用默认分支仍是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。"
 
   case "${XMJ_VERSION_RESTORE_NOTE:-}" in
     ''|'无需放回本地改动。')
@@ -765,6 +1211,40 @@ xmj_version_checkout_target() {
   return 0
 }
 
+xmj_branch_checkout_target() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local target_branch="${1:-}"
+
+  if [ -z "$target_branch" ]; then
+    xmj_version_fail 'switch' '未识别到目标分支' '请重新选择要切换的分支。'
+    return 1
+  fi
+
+  xmj_version_log_line "准备切换到分支：$target_branch"
+
+  if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$target_branch"; then
+    if ! git -C "$repo_path" checkout "$target_branch" >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+      xmj_version_fail 'switch' '切换分支失败' '本地分支没有顺利切换，可温和查看日志。'
+      return 1
+    fi
+  elif git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
+    if ! git -C "$repo_path" checkout -b "$target_branch" --track "origin/$target_branch" >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+      xmj_version_fail 'switch' '切换分支失败' '远程分支没有顺利切换到本地，可温和查看日志。'
+      return 1
+    fi
+  else
+    xmj_version_fail 'switch' '未找到目标分支' '当前仓库里没有找到你选择的分支。'
+    return 1
+  fi
+
+  XMJ_VERSION_TARGET_BRANCH="$target_branch"
+  xmj_version_update_current_state
+  XMJ_VERSION_TARGET_COMMIT="$XMJ_VERSION_CURRENT_COMMIT"
+  xmj_version_log_line "已切换到分支：${XMJ_VERSION_CURRENT_BRANCH:-$target_branch}"
+  xmj_version_log_line "切换后提交：${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+  return 0
+}
+
 xmj_version_run_switch() {
   local selected_index="${1:-0}"
   local selected_number='0'
@@ -795,6 +1275,10 @@ xmj_version_run_switch() {
       "$XMJ_VERSION_SUMMARY" \
       "$XMJ_VERSION_DETAIL"
     return 1
+  fi
+
+  if ! xmj_version_confirm_backup_ack 'version' "$target_tag" "$target_date"; then
+    return 0
   fi
 
   xmj_render_version_progress \
@@ -884,51 +1368,132 @@ xmj_version_run_switch() {
   return 1
 }
 
-xmj_run_tavern_version_switch() {
+xmj_branch_run_switch() {
+  local selected_index="${1:-0}"
+  local selected_number='0'
+  local array_index='0'
+  local target_branch=''
+  local detail_text=''
+
+  selected_number=$((10#$selected_index))
+  array_index=$((selected_number - 1))
+  if [ "$array_index" -lt 0 ] || [ "$array_index" -ge "${#XMJ_VERSION_BRANCHES[@]}" ]; then
+    xmj_version_set_notice 'warn' '输入的序号不在当前分支列表里，请重新选择。'
+    return 0
+  fi
+
+  target_branch="${XMJ_VERSION_BRANCHES[$array_index]}"
+  XMJ_VERSION_TARGET_BRANCH="$target_branch"
+
+  if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ] && [ "$target_branch" = "$XMJ_VERSION_CURRENT_BRANCH" ]; then
+    XMJ_VERSION_STAGE='done'
+    XMJ_VERSION_SUMMARY="当前已经在分支 ${target_branch}"
+    XMJ_VERSION_DETAIL='无需重复切换。'
+    xmj_render_version_result \
+      'success' \
+      'done' \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
+  if ! xmj_version_confirm_backup_ack 'branch' "$target_branch" ''; then
+    return 0
+  fi
+
+  xmj_render_version_progress \
+    'switch' \
+    'running' \
+    '切换分支' \
+    "猫猫正在把酒馆切到分支 ${target_branch} 喵~ 如有本地改动会先自动收好。"
+
+  if ! xmj_version_prepare_local_changes; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
+  if ! xmj_branch_checkout_target "$target_branch"; then
+    if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+      if xmj_version_restore_local_changes; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        if [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ] && [ "${XMJ_VERSION_RESTORE_NOTE}" != '无需放回本地改动。' ]; then
+          detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        fi
+        XMJ_VERSION_DETAIL="$detail_text"
+      elif [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ]; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        XMJ_VERSION_DETAIL="$detail_text"
+      fi
+    fi
+
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
+  xmj_render_version_progress \
+    'deps' \
+    'running' \
+    '同步依赖' \
+    '分支已经切过去了，正在确认依赖是否需要整理。'
+
+  if ! xmj_version_sync_dependencies; then
+    if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+      if xmj_version_restore_local_changes; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        if [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ] && [ "${XMJ_VERSION_RESTORE_NOTE}" != '无需放回本地改动。' ]; then
+          detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        fi
+        XMJ_VERSION_DETAIL="$detail_text"
+      elif [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ]; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        XMJ_VERSION_DETAIL="$detail_text"
+      fi
+    fi
+
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
+  if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+    if ! xmj_version_restore_local_changes; then
+      xmj_version_log_line '分支已切换成功，但本地改动未自动放回。'
+    fi
+  fi
+
+  XMJ_VERSION_STAGE='done'
+  XMJ_VERSION_SUMMARY="已切换到分支 ${XMJ_VERSION_CURRENT_BRANCH:-$target_branch}"
+  XMJ_VERSION_DETAIL="$(xmj_branch_target_detail)"
+  xmj_version_log_line "结果摘要：$XMJ_VERSION_SUMMARY"
+  xmj_version_log_line "结果说明：$XMJ_VERSION_DETAIL"
+
+  xmj_render_version_result \
+    'success' \
+    'done' \
+    "$XMJ_VERSION_SUMMARY" \
+    "$XMJ_VERSION_DETAIL"
+  return 1
+}
+
+xmj_run_version_catalog() {
   local input=''
 
-  xmj_version_reset_state
-
-  xmj_render_version_progress \
-    'prepare' \
-    'running' \
-    '准备中' \
-    '猫猫正在整理版本抽屉与切换纸条喵~'
-
-  if ! xmj_version_prepare_log_file; then
-    xmj_render_version_result \
-      'failure' \
-      'prepare' \
-      '无法创建版本切换日志' \
-      '请检查脚本目录的写入权限后再试。'
-    return 0
-  fi
-
-  xmj_version_log_line '开始执行 03 切换版本。'
-
-  xmj_render_version_progress \
-    'env' \
-    'running' \
-    '检查环境' \
-    '正在确认路径、Git 和仓库状态。'
-
-  if ! xmj_version_check_environment; then
-    xmj_render_version_result \
-      'failure' \
-      "$XMJ_VERSION_STAGE" \
-      "$XMJ_VERSION_SUMMARY" \
-      "$XMJ_VERSION_DETAIL"
-    return 0
-  fi
-
-  if ! xmj_version_check_repository; then
-    xmj_render_version_result \
-      'failure' \
-      "$XMJ_VERSION_STAGE" \
-      "$XMJ_VERSION_SUMMARY" \
-      "$XMJ_VERSION_DETAIL"
-    return 0
-  fi
+  XMJ_VERSION_ACTIVE_MODE='version'
+  XMJ_VERSION_PAGE='1'
+  xmj_version_clear_notice
 
   if ! xmj_version_refresh_catalog; then
     xmj_render_version_result \
@@ -936,7 +1501,7 @@ xmj_run_tavern_version_switch() {
       "$XMJ_VERSION_STAGE" \
       "$XMJ_VERSION_SUMMARY" \
       "$XMJ_VERSION_DETAIL"
-    return 0
+    return 1
   fi
 
   while true; do
@@ -945,10 +1510,11 @@ xmj_run_tavern_version_switch() {
     input="${XMJ_LAST_INPUT:-}"
 
     case "$input" in
-      '' )
+      '')
         xmj_version_set_notice 'warn' '请输入版本序号，或使用 n / p / r / 0。'
         ;;
       0)
+        xmj_version_clear_notice
         return 0
         ;;
       n|N)
@@ -974,7 +1540,7 @@ xmj_run_tavern_version_switch() {
             "$XMJ_VERSION_STAGE" \
             "$XMJ_VERSION_SUMMARY" \
             "$XMJ_VERSION_DETAIL"
-          return 0
+          return 1
         fi
         xmj_version_set_notice 'info' '版本列表已刷新。'
         ;;
@@ -986,7 +1552,158 @@ xmj_run_tavern_version_switch() {
         if ! xmj_version_run_switch "$input"; then
           continue
         fi
+        return 1
+        ;;
+    esac
+  done
+}
+
+xmj_run_branch_catalog() {
+  local input=''
+
+  XMJ_VERSION_ACTIVE_MODE='branch'
+  XMJ_VERSION_PAGE='1'
+  xmj_version_clear_notice
+
+  if ! xmj_branch_refresh_catalog; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
+  while true; do
+    xmj_render_branch_list_page
+    xmj_branch_prompt_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      '')
+        xmj_version_set_notice 'warn' '请输入分支序号，或使用 n / p / r / 0。'
+        ;;
+      0)
+        xmj_version_clear_notice
         return 0
+        ;;
+      n|N)
+        if [ "${XMJ_VERSION_PAGE:-1}" -lt "${XMJ_VERSION_TOTAL_PAGES:-1}" ]; then
+          XMJ_VERSION_PAGE=$((XMJ_VERSION_PAGE + 1))
+          xmj_version_clear_notice
+        else
+          xmj_version_set_notice 'warn' '已经是最后一页了。'
+        fi
+        ;;
+      p|P)
+        if [ "${XMJ_VERSION_PAGE:-1}" -gt 1 ]; then
+          XMJ_VERSION_PAGE=$((XMJ_VERSION_PAGE - 1))
+          xmj_version_clear_notice
+        else
+          xmj_version_set_notice 'warn' '已经是第一页了。'
+        fi
+        ;;
+      r|R)
+        if ! xmj_branch_refresh_catalog; then
+          xmj_render_version_result \
+            'failure' \
+            "$XMJ_VERSION_STAGE" \
+            "$XMJ_VERSION_SUMMARY" \
+            "$XMJ_VERSION_DETAIL"
+          return 1
+        fi
+        xmj_version_set_notice 'info' '分支列表已刷新。'
+        ;;
+      *[!0-9]*)
+        xmj_version_set_notice 'warn' '仅支持输入分支序号，或使用 n / p / r / 0。'
+        ;;
+      *)
+        xmj_version_clear_notice
+        if ! xmj_branch_run_switch "$input"; then
+          continue
+        fi
+        return 1
+        ;;
+    esac
+  done
+}
+
+xmj_run_tavern_version_switch() {
+  local input=''
+
+  xmj_version_reset_state
+
+  xmj_render_version_progress \
+    'prepare' \
+    'running' \
+    '准备中' \
+    '猫猫正在整理版本抽屉与切换纸条喵~'
+
+  if ! xmj_version_prepare_log_file; then
+    xmj_render_version_result \
+      'failure' \
+      'prepare' \
+      '无法创建版本切换日志' \
+      '请检查脚本目录的写入权限后再试。'
+    return 0
+  fi
+
+  xmj_version_log_line '开始执行 03 切换版本 / 分支。'
+
+  xmj_render_version_progress \
+    'env' \
+    'running' \
+    '检查环境' \
+    '正在确认路径、Git 和仓库状态。'
+
+  if ! xmj_version_check_environment; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 0
+  fi
+
+  if ! xmj_version_check_repository; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 0
+  fi
+
+  xmj_version_clear_selector_notice
+
+  while true; do
+    xmj_render_switch_mode_page
+    xmj_version_prompt_mode_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      '')
+        xmj_version_set_selector_notice 'warn' '请选择要切换的类型：1 版本，2 分支，0 返回首页。'
+        ;;
+      0)
+        return 0
+        ;;
+      1)
+        xmj_version_clear_selector_notice
+        if xmj_run_version_catalog; then
+          continue
+        fi
+        return 0
+        ;;
+      2)
+        xmj_version_clear_selector_notice
+        if xmj_run_branch_catalog; then
+          continue
+        fi
+        return 0
+        ;;
+      *)
+        xmj_version_set_selector_notice 'warn' '这里只支持输入 1 / 2 / 0。'
         ;;
     esac
   done

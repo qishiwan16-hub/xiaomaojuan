@@ -22,6 +22,11 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_ENTRY_URL=''
   XMJ_LAUNCH_PID=''
   XMJ_LAUNCH_EXIT_CODE=''
+  XMJ_LAUNCH_TAVERN_VERSION=''
+  XMJ_LAUNCH_TAVERN_BRANCH=''
+  XMJ_LAUNCH_TAVERN_COMMIT=''
+  XMJ_LAUNCH_TAVERN_TAG=''
+  XMJ_LAUNCH_TAVERN_DESCRIBE=''
   XMJ_LAUNCH_INTERRUPT='0'
   XMJ_LAUNCH_WAITED='0'
   XMJ_LAUNCH_USE_PGID='0'
@@ -142,6 +147,66 @@ xmj_launch_endpoint_available() {
   return 1
 }
 
+xmj_launch_update_tavern_state() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local repo_flag=''
+  local branch_name=''
+  local describe_name=''
+  local exact_tag=''
+  local commit_name=''
+
+  XMJ_LAUNCH_TAVERN_VERSION=''
+  XMJ_LAUNCH_TAVERN_BRANCH=''
+  XMJ_LAUNCH_TAVERN_COMMIT=''
+  XMJ_LAUNCH_TAVERN_TAG=''
+  XMJ_LAUNCH_TAVERN_DESCRIBE=''
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    return 0
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    xmj_launch_log_line '未检测到 Git，启动页将跳过酒馆版本信息。'
+    return 0
+  fi
+
+  repo_flag="$(git -C "$repo_path" rev-parse --is-inside-work-tree 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+  if [ "$repo_flag" != 'true' ]; then
+    xmj_launch_log_line '当前目录不是 Git 仓库，启动页将跳过酒馆版本信息。'
+    return 0
+  fi
+
+  commit_name="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+  branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+  describe_name="$(git -C "$repo_path" describe --tags --always --dirty 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+  exact_tag="$(git -C "$repo_path" describe --tags --exact-match 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+
+  XMJ_LAUNCH_TAVERN_COMMIT="${commit_name:-unknown}"
+  XMJ_LAUNCH_TAVERN_TAG="$exact_tag"
+  XMJ_LAUNCH_TAVERN_DESCRIBE="$describe_name"
+
+  if [ -n "$exact_tag" ]; then
+    XMJ_LAUNCH_TAVERN_VERSION="$exact_tag"
+  elif [ -n "$describe_name" ]; then
+    XMJ_LAUNCH_TAVERN_VERSION="$describe_name"
+  elif [ -n "$commit_name" ]; then
+    XMJ_LAUNCH_TAVERN_VERSION="$commit_name"
+  else
+    XMJ_LAUNCH_TAVERN_VERSION='未知'
+  fi
+
+  if [ -n "$branch_name" ]; then
+    XMJ_LAUNCH_TAVERN_BRANCH="$branch_name"
+  else
+    XMJ_LAUNCH_TAVERN_BRANCH='detached'
+  fi
+
+  xmj_launch_log_line "酒馆版本：${XMJ_LAUNCH_TAVERN_VERSION}"
+  xmj_launch_log_line "酒馆分支：${XMJ_LAUNCH_TAVERN_BRANCH}"
+  xmj_launch_log_line "当前提交：${XMJ_LAUNCH_TAVERN_COMMIT}"
+  return 0
+}
+
 xmj_launch_check_environment() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
@@ -155,6 +220,7 @@ xmj_launch_check_environment() {
     return 1
   fi
 
+  xmj_launch_update_tavern_state
   xmj_launch_log_line '酒馆目录检查通过。'
   return 0
 }

@@ -102,7 +102,7 @@ xmj_load_menu_data() {
 
   XMJ_MENU_LABEL['01']='启动酒馆'
   XMJ_MENU_LABEL['02']='一键更新'
-  XMJ_MENU_LABEL['03']='切换版本'
+  XMJ_MENU_LABEL['03']='切换版本 / 分支'
   XMJ_MENU_LABEL['04']='卸载重装'
   XMJ_MENU_LABEL['05']='更新记录'
   XMJ_MENU_LABEL['06']='教程说明'

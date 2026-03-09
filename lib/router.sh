@@ -3,7 +3,7 @@ xmj_exit_panel() {
   xmj_render_header
   printf '\n'
   printf '  %b小猫卷面板已退出。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b当前 01 启动酒馆、02 一键更新、03 切换版本已接入真实流程，其余功能仍在整理中。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
+  printf '  %b当前 01 启动酒馆、02 一键更新、03 切换版本 / 分支已接入真实流程，其余功能仍在整理中。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
   printf '\n'
 }
 
