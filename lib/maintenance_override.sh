@@ -908,19 +908,40 @@ xmj_maintenance_backup_dir() {
 }
 
 declare -ga XMJ_BACKUP_ARCHIVE_FILES=()
-XMJ_BACKUP_BUSY_PID=''
+
+xmj_backup_busy_tip() {
+  case "${1:-备份处理中}" in
+    '生成备份中')
+      printf '%s' '₍˄·͈༝·͈˄₎♡ 正在把数据、配置和扩展轻轻收进小口袋。'
+      ;;
+    '恢复备份中')
+      printf '%s' '₍ᐢ..ᐢ₎♡ 正在把记忆温柔放回原来的位置。'
+      ;;
+    '删除备份中')
+      printf '%s' '₍˃ ⤙ ˂₎੭ु⁾⁾ 正在悄悄移走这份旧备份。'
+      ;;
+    '清理旧档中')
+      printf '%s' 'ฅ^•ﻌ•^ฅ 正在整理旧档，只留下较新的几份。'
+      ;;
+    *)
+      printf '%s' '猫猫正在安静处理这份备份相关操作。'
+      ;;
+  esac
+}
 
 xmj_render_backup_busy_frame() {
   local action_text="${1:-备份处理中}"
-  local spinner_text="${2:-◜}"
+  local detail_text=''
+
+  detail_text="$(xmj_backup_busy_tip "$action_text")"
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title '备份处理中' 'backup motion' 'backup'
+  xmj_render_page_title '备份处理中' 'memory archive' 'backup'
   printf '\n'
-  xmj_render_setting_card "$action_text" '命令细节已隐藏，猫猫正在安静处理。' ''
+  xmj_render_setting_card "$action_text" '命令细节已隐藏，猫猫正在安静处理。' "$detail_text"
   printf '\n'
-  printf '  %b%s %s%b\n' "$XMJ_PINK" "$action_text" "$spinner_text" "$XMJ_RESET"
+  printf '  %b(ฅ́˘ฅ̀)♡ %s%b\n' "$XMJ_PINK" "$action_text" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
 }
@@ -928,32 +949,11 @@ xmj_render_backup_busy_frame() {
 xmj_backup_start_busy() {
   local action_text="${1:-备份处理中}"
 
-  xmj_backup_stop_busy
-  xmj_render_backup_busy_frame "$action_text" '◜'
-
-  (
-    trap 'exit 0' TERM INT
-    local frames=('◜' '◠' '◝' '◞' '◡' '◟')
-    local index='0'
-
-    while :; do
-      xmj_render_backup_busy_frame "$action_text" "${frames[$index]}"
-      sleep 0.12 2>/dev/null || sleep 1
-      index=$(((index + 1) % ${#frames[@]}))
-    done
-  ) &
-  XMJ_BACKUP_BUSY_PID="$!"
+  xmj_render_backup_busy_frame "$action_text"
 }
 
 xmj_backup_stop_busy() {
-  local pid="${XMJ_BACKUP_BUSY_PID:-}"
-
-  if [ -n "$pid" ]; then
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-  fi
-
-  XMJ_BACKUP_BUSY_PID=''
+  return 0
 }
 
 xmj_backup_notice_color() {
