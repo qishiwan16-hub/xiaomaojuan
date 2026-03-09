@@ -21,10 +21,15 @@ xmj_version_reset_state() {
   XMJ_VERSION_LOCAL_NOTE=''
   XMJ_VERSION_FETCH_NOTE=''
   XMJ_VERSION_DEPENDENCY_NOTE=''
+  XMJ_VERSION_BACKUP_FILE=''
+  XMJ_VERSION_BACKUP_NOTE=''
+  XMJ_VERSION_RECOVER_NOTE=''
   XMJ_VERSION_STASH_CREATED='0'
   XMJ_VERSION_STASH_REF=''
   XMJ_VERSION_STASH_LABEL=''
   XMJ_VERSION_RESTORE_NOTE=''
+  XMJ_VERSION_BEFORE_VERSION=''
+  XMJ_VERSION_BEFORE_COMMIT=''
   XMJ_VERSION_CURRENT_LABEL=''
   XMJ_VERSION_CURRENT_VERSION=''
   XMJ_VERSION_CURRENT_TAG=''
@@ -102,6 +107,23 @@ xmj_version_fail() {
   xmj_version_log_line "失败摘要：$summary"
   xmj_version_log_line "失败说明：$detail"
   return 1
+}
+
+xmj_version_append_detail() {
+  local base_text="${1:-}"
+  local extra_text="${2:-}"
+
+  if [ -z "$extra_text" ]; then
+    printf '%s' "$base_text"
+    return 0
+  fi
+
+  if [ -z "$base_text" ]; then
+    printf '%s' "$extra_text"
+    return 0
+  fi
+
+  printf '%s %s' "$base_text" "$extra_text"
 }
 
 xmj_version_clear_notice() {
@@ -298,6 +320,8 @@ xmj_version_check_repository() {
   fi
 
   xmj_version_update_current_state
+  XMJ_VERSION_BEFORE_VERSION="$XMJ_VERSION_CURRENT_VERSION"
+  XMJ_VERSION_BEFORE_COMMIT="$XMJ_VERSION_CURRENT_COMMIT"
   xmj_version_log_line "当前版本：${XMJ_VERSION_CURRENT_LABEL:-unknown}"
   xmj_version_log_line "当前提交：${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
   return 0
@@ -367,6 +391,31 @@ xmj_version_restore_local_changes() {
   fi
   xmj_version_log_line "$XMJ_VERSION_RESTORE_NOTE"
   return 1
+}
+
+xmj_version_run_backup() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if ! xmj_maintenance_create_backup "$repo_path" 'xmj_version_log_line' "$XMJ_VERSION_LOG_FILE" '版本切换'; then
+    xmj_version_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成 zip 备份。}"
+    return 1
+  fi
+
+  XMJ_VERSION_BACKUP_FILE="$XMJ_MAINT_BACKUP_FILE"
+  XMJ_VERSION_BACKUP_NOTE="$XMJ_MAINT_BACKUP_NOTE"
+  return 0
+}
+
+xmj_version_run_recover() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if ! xmj_maintenance_restore_backup "$repo_path" 'xmj_version_log_line' "$XMJ_VERSION_LOG_FILE"; then
+    xmj_version_fail 'recover' '恢复备份失败' "${XMJ_MAINT_LAST_ERROR:-备份压缩包没有顺利恢复。}"
+    return 1
+  fi
+
+  XMJ_VERSION_RECOVER_NOTE="$XMJ_MAINT_BACKUP_RESTORE_NOTE"
+  return 0
 }
 
 xmj_version_fetch_tags() {
@@ -661,9 +710,13 @@ xmj_version_stage_order() {
     prepare) printf '%s' '1' ;;
     env) printf '%s' '2' ;;
     fetch) printf '%s' '3' ;;
-    switch) printf '%s' '4' ;;
-    deps) printf '%s' '5' ;;
-    done) printf '%s' '6' ;;
+    backup) printf '%s' '4' ;;
+    local) printf '%s' '5' ;;
+    switch) printf '%s' '6' ;;
+    deps) printf '%s' '7' ;;
+    recover) printf '%s' '8' ;;
+    restore) printf '%s' '9' ;;
+    done) printf '%s' '10' ;;
     *) printf '%s' '0' ;;
   esac
 }
@@ -673,8 +726,12 @@ xmj_version_stage_label() {
     prepare) printf '%s' '准备中' ;;
     env) printf '%s' '检查环境' ;;
     fetch) printf '%s' '整理版本列表' ;;
+    backup) printf '%s' '自动备份' ;;
+    local) printf '%s' '整理本地改动' ;;
     switch) printf '%s' '切换版本' ;;
     deps) printf '%s' '同步依赖' ;;
+    recover) printf '%s' '恢复备份' ;;
+    restore) printf '%s' '放回本地改动' ;;
     done) printf '%s' '完成' ;;
     *) printf '%s' '切换版本' ;;
   esac
@@ -744,8 +801,12 @@ xmj_render_version_progress() {
   xmj_render_version_stage_line 'prepare' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'env' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'fetch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'local' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'switch' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'restore' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
 
   if [ -n "${XMJ_VERSION_LOG_FILE:-}" ]; then
@@ -786,13 +847,21 @@ xmj_render_version_result() {
   xmj_render_version_stage_line 'prepare' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'env' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'fetch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'local' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'switch' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'restore' "$current_stage" "$stage_mode"
   xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
 
   printf '\n'
   xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL:-未知}"
   xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+
+  if [ -n "${XMJ_VERSION_BACKUP_FILE:-}" ]; then
+    xmj_render_fact_line '自动备份' "$(xmj_display_path "$XMJ_VERSION_BACKUP_FILE")"
+  fi
 
   if [ -n "${XMJ_VERSION_TARGET_DATE:-}" ]; then
     xmj_render_fact_line '发行日期' "${XMJ_VERSION_TARGET_DATE}"
@@ -1027,65 +1096,6 @@ xmj_render_branch_list_page() {
   xmj_rule_line "$XMJ_BORDER" '─' 68
 }
 
-xmj_render_version_backup_confirm_page() {
-  local target_kind="${1:-version}"
-  local target_name="${2:-}"
-  local target_detail="${3:-}"
-  local title_text='目标版本'
-  local card_title='手动确认备份'
-  local card_desc=''
-  local risk_line='  %b• 切到标签版本后会停留在 detached HEAD。%b\n'
-
-  xmj_clear_screen
-  xmj_render_header
-  xmj_render_section_title 'update'
-  printf '\n'
-  xmj_render_page_identity '03' "${XMJ_MENU_LABEL['03']}"
-  printf '\n'
-  xmj_render_page_intro \
-    '正式切换前，需要你手动确认备份风险。' \
-    '自动备份功能后面再做，这一版不会替你生成版本切换备份。'
-  printf '\n'
-
-  case "$target_kind" in
-    branch)
-      title_text='目标分支'
-      card_desc="准备切到分支 ${target_name}。"
-      risk_line='  %b• 切换后会进入目标分支，并以该分支继续工作。%b\n'
-      ;;
-    *)
-      card_desc="准备切到 ${target_name}（发行日期：${target_detail:-unknown-date}）。"
-      ;;
-  esac
-
-  xmj_render_setting_card \
-    "$card_title" \
-    "$card_desc" \
-    '请先确认你已经自行备份，或明确接受这次不做备份直接切换。'
-  printf '\n'
-  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
-  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
-  xmj_render_fact_line "$title_text" "$target_name"
-
-  if [ "$target_kind" = 'version' ]; then
-    xmj_render_fact_line '发行日期' "${target_detail:-unknown-date}"
-  fi
-
-  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
-    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
-  fi
-
-  printf '\n'
-  printf '  %b♡ 风险提醒%b\n' "$XMJ_PINK" "$XMJ_RESET"
-  printf "$risk_line" "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b• 当前不会自动做切换前备份。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b• 如检测到本地改动，仍会先自动收好再尽量放回。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '\n'
-  printf '  %b输入 y 继续切换；输入其它任意内容取消并返回列表。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
-  printf '\n'
-  xmj_rule_line "$XMJ_BORDER" '─' 68
-}
-
 xmj_version_prompt_input() {
   printf '%b%s%b' "$XMJ_PINK_SOFT" '  版本序号 / n / p / r / 0 > ' "$XMJ_RESET"
   IFS= read -r XMJ_LAST_INPUT
@@ -1101,37 +1111,19 @@ xmj_version_prompt_mode_input() {
   IFS= read -r XMJ_LAST_INPUT
 }
 
-xmj_version_prompt_backup_confirm_input() {
-  printf '%b%s%b' "$XMJ_PINK_SOFT" '  我已确认备份风险（y / 其它取消）> ' "$XMJ_RESET"
-  IFS= read -r XMJ_LAST_INPUT
-}
-
-xmj_version_confirm_backup_ack() {
-  local target_kind="${1:-version}"
-  local target_name="${2:-}"
-  local target_detail="${3:-}"
-  local input=''
-
-  xmj_render_version_backup_confirm_page "$target_kind" "$target_name" "$target_detail"
-  xmj_version_prompt_backup_confirm_input
-  input="${XMJ_LAST_INPUT:-}"
-
-  case "$input" in
-    y|Y|yes|YES|Yes)
-      return 0
-      ;;
-    *)
-      xmj_version_set_notice 'info' '已取消这次切换。等你手动确认备份后再选版本即可。'
-      return 1
-      ;;
-  esac
-}
-
 xmj_version_target_detail() {
   local detail_text=''
 
   detail_text="发行日期：${XMJ_VERSION_TARGET_DATE:-unknown-date}。"
   detail_text="${detail_text} 当前会停留在标签版本上，后续若要继续跟随更新，建议再切回主分支。"
+
+  if [ -n "${XMJ_VERSION_BACKUP_NOTE:-}" ]; then
+    detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_BACKUP_NOTE")"
+  fi
+
+  if [ -n "${XMJ_VERSION_RECOVER_NOTE:-}" ]; then
+    detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_RECOVER_NOTE")"
+  fi
 
   case "${XMJ_VERSION_RESTORE_NOTE:-}" in
     ''|'无需放回本地改动。')
@@ -1150,6 +1142,14 @@ xmj_branch_target_detail() {
   detail_text="当前已切到分支 ${XMJ_VERSION_TARGET_BRANCH:-unknown}。"
   detail_text="${detail_text} 最常用默认分支仍是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。"
 
+  if [ -n "${XMJ_VERSION_BACKUP_NOTE:-}" ]; then
+    detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_BACKUP_NOTE")"
+  fi
+
+  if [ -n "${XMJ_VERSION_RECOVER_NOTE:-}" ]; then
+    detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_RECOVER_NOTE")"
+  fi
+
   case "${XMJ_VERSION_RESTORE_NOTE:-}" in
     ''|'无需放回本地改动。')
       ;;
@@ -1159,6 +1159,29 @@ xmj_branch_target_detail() {
   esac
 
   printf '%s' "$detail_text"
+}
+
+xmj_version_write_history() {
+  local action_kind=''
+  local note_text=''
+
+  action_kind="$(xmj_maintenance_classify_change "${XMJ_SILLYTAVERN_PATH:-}" "${XMJ_VERSION_BEFORE_COMMIT:-}" "${XMJ_VERSION_CURRENT_COMMIT:-}" "$XMJ_VERSION_LOG_FILE")"
+  if [ -z "$action_kind" ]; then
+    xmj_version_log_line '本次切换没有产生新的版本变化，跳过写入更新记录。'
+    return 0
+  fi
+
+  if [ "${XMJ_VERSION_ACTIVE_MODE:-version}" = 'branch' ]; then
+    note_text="切换分支：${XMJ_VERSION_CURRENT_BRANCH:-unknown}。提交：${XMJ_VERSION_BEFORE_COMMIT:-unknown} -> ${XMJ_VERSION_CURRENT_COMMIT:-unknown}。"
+  else
+    note_text="切换版本：${XMJ_VERSION_TARGET_TAG:-unknown}。提交：${XMJ_VERSION_BEFORE_COMMIT:-unknown} -> ${XMJ_VERSION_CURRENT_COMMIT:-unknown}。"
+  fi
+
+  if ! xmj_maintenance_record_history "$action_kind" "${XMJ_VERSION_CURRENT_VERSION:-未知}" "$note_text" 'xmj_version_log_line'; then
+    xmj_version_log_line "更新记录写入失败：${XMJ_MAINT_LAST_ERROR:-unknown}"
+  fi
+
+  return 0
 }
 
 xmj_version_sync_dependencies() {
@@ -1263,7 +1286,9 @@ xmj_version_run_switch() {
   target_tag="${XMJ_VERSION_TAGS[$array_index]}"
   target_date="${XMJ_VERSION_TAG_DATES[$array_index]}"
   XMJ_VERSION_TARGET_TAG="$target_tag"
+  XMJ_VERSION_TARGET_BRANCH=''
   XMJ_VERSION_TARGET_DATE="$target_date"
+  XMJ_VERSION_TARGET_KIND='version'
 
   if [ -n "${XMJ_VERSION_CURRENT_TAG:-}" ] && [ "$target_tag" = "$XMJ_VERSION_CURRENT_TAG" ]; then
     XMJ_VERSION_STAGE='done'
@@ -1277,9 +1302,29 @@ xmj_version_run_switch() {
     return 1
   fi
 
-  if ! xmj_version_confirm_backup_ack 'version' "$target_tag" "$target_date"; then
-    return 0
+  XMJ_VERSION_BEFORE_VERSION="$XMJ_VERSION_CURRENT_VERSION"
+  XMJ_VERSION_BEFORE_COMMIT="$XMJ_VERSION_CURRENT_COMMIT"
+
+  xmj_render_version_progress \
+    'backup' \
+    'running' \
+    '自动备份' \
+    '正在把 data、third-party 和 config.yaml 打包成 zip 备份。'
+
+  if ! xmj_version_run_backup; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
   fi
+
+  xmj_render_version_progress \
+    'local' \
+    'running' \
+    '整理本地改动' \
+    '若检测到未提交内容，会先轻轻收进临时口袋。'
 
   xmj_render_version_progress \
     'switch' \
@@ -1297,6 +1342,18 @@ xmj_version_run_switch() {
   fi
 
   if ! xmj_version_checkout_target "$target_tag"; then
+    if [ -n "${XMJ_VERSION_BACKUP_FILE:-}" ]; then
+      xmj_render_version_progress \
+        'recover' \
+        'running' \
+        '恢复备份' \
+        '切换没有完成，先把自动备份的内容覆盖恢复回来。'
+
+      if xmj_version_run_recover; then
+        XMJ_VERSION_DETAIL="$(xmj_version_append_detail "$XMJ_VERSION_DETAIL" "$XMJ_VERSION_RECOVER_NOTE")"
+      fi
+    fi
+
     if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
       if xmj_version_restore_local_changes; then
         detail_text="${XMJ_VERSION_DETAIL}"
@@ -1326,6 +1383,18 @@ xmj_version_run_switch() {
     '版本已经切过去了，正在确认依赖是否需要整理。'
 
   if ! xmj_version_sync_dependencies; then
+    if [ -n "${XMJ_VERSION_BACKUP_FILE:-}" ]; then
+      xmj_render_version_progress \
+        'recover' \
+        'running' \
+        '恢复备份' \
+        '依赖整理没有完成，先把自动备份的内容覆盖恢复回来。'
+
+      if xmj_version_run_recover; then
+        XMJ_VERSION_DETAIL="$(xmj_version_append_detail "$XMJ_VERSION_DETAIL" "$XMJ_VERSION_RECOVER_NOTE")"
+      fi
+    fi
+
     if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
       if xmj_version_restore_local_changes; then
         detail_text="${XMJ_VERSION_DETAIL}"
@@ -1348,7 +1417,28 @@ xmj_version_run_switch() {
     return 1
   fi
 
+  xmj_render_version_progress \
+    'recover' \
+    'running' \
+    '恢复备份' \
+    '代码与依赖已经切换完成，正在把自动备份的内容覆盖恢复回来。'
+
+  if ! xmj_version_run_recover; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
   if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+    xmj_render_version_progress \
+      'restore' \
+      'running' \
+      '放回本地改动' \
+      '正在把刚才收好的本地改动放回原位。'
+
     if ! xmj_version_restore_local_changes; then
       xmj_version_log_line '版本已切换成功，但本地改动未自动放回。'
     fi
@@ -1357,6 +1447,7 @@ xmj_version_run_switch() {
   XMJ_VERSION_STAGE='done'
   XMJ_VERSION_SUMMARY="已切换到 ${XMJ_VERSION_CURRENT_LABEL:-$target_tag}"
   XMJ_VERSION_DETAIL="$(xmj_version_target_detail)"
+  xmj_version_write_history
   xmj_version_log_line "结果摘要：$XMJ_VERSION_SUMMARY"
   xmj_version_log_line "结果说明：$XMJ_VERSION_DETAIL"
 
@@ -1383,7 +1474,10 @@ xmj_branch_run_switch() {
   fi
 
   target_branch="${XMJ_VERSION_BRANCHES[$array_index]}"
+  XMJ_VERSION_TARGET_TAG=''
   XMJ_VERSION_TARGET_BRANCH="$target_branch"
+  XMJ_VERSION_TARGET_DATE=''
+  XMJ_VERSION_TARGET_KIND='branch'
 
   if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ] && [ "$target_branch" = "$XMJ_VERSION_CURRENT_BRANCH" ]; then
     XMJ_VERSION_STAGE='done'
@@ -1397,9 +1491,29 @@ xmj_branch_run_switch() {
     return 1
   fi
 
-  if ! xmj_version_confirm_backup_ack 'branch' "$target_branch" ''; then
-    return 0
+  XMJ_VERSION_BEFORE_VERSION="$XMJ_VERSION_CURRENT_VERSION"
+  XMJ_VERSION_BEFORE_COMMIT="$XMJ_VERSION_CURRENT_COMMIT"
+
+  xmj_render_version_progress \
+    'backup' \
+    'running' \
+    '自动备份' \
+    '正在把 data、third-party 和 config.yaml 打包成 zip 备份。'
+
+  if ! xmj_version_run_backup; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
   fi
+
+  xmj_render_version_progress \
+    'local' \
+    'running' \
+    '整理本地改动' \
+    '若检测到未提交内容，会先轻轻收进临时口袋。'
 
   xmj_render_version_progress \
     'switch' \
@@ -1417,6 +1531,18 @@ xmj_branch_run_switch() {
   fi
 
   if ! xmj_branch_checkout_target "$target_branch"; then
+    if [ -n "${XMJ_VERSION_BACKUP_FILE:-}" ]; then
+      xmj_render_version_progress \
+        'recover' \
+        'running' \
+        '恢复备份' \
+        '切换没有完成，先把自动备份的内容覆盖恢复回来。'
+
+      if xmj_version_run_recover; then
+        XMJ_VERSION_DETAIL="$(xmj_version_append_detail "$XMJ_VERSION_DETAIL" "$XMJ_VERSION_RECOVER_NOTE")"
+      fi
+    fi
+
     if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
       if xmj_version_restore_local_changes; then
         detail_text="${XMJ_VERSION_DETAIL}"
@@ -1446,6 +1572,18 @@ xmj_branch_run_switch() {
     '分支已经切过去了，正在确认依赖是否需要整理。'
 
   if ! xmj_version_sync_dependencies; then
+    if [ -n "${XMJ_VERSION_BACKUP_FILE:-}" ]; then
+      xmj_render_version_progress \
+        'recover' \
+        'running' \
+        '恢复备份' \
+        '依赖整理没有完成，先把自动备份的内容覆盖恢复回来。'
+
+      if xmj_version_run_recover; then
+        XMJ_VERSION_DETAIL="$(xmj_version_append_detail "$XMJ_VERSION_DETAIL" "$XMJ_VERSION_RECOVER_NOTE")"
+      fi
+    fi
+
     if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
       if xmj_version_restore_local_changes; then
         detail_text="${XMJ_VERSION_DETAIL}"
@@ -1468,7 +1606,28 @@ xmj_branch_run_switch() {
     return 1
   fi
 
+  xmj_render_version_progress \
+    'recover' \
+    'running' \
+    '恢复备份' \
+    '代码与依赖已经切换完成，正在把自动备份的内容覆盖恢复回来。'
+
+  if ! xmj_version_run_recover; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
+
   if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+    xmj_render_version_progress \
+      'restore' \
+      'running' \
+      '放回本地改动' \
+      '正在把刚才收好的本地改动放回原位。'
+
     if ! xmj_version_restore_local_changes; then
       xmj_version_log_line '分支已切换成功，但本地改动未自动放回。'
     fi
@@ -1477,6 +1636,7 @@ xmj_branch_run_switch() {
   XMJ_VERSION_STAGE='done'
   XMJ_VERSION_SUMMARY="已切换到分支 ${XMJ_VERSION_CURRENT_BRANCH:-$target_branch}"
   XMJ_VERSION_DETAIL="$(xmj_branch_target_detail)"
+  xmj_version_write_history
   xmj_version_log_line "结果摘要：$XMJ_VERSION_SUMMARY"
   xmj_version_log_line "结果说明：$XMJ_VERSION_DETAIL"
 

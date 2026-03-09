@@ -15,6 +15,8 @@ source "$XMJ_ROOT_DIR/lib/font.sh"
 source "$XMJ_ROOT_DIR/lib/menu_data.sh"
 # shellcheck source=lib/render.sh
 source "$XMJ_ROOT_DIR/lib/render.sh"
+# shellcheck source=lib/maintenance.sh
+source "$XMJ_ROOT_DIR/lib/maintenance.sh"
 # shellcheck source=lib/update.sh
 source "$XMJ_ROOT_DIR/lib/update.sh"
 # shellcheck source=lib/version_switch.sh

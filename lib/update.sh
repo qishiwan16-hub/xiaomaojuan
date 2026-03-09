@@ -15,9 +15,14 @@ xmj_update_reset_state() {
   XMJ_UPDATE_SUMMARY=''
   XMJ_UPDATE_DETAIL=''
   XMJ_UPDATE_BRANCH=''
+  XMJ_UPDATE_BEFORE_VERSION=''
+  XMJ_UPDATE_AFTER_VERSION=''
   XMJ_UPDATE_BEFORE_COMMIT=''
   XMJ_UPDATE_AFTER_COMMIT=''
   XMJ_UPDATE_DEPENDENCY_NOTE=''
+  XMJ_UPDATE_BACKUP_FILE=''
+  XMJ_UPDATE_BACKUP_NOTE=''
+  XMJ_UPDATE_RECOVER_NOTE=''
   XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
   XMJ_UPDATE_LOCAL_NOTE=''
   XMJ_UPDATE_STASH_CREATED='0'
@@ -77,6 +82,23 @@ xmj_update_fail() {
   return 1
 }
 
+xmj_update_append_detail() {
+  local base_text="${1:-}"
+  local extra_text="${2:-}"
+
+  if [ -z "$extra_text" ]; then
+    printf '%s' "$base_text"
+    return 0
+  fi
+
+  if [ -z "$base_text" ]; then
+    printf '%s' "$extra_text"
+    return 0
+  fi
+
+  printf '%s %s' "$base_text" "$extra_text"
+}
+
 xmj_update_check_environment() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
@@ -116,6 +138,7 @@ xmj_update_check_repository() {
     return 1
   fi
 
+  XMJ_UPDATE_BEFORE_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
   XMJ_UPDATE_BEFORE_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
   worktree_state="$(git -C "$repo_path" status --porcelain 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
 
@@ -174,6 +197,31 @@ xmj_update_prepare_local_changes() {
   return 0
 }
 
+xmj_update_run_backup() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if ! xmj_maintenance_create_backup "$repo_path" 'xmj_update_log_line' "$XMJ_UPDATE_LOG_FILE" '一键更新'; then
+    xmj_update_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成 zip 备份。}"
+    return 1
+  fi
+
+  XMJ_UPDATE_BACKUP_FILE="$XMJ_MAINT_BACKUP_FILE"
+  XMJ_UPDATE_BACKUP_NOTE="$XMJ_MAINT_BACKUP_NOTE"
+  return 0
+}
+
+xmj_update_run_recover() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if ! xmj_maintenance_restore_backup "$repo_path" 'xmj_update_log_line' "$XMJ_UPDATE_LOG_FILE"; then
+    xmj_update_fail 'recover' '恢复备份失败' "${XMJ_MAINT_LAST_ERROR:-备份压缩包没有顺利恢复。}"
+    return 1
+  fi
+
+  XMJ_UPDATE_RECOVER_NOTE="$XMJ_MAINT_BACKUP_RESTORE_NOTE"
+  return 0
+}
+
 xmj_update_restore_local_changes() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
@@ -221,7 +269,9 @@ xmj_update_pull_repository() {
   fi
 
   XMJ_UPDATE_AFTER_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  XMJ_UPDATE_AFTER_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
   xmj_update_log_line "更新后提交：${XMJ_UPDATE_AFTER_COMMIT:-unknown}"
+  xmj_update_log_line "更新后版本：${XMJ_UPDATE_AFTER_VERSION:-unknown}"
   return 0
 }
 
@@ -272,13 +322,45 @@ xmj_update_success_summary() {
 }
 
 xmj_update_success_detail() {
+  local detail_text=''
+
+  if [ -n "${XMJ_UPDATE_BACKUP_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BACKUP_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_RECOVER_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RECOVER_NOTE")"
+  fi
+
   if [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ] \
     && [ "$XMJ_UPDATE_RESTORE_NOTE" = '本地改动已自动放回。' ]; then
-    printf '%s' "$XMJ_UPDATE_RESTORE_NOTE"
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RESTORE_NOTE")"
+  fi
+
+  printf '%s' "$detail_text"
+}
+
+xmj_update_write_history() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local action_kind=''
+  local note_text=''
+
+  action_kind="$(xmj_maintenance_classify_change "$repo_path" "${XMJ_UPDATE_BEFORE_COMMIT:-}" "${XMJ_UPDATE_AFTER_COMMIT:-}" "$XMJ_UPDATE_LOG_FILE")"
+  if [ -z "$action_kind" ]; then
+    xmj_update_log_line '本次没有产生新的版本变化，跳过写入更新记录。'
     return 0
   fi
 
-  printf '%s' ''
+  if [ -z "${XMJ_UPDATE_AFTER_VERSION:-}" ]; then
+    XMJ_UPDATE_AFTER_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
+  fi
+
+  note_text="分支：${XMJ_UPDATE_BRANCH:-unknown}。提交：${XMJ_UPDATE_BEFORE_COMMIT:-unknown} -> ${XMJ_UPDATE_AFTER_COMMIT:-unknown}。"
+  if ! xmj_maintenance_record_history "$action_kind" "${XMJ_UPDATE_AFTER_VERSION:-未知}" "$note_text" 'xmj_update_log_line'; then
+    xmj_update_log_line "更新记录写入失败：${XMJ_MAINT_LAST_ERROR:-unknown}"
+  fi
+
+  return 0
 }
 
 xmj_run_tavern_update() {
@@ -347,6 +429,26 @@ xmj_run_tavern_update() {
   fi
 
   xmj_render_update_progress \
+    'backup' \
+    'running' \
+    '自动备份' \
+    '正在把 data、third-party 和 config.yaml 打包成 zip 备份。'
+
+  if ! xmj_update_run_backup; then
+    xmj_render_update_result \
+      'failure' \
+      "$XMJ_UPDATE_STAGE" \
+      "$XMJ_UPDATE_SUMMARY" \
+      "$XMJ_UPDATE_DETAIL" \
+      "$XMJ_UPDATE_BRANCH" \
+      "$XMJ_UPDATE_BEFORE_COMMIT" \
+      "$XMJ_UPDATE_AFTER_COMMIT" \
+      "$XMJ_UPDATE_LOG_FILE" \
+      "${XMJ_SILLYTAVERN_PATH:-}"
+    return 0
+  fi
+
+  xmj_render_update_progress \
     'local' \
     'running' \
     '整理本地改动' \
@@ -379,6 +481,21 @@ xmj_run_tavern_update() {
     "$XMJ_UPDATE_LOG_FILE"
 
   if ! xmj_update_pull_repository; then
+    if [ -n "${XMJ_UPDATE_BACKUP_FILE:-}" ]; then
+      xmj_render_update_progress \
+        'recover' \
+        'running' \
+        '恢复备份' \
+        '更新没有完成，先把自动备份的内容覆盖恢复回来。' \
+        "$XMJ_UPDATE_BRANCH" \
+        "${XMJ_SILLYTAVERN_PATH:-}" \
+        "$XMJ_UPDATE_LOG_FILE"
+
+      if xmj_update_run_recover; then
+        XMJ_UPDATE_DETAIL="$(xmj_update_append_detail "$XMJ_UPDATE_DETAIL" "$XMJ_UPDATE_RECOVER_NOTE")"
+      fi
+    fi
+
     if [ "${XMJ_UPDATE_STASH_CREATED:-0}" = '1' ]; then
       xmj_render_update_progress \
         'restore' \
@@ -392,7 +509,9 @@ xmj_run_tavern_update() {
       if xmj_update_restore_local_changes; then
         XMJ_UPDATE_STAGE='pull'
         XMJ_UPDATE_SUMMARY='拉取更新失败'
-        XMJ_UPDATE_DETAIL='远程内容没有顺利同步，本地改动已自动放回。可查看日志。'
+        XMJ_UPDATE_DETAIL='远程内容没有顺利同步。'
+        XMJ_UPDATE_DETAIL="$(xmj_update_append_detail "$XMJ_UPDATE_DETAIL" "${XMJ_UPDATE_RECOVER_NOTE:-}")"
+        XMJ_UPDATE_DETAIL="$(xmj_update_append_detail "$XMJ_UPDATE_DETAIL" '本地改动已自动放回。可查看日志。')"
         xmj_update_log_line "失败后恢复说明：$XMJ_UPDATE_DETAIL"
       fi
     fi
@@ -420,6 +539,21 @@ xmj_run_tavern_update() {
     "$XMJ_UPDATE_LOG_FILE"
 
   if ! xmj_update_sync_dependencies; then
+    if [ -n "${XMJ_UPDATE_BACKUP_FILE:-}" ]; then
+      xmj_render_update_progress \
+        'recover' \
+        'running' \
+        '恢复备份' \
+        '依赖整理没有完成，先把自动备份的内容覆盖恢复回来。' \
+        "$XMJ_UPDATE_BRANCH" \
+        "${XMJ_SILLYTAVERN_PATH:-}" \
+        "$XMJ_UPDATE_LOG_FILE"
+
+      if xmj_update_run_recover; then
+        XMJ_UPDATE_DETAIL="$(xmj_update_append_detail "$XMJ_UPDATE_DETAIL" "$XMJ_UPDATE_RECOVER_NOTE")"
+      fi
+    fi
+
     if [ "${XMJ_UPDATE_STASH_CREATED:-0}" = '1' ]; then
       xmj_render_update_progress \
         'restore' \
@@ -433,11 +567,36 @@ xmj_run_tavern_update() {
       if xmj_update_restore_local_changes; then
         XMJ_UPDATE_STAGE='deps'
         XMJ_UPDATE_SUMMARY='同步依赖失败'
-        XMJ_UPDATE_DETAIL='依赖整理没有完成，本地改动已自动放回。可查看日志。'
+        XMJ_UPDATE_DETAIL='依赖整理没有完成。'
+        XMJ_UPDATE_DETAIL="$(xmj_update_append_detail "$XMJ_UPDATE_DETAIL" "${XMJ_UPDATE_RECOVER_NOTE:-}")"
+        XMJ_UPDATE_DETAIL="$(xmj_update_append_detail "$XMJ_UPDATE_DETAIL" '本地改动已自动放回。可查看日志。')"
         xmj_update_log_line "失败后恢复说明：$XMJ_UPDATE_DETAIL"
       fi
     fi
 
+    xmj_render_update_result \
+      'failure' \
+      "$XMJ_UPDATE_STAGE" \
+      "$XMJ_UPDATE_SUMMARY" \
+      "$XMJ_UPDATE_DETAIL" \
+      "$XMJ_UPDATE_BRANCH" \
+      "$XMJ_UPDATE_BEFORE_COMMIT" \
+      "$XMJ_UPDATE_AFTER_COMMIT" \
+      "$XMJ_UPDATE_LOG_FILE" \
+      "${XMJ_SILLYTAVERN_PATH:-}"
+    return 0
+  fi
+
+  xmj_render_update_progress \
+    'recover' \
+    'running' \
+    '恢复备份' \
+    '代码与依赖已经更新完成，正在把自动备份的内容覆盖恢复回来。' \
+    "$XMJ_UPDATE_BRANCH" \
+    "${XMJ_SILLYTAVERN_PATH:-}" \
+    "$XMJ_UPDATE_LOG_FILE"
+
+  if ! xmj_update_run_recover; then
     xmj_render_update_result \
       'failure' \
       "$XMJ_UPDATE_STAGE" \
@@ -479,6 +638,7 @@ xmj_run_tavern_update() {
   XMJ_UPDATE_STAGE='done'
   XMJ_UPDATE_SUMMARY="$(xmj_update_success_summary)"
   XMJ_UPDATE_DETAIL="$(xmj_update_success_detail)"
+  xmj_update_write_history
   xmj_update_log_line "结果摘要：$XMJ_UPDATE_SUMMARY"
   if [ -n "$XMJ_UPDATE_DETAIL" ]; then
     xmj_update_log_line "结果说明：$XMJ_UPDATE_DETAIL"

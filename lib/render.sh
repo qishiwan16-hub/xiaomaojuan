@@ -125,11 +125,13 @@ xmj_update_stage_order() {
   case "${1:-}" in
     prepare) printf '%s' '1' ;;
     env|repo) printf '%s' '2' ;;
-    local) printf '%s' '3' ;;
-    pull) printf '%s' '4' ;;
-    deps) printf '%s' '5' ;;
-    restore) printf '%s' '6' ;;
-    done) printf '%s' '7' ;;
+    backup) printf '%s' '3' ;;
+    local) printf '%s' '4' ;;
+    pull) printf '%s' '5' ;;
+    deps) printf '%s' '6' ;;
+    recover) printf '%s' '7' ;;
+    restore) printf '%s' '8' ;;
+    done) printf '%s' '9' ;;
     *) printf '%s' '0' ;;
   esac
 }
@@ -138,9 +140,11 @@ xmj_update_stage_label() {
   case "${1:-}" in
     prepare) printf '%s' '准备中' ;;
     env|repo) printf '%s' '检查环境' ;;
+    backup) printf '%s' '自动备份' ;;
     local) printf '%s' '整理本地改动' ;;
     pull) printf '%s' '拉取更新' ;;
     deps) printf '%s' '同步依赖' ;;
+    recover) printf '%s' '恢复备份' ;;
     restore) printf '%s' '放回本地改动' ;;
     done) printf '%s' '更新完成' ;;
     *) printf '%s' '更新中' ;;
@@ -220,9 +224,11 @@ xmj_render_update_progress() {
   printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
   xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'backup' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'recover' "$stage_for_display" "$stage_mode"
 
   if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
     || [ "$stage_for_display" = 'restore' ] \
@@ -277,9 +283,11 @@ xmj_render_update_result() {
   printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
   xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'backup' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
   xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'recover' "$stage_for_display" "$stage_mode"
 
   if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
     || [ "$stage_for_display" = 'restore' ] \
@@ -288,6 +296,168 @@ xmj_render_update_result() {
   fi
 
   xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
+
+  if [ -n "${XMJ_UPDATE_BACKUP_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '自动备份' "$(xmj_display_path "$XMJ_UPDATE_BACKUP_FILE")"
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_reinstall_stage_order() {
+  case "${1:-}" in
+    prepare) printf '%s' '1' ;;
+    env) printf '%s' '2' ;;
+    backup) printf '%s' '3' ;;
+    remove) printf '%s' '4' ;;
+    install) printf '%s' '5' ;;
+    deps) printf '%s' '6' ;;
+    recover) printf '%s' '7' ;;
+    done) printf '%s' '8' ;;
+    *) printf '%s' '0' ;;
+  esac
+}
+
+xmj_reinstall_stage_label() {
+  case "${1:-}" in
+    prepare) printf '%s' '准备中' ;;
+    env) printf '%s' '检查环境' ;;
+    backup) printf '%s' '自动备份' ;;
+    remove) printf '%s' '卸载旧目录' ;;
+    install) printf '%s' '重新安装' ;;
+    deps) printf '%s' '同步依赖' ;;
+    recover) printf '%s' '恢复备份' ;;
+    done) printf '%s' '完成' ;;
+    *) printf '%s' '卸载重装' ;;
+  esac
+}
+
+xmj_render_reinstall_stage_line() {
+  local stage="${1:-prepare}"
+  local current_stage="${2:-prepare}"
+  local stage_mode="${3:-running}"
+  local stage_order='0'
+  local current_order='0'
+  local marker='·'
+  local state_text='等待中'
+  local color="$XMJ_MIST"
+
+  stage_order="$(xmj_reinstall_stage_order "$stage")"
+  current_order="$(xmj_reinstall_stage_order "$current_stage")"
+
+  if [ "$stage_order" -lt "$current_order" ]; then
+    marker='✓'
+    state_text='已完成'
+    color="$XMJ_CREAM"
+  elif [ "$stage_order" -eq "$current_order" ]; then
+    case "$stage_mode" in
+      failure)
+        marker='✕'
+        state_text='失败'
+        color="$XMJ_WARN"
+        ;;
+      success)
+        marker='✓'
+        state_text='已完成'
+        color="$XMJ_CREAM"
+        ;;
+      *)
+        marker='➜'
+        state_text='进行中'
+        color="$XMJ_PINK"
+        ;;
+    esac
+  fi
+
+  printf '  %b%s%b %b%s%b %b·%b %b%s%b\n' \
+    "$color" "$marker" "$XMJ_RESET" \
+    "$XMJ_WHITE" "$(xmj_reinstall_stage_label "$stage")" "$XMJ_RESET" \
+    "$XMJ_MIST" "$XMJ_RESET" \
+    "$color" "$state_text" "$XMJ_RESET"
+}
+
+xmj_render_reinstall_progress() {
+  local current_stage="${1:-prepare}"
+  local stage_mode="${2:-running}"
+  local headline="${3:-准备中}"
+  local detail_text="${4:-猫猫正在安静整理卸载重装步骤。}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_intro \
+    '卸载重装进行中，详细命令会悄悄写进日志本。' \
+    '前台只保留简洁阶段提示，避免把输出直接刷满。'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ 卸载重装进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_reinstall_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'remove' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'install' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'done' "$current_stage" "$stage_mode"
+
+  if [ -n "${XMJ_REINSTALL_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_REINSTALL_LOG_FILE")"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+}
+
+xmj_render_reinstall_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-done}"
+  local summary_text="${3:-卸载重装已完成。}"
+  local detail_text="${4:-}"
+  local result_title='卸载重装完成'
+  local result_intro='猫猫已经把卸载重装整理好了。'
+  local result_hint=''
+  local stage_mode='success'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='卸载重装失败'
+    result_intro='这次卸载重装没有顺利完成。'
+    result_hint='需要时可温和查看日志。'
+    stage_mode='failure'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_section_title 'update'
+  printf '\n'
+  xmj_render_page_intro "$result_intro" "$result_hint"
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ 卸载重装进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_reinstall_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'remove' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'install' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'done' "$current_stage" "$stage_mode"
+
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_REINSTALL_AFTER_VERSION:-未知}"
+
+  if [ -n "${XMJ_REINSTALL_BACKUP_FILE:-}" ]; then
+    xmj_render_fact_line '自动备份' "$(xmj_display_path "$XMJ_REINSTALL_BACKUP_FILE")"
+  fi
+
+  if [ -n "${XMJ_REINSTALL_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_REINSTALL_LOG_FILE")"
+  fi
+
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -669,7 +839,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前 01 启动酒馆、02 一键更新、03 切换版本 / 分支已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 启动酒馆、02 一键更新、03 切换版本 / 分支、04 卸载重装、05 更新记录已接入真实流程，其余业务菜单仍然保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -726,9 +896,9 @@ xmj_render_about_status_page() {
     "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")" \
     "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
   printf '\n'
-  xmj_render_path_block '备份目录' \
-    "$(xmj_display_path "${XMJ_BACKUP_DIR:-}")" \
-    "$(xmj_dir_state "${XMJ_BACKUP_DIR:-}" '已就绪' '待创建')"
+  xmj_render_path_block '自动备份目录' \
+    "$(xmj_display_path "$(xmj_maintenance_backup_dir)")" \
+    "$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -822,9 +992,9 @@ xmj_render_setting_basic_page() {
     "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")" \
     "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
   printf '\n'
-  xmj_render_path_block '备份目录' \
-    "$(xmj_display_path "${XMJ_BACKUP_DIR:-}")" \
-    "$(xmj_dir_state "${XMJ_BACKUP_DIR:-}" '已就绪' '待创建')"
+  xmj_render_path_block '自动备份目录' \
+    "$(xmj_display_path "$(xmj_maintenance_backup_dir)")" \
+    "$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
   printf '\n'
   xmj_render_page_intro '修改配置请编辑 config/xiaomaojuan.conf。' ''
   xmj_render_notice_line
@@ -956,7 +1126,7 @@ xmj_render_about_panel_page() {
   printf '\n'
   xmj_render_page_intro \
     '小猫卷目前是一个运行在 Termux 里的 Bash 面板框架。' \
-    '首页仍以功能分组为主，其中 01 启动酒馆、02 一键更新、03 切换版本 / 分支已经接入真实逻辑。'
+    '首页仍以功能分组为主，其中 01 启动酒馆、02 一键更新、03 切换版本 / 分支、04 卸载重装、05 更新记录已经接入真实逻辑。'
   printf '\n'
   xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
   xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
@@ -983,7 +1153,7 @@ xmj_render_author_page() {
   printf '\n'
   xmj_render_page_intro \
     '当前版本主要用于确认配置、面板结构和已接入的更新流程。' \
-    '目前已实现 01 启动酒馆、02 一键更新、03 切换版本 / 分支，备份、恢复、回退等功能仍未开放。'
+    '目前已实现 01 启动酒馆、02 一键更新、03 切换版本 / 分支、04 卸载重装、05 更新记录，备份恢复和更新日志也已接入真实流程。'
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -1029,7 +1199,7 @@ xmj_render_placeholder_page() {
   printf '\n'
   xmj_render_page_intro \
     '你现在看到的是视觉占位页，后续会在这里补上对应业务逻辑。' \
-    '目前仅 01 启动酒馆、02 一键更新、03 切换版本 / 分支已接入真实流程，其余入口仍在整理。'
+    '目前仅 01 启动酒馆、02 一键更新、03 切换版本 / 分支、04 卸载重装、05 更新记录已接入真实流程，其余入口仍在整理。'
   xmj_render_page_footer '按回车返回首页'
 }
 
