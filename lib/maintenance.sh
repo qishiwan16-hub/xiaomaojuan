@@ -32,6 +32,11 @@ xmj_maintenance_shell_log_target() {
 }
 
 xmj_maintenance_backup_dir() {
+  if [ -n "${XMJ_BACKUP_DIR:-}" ]; then
+    printf '%s' "$XMJ_BACKUP_DIR"
+    return 0
+  fi
+
   printf '%s/备份' "${XMJ_ROOT_DIR:-.}"
 }
 

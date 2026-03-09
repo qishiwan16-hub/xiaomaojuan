@@ -180,16 +180,19 @@ xmj_maintenance_create_backup() {
   fi
 
   xmj_maintenance_log "$logger_name" "开始为${op_name}自动打包备份。"
+  xmj_backup_start_busy '生成备份中'
 
   for item in "${items[@]}"; do
     target_path="$bundle_root/$item"
     if ! mkdir -p "$(dirname "$target_path")" 2>/dev/null; then
+      xmj_backup_stop_busy
       rm -rf "$temp_root" 2>/dev/null || true
       XMJ_MAINT_LAST_ERROR='整理自动备份内容时失败。'
       return 1
     fi
 
     if ! cp -a "$repo_path/$item" "$target_path" 2>>"$shell_log"; then
+      xmj_backup_stop_busy
       rm -rf "$temp_root" 2>/dev/null || true
       XMJ_MAINT_LAST_ERROR='整理自动备份内容时失败。'
       return 1
@@ -197,12 +200,14 @@ xmj_maintenance_create_backup() {
   done
 
   if ! xmj_maintenance_create_archive "$temp_root" "$bundle_name" "$archive_file" "$shell_log"; then
+    xmj_backup_stop_busy
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='生成备份压缩包失败，可温和查看日志。'
     return 1
   fi
 
   rm -rf "$temp_root" 2>/dev/null || true
+  xmj_backup_stop_busy
 
   XMJ_MAINT_BACKUP_FILE="$archive_file"
   XMJ_MAINT_BACKUP_NOTE="已把 ${joined_items} 打成 1 个备份压缩包。"
@@ -261,8 +266,10 @@ xmj_maintenance_restore_backup() {
   fi
 
   xmj_maintenance_log "$logger_name" '开始从自动备份压缩包恢复内容。'
+  xmj_backup_start_busy '恢复备份中'
 
   if ! xmj_maintenance_extract_archive "$XMJ_MAINT_BACKUP_FILE" "$temp_root" "$shell_log"; then
+    xmj_backup_stop_busy
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='解压备份压缩包失败，可温和查看日志。'
     return 1
@@ -284,12 +291,14 @@ xmj_maintenance_restore_backup() {
     target_path="$repo_path/$item"
     rm -rf "$target_path" 2>/dev/null || true
     if ! mkdir -p "$(dirname "$target_path")" 2>/dev/null; then
+      xmj_backup_stop_busy
       rm -rf "$temp_root" 2>/dev/null || true
       XMJ_MAINT_LAST_ERROR='恢复备份内容时失败。'
       return 1
     fi
 
     if ! cp -a "$source_path" "$target_path" 2>>"$shell_log"; then
+      xmj_backup_stop_busy
       rm -rf "$temp_root" 2>/dev/null || true
       XMJ_MAINT_LAST_ERROR='恢复备份内容时失败。'
       return 1
@@ -299,6 +308,7 @@ xmj_maintenance_restore_backup() {
   done
 
   rm -rf "$temp_root" 2>/dev/null || true
+  xmj_backup_stop_busy
 
   if [ "$restored_count" -eq 0 ]; then
     XMJ_MAINT_LAST_ERROR='备份压缩包里没有可恢复的目标内容。'
@@ -898,6 +908,53 @@ xmj_maintenance_backup_dir() {
 }
 
 declare -ga XMJ_BACKUP_ARCHIVE_FILES=()
+XMJ_BACKUP_BUSY_PID=''
+
+xmj_render_backup_busy_frame() {
+  local action_text="${1:-备份处理中}"
+  local spinner_text="${2:-◜}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '备份处理中' 'backup motion' 'backup'
+  printf '\n'
+  xmj_render_setting_card "$action_text" '命令细节已隐藏，猫猫正在安静处理。' ''
+  printf '\n'
+  printf '  %b%s %s%b\n' "$XMJ_PINK" "$action_text" "$spinner_text" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+}
+
+xmj_backup_start_busy() {
+  local action_text="${1:-备份处理中}"
+
+  xmj_backup_stop_busy
+  xmj_render_backup_busy_frame "$action_text" '◜'
+
+  (
+    trap 'exit 0' TERM INT
+    local frames=('◜' '◠' '◝' '◞' '◡' '◟')
+    local index='0'
+
+    while :; do
+      xmj_render_backup_busy_frame "$action_text" "${frames[$index]}"
+      sleep 0.12 2>/dev/null || sleep 1
+      index=$(((index + 1) % ${#frames[@]}))
+    done
+  ) &
+  XMJ_BACKUP_BUSY_PID="$!"
+}
+
+xmj_backup_stop_busy() {
+  local pid="${XMJ_BACKUP_BUSY_PID:-}"
+
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+
+  XMJ_BACKUP_BUSY_PID=''
+}
 
 xmj_backup_notice_color() {
   case "${1:-info}" in
@@ -1527,11 +1584,14 @@ xmj_backup_delete_archive() {
     return 1
   fi
 
+  xmj_backup_start_busy '删除备份中'
   if ! rm -f "$archive_file" 2>/dev/null; then
+    xmj_backup_stop_busy
     XMJ_MAINT_LAST_ERROR="删除备份失败：$(basename "$archive_file")"
     return 1
   fi
 
+  xmj_backup_stop_busy
   return 0
 }
 
@@ -1562,9 +1622,11 @@ xmj_backup_cleanup_old_archives() {
     return 0
   fi
 
+  xmj_backup_start_busy '清理旧档中'
   for ((i = keep_count; i < total; i++)); do
     archive_file="${XMJ_BACKUP_ARCHIVE_FILES[$i]}"
     if ! rm -f "$archive_file" 2>/dev/null; then
+      xmj_backup_stop_busy
       XMJ_MAINT_LAST_ERROR="删除备份失败：$(basename "$archive_file")"
       return 1
     fi
@@ -1572,6 +1634,7 @@ xmj_backup_cleanup_old_archives() {
     XMJ_BACKUP_CLEANUP_REMOVED="$((XMJ_BACKUP_CLEANUP_REMOVED + 1))"
   done
 
+  xmj_backup_stop_busy
   XMJ_BACKUP_CLEANUP_NOTE="已清理 ${XMJ_BACKUP_CLEANUP_REMOVED} 个旧备份，保留最新 ${keep_count} 个。"
   return 0
 }
