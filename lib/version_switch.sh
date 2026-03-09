@@ -832,8 +832,14 @@ xmj_branch_fetch_refs() {
     return 0
   fi
 
+  if git -C "$repo_path" fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+    xmj_version_log_line '远程全部分支同步完成。'
+    return 0
+  fi
+
+  xmj_version_log_line '按全部远程分支同步失败，尝试使用默认 fetch 规则。'
   if git -C "$repo_path" fetch origin --prune >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
-    xmj_version_log_line '远程分支同步完成。'
+    xmj_version_log_line '按默认规则同步远程分支完成。'
     return 0
   fi
 
