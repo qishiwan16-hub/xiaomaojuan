@@ -60,6 +60,7 @@ xmj_init_runtime_paths() {
   XMJ_CONFIG_FILE="$XMJ_CONFIG_DIR/xiaomaojuan.conf"
   XMJ_DOCS_DIR="$XMJ_ROOT_DIR/docs"
   XMJ_CONFIG_GUIDE_FILE="$XMJ_DOCS_DIR/config-guide.md"
+  XMJ_LOG_DIR="$XMJ_ROOT_DIR/logs"
 }
 
 xmj_expand_path() {
@@ -144,6 +145,10 @@ XMJ_SILLYTAVERN_PATH="$HOME/SillyTavern"
 # 可以写相对路径，例如 backups；相对路径会自动以脚本根目录为基准。
 XMJ_BACKUP_DIR="backups"
 
+# 日志目录。
+# 更新日志等详细输出会写到这里，避免直接刷满前台。
+XMJ_LOG_DIR="logs"
+
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -208,6 +213,7 @@ xmj_apply_config_defaults() {
   : "${XMJ_TARGET_PROJECT:=SillyTavern}"
   : "${XMJ_SILLYTAVERN_PATH:=$HOME/SillyTavern}"
   : "${XMJ_BACKUP_DIR:=backups}"
+  : "${XMJ_LOG_DIR:=logs}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
@@ -248,13 +254,19 @@ xmj_validate_config() {
   xmj_validate_required_text 'XMJ_TARGET_PROJECT' '目标项目' 'SillyTavern'
   xmj_validate_required_text 'XMJ_SILLYTAVERN_PATH' 'SillyTavern 路径' "$HOME/SillyTavern"
   xmj_validate_required_text 'XMJ_BACKUP_DIR' '备份目录' 'backups'
+  xmj_validate_required_text 'XMJ_LOG_DIR' '日志目录' 'logs'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 
   XMJ_SILLYTAVERN_PATH="$(xmj_resolve_path "$XMJ_SILLYTAVERN_PATH")"
   XMJ_BACKUP_DIR="$(xmj_resolve_path "$XMJ_BACKUP_DIR")"
+  XMJ_LOG_DIR="$(xmj_resolve_path "$XMJ_LOG_DIR")"
 
   if ! xmj_ensure_dir "$XMJ_BACKUP_DIR" '备份目录'; then
+    return 1
+  fi
+
+  if ! xmj_ensure_dir "$XMJ_LOG_DIR" '日志目录'; then
     return 1
   fi
 

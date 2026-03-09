@@ -100,7 +100,7 @@ xmj_load_menu_data() {
   declare -gA XMJ_MENU_LABEL=()
   declare -gA XMJ_MENU_SECTION=()
 
-  XMJ_MENU_LABEL['01']='一键更新'
+  XMJ_MENU_LABEL['01']='一键更新酒馆'
   XMJ_MENU_LABEL['02']='版本回退'
   XMJ_MENU_LABEL['03']='更新记录'
   XMJ_MENU_LABEL['04']='快速启动'
