@@ -32,7 +32,7 @@ xmj_init_theme() {
 }
 
 xmj_clear_screen() {
-  printf '\033[2J\033[H'
+  printf '\033[3J\033[2J\033[H'
 }
 
 xmj_repeat_char() {
@@ -52,8 +52,34 @@ xmj_rule_line() {
   local color="${1:-$XMJ_BORDER}"
   local char="${2:-─}"
   local count="${3:-62}"
+  local motif='(=^･ω･^=)'
+  local pad_char='~'
+  local inner_width=0
+  local left_count=0
+  local right_count=0
+  local left_pad=''
+  local right_pad=''
 
-  printf '%b%s%b\n' "$color" "$(xmj_repeat_char "$char" "$count")" "$XMJ_RESET"
+  case "$char" in
+    '═')
+      pad_char='='
+      ;;
+    *)
+      pad_char='~'
+      ;;
+  esac
+
+  inner_width=$((count - ${#motif} - 2))
+  if [ "$inner_width" -lt 0 ]; then
+    inner_width=0
+  fi
+
+  left_count=$((inner_width / 2))
+  right_count=$((inner_width - left_count))
+  left_pad="$(xmj_repeat_char "$pad_char" "$left_count")"
+  right_pad="$(xmj_repeat_char "$pad_char" "$right_count")"
+
+  printf '%b%s %s %s%b\n' "$color" "$left_pad" "$motif" "$right_pad" "$XMJ_RESET"
 }
 
 xmj_wait_for_enter() {
