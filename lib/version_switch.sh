@@ -14,8 +14,14 @@ xmj_version_reset_state() {
   XMJ_VERSION_STAGE='prepare'
   XMJ_VERSION_SUMMARY=''
   XMJ_VERSION_DETAIL=''
+  XMJ_VERSION_HAS_LOCAL_CHANGES='0'
+  XMJ_VERSION_LOCAL_NOTE=''
   XMJ_VERSION_FETCH_NOTE=''
   XMJ_VERSION_DEPENDENCY_NOTE=''
+  XMJ_VERSION_STASH_CREATED='0'
+  XMJ_VERSION_STASH_REF=''
+  XMJ_VERSION_STASH_LABEL=''
+  XMJ_VERSION_RESTORE_NOTE=''
   XMJ_VERSION_CURRENT_LABEL=''
   XMJ_VERSION_CURRENT_TAG=''
   XMJ_VERSION_CURRENT_COMMIT=''
@@ -229,16 +235,86 @@ xmj_version_check_repository() {
 
   worktree_state="$(git -C "$repo_path" status --porcelain 2>>"$XMJ_VERSION_LOG_FILE" || true)"
   if [ -n "$worktree_state" ]; then
-    xmj_version_log_line '检测到本地改动，当前不允许直接切换版本。'
+    XMJ_VERSION_HAS_LOCAL_CHANGES='1'
+    XMJ_VERSION_LOCAL_NOTE='检测到本地改动，切换时会先自动收好，完成后再尽量放回。'
+    xmj_version_log_line '检测到本地改动，切换前会先自动 stash。'
     printf '%s\n' "$worktree_state" >>"$XMJ_VERSION_LOG_FILE"
-    xmj_version_fail 'env' '检测到本地改动' '为避免把未提交内容带到别的版本，请先提交或 stash 后再试。'
-    return 1
+  else
+    XMJ_VERSION_HAS_LOCAL_CHANGES='0'
+    XMJ_VERSION_LOCAL_NOTE='工作区干净，无需整理本地改动。'
+    xmj_version_log_line "$XMJ_VERSION_LOCAL_NOTE"
   fi
 
   xmj_version_update_current_state
   xmj_version_log_line "当前版本：${XMJ_VERSION_CURRENT_LABEL:-unknown}"
   xmj_version_log_line "当前提交：${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
   return 0
+}
+
+xmj_version_prepare_local_changes() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local stash_before=''
+  local stash_after=''
+  local stash_stamp=''
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" != '1' ]; then
+    XMJ_VERSION_LOCAL_NOTE='本地改动无需整理。'
+    xmj_version_log_line "$XMJ_VERSION_LOCAL_NOTE"
+    return 0
+  fi
+
+  stash_before="$(git -C "$repo_path" rev-parse --verify -q refs/stash 2>>"$XMJ_VERSION_LOG_FILE" || true)"
+  stash_stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stash_stamp" ]; then
+    stash_stamp='manual'
+  fi
+
+  XMJ_VERSION_STASH_LABEL="xmj-auto-version-switch-$stash_stamp"
+  xmj_version_log_line "开始整理本地改动：${XMJ_VERSION_STASH_LABEL}"
+
+  if ! git -C "$repo_path" stash push --include-untracked -m "$XMJ_VERSION_STASH_LABEL" >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+    xmj_version_fail 'switch' '整理本地改动失败' '检测到本地改动，但没有成功临时收好，可温和查看日志。'
+    return 1
+  fi
+
+  stash_after="$(git -C "$repo_path" rev-parse --verify -q refs/stash 2>>"$XMJ_VERSION_LOG_FILE" || true)"
+  if [ -z "$stash_after" ] || [ "$stash_after" = "$stash_before" ]; then
+    xmj_version_fail 'switch' '整理本地改动失败' '检测到本地改动，但没有成功生成临时保存记录。'
+    return 1
+  fi
+
+  XMJ_VERSION_STASH_CREATED='1'
+  XMJ_VERSION_STASH_REF='stash@{0}'
+  XMJ_VERSION_LOCAL_NOTE='本地改动已临时收好。'
+  xmj_version_log_line "$XMJ_VERSION_LOCAL_NOTE"
+  return 0
+}
+
+xmj_version_restore_local_changes() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if [ "${XMJ_VERSION_STASH_CREATED:-0}" != '1' ]; then
+    XMJ_VERSION_RESTORE_NOTE='无需放回本地改动。'
+    xmj_version_log_line "$XMJ_VERSION_RESTORE_NOTE"
+    return 0
+  fi
+
+  xmj_version_log_line "开始放回本地改动：${XMJ_VERSION_STASH_REF}"
+  if git -C "$repo_path" stash pop --index "$XMJ_VERSION_STASH_REF" >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+    XMJ_VERSION_STASH_CREATED='0'
+    XMJ_VERSION_STASH_REF=''
+    XMJ_VERSION_RESTORE_NOTE='本地改动已自动放回。'
+    xmj_version_log_line "$XMJ_VERSION_RESTORE_NOTE"
+    return 0
+  fi
+
+  if [ -n "${XMJ_VERSION_STASH_LABEL:-}" ]; then
+    XMJ_VERSION_RESTORE_NOTE="本地改动未自动放回，原始内容仍保存在 Git stash：${XMJ_VERSION_STASH_LABEL}。"
+  else
+    XMJ_VERSION_RESTORE_NOTE='本地改动未自动放回，原始内容仍保存在 Git stash 里。'
+  fi
+  xmj_version_log_line "$XMJ_VERSION_RESTORE_NOTE"
+  return 1
 }
 
 xmj_version_fetch_tags() {
@@ -574,6 +650,10 @@ xmj_render_version_list_page() {
     xmj_render_fact_line '同步说明' "$XMJ_VERSION_FETCH_NOTE"
   fi
 
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
   if [ -n "${XMJ_VERSION_LOG_FILE:-}" ]; then
     xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_VERSION_LOG_FILE")"
   fi
@@ -623,6 +703,15 @@ xmj_version_target_detail() {
 
   detail_text="发行日期：${XMJ_VERSION_TARGET_DATE:-unknown-date}。"
   detail_text="${detail_text} 当前会停留在标签版本上，后续若要继续跟随更新，建议再切回主分支。"
+
+  case "${XMJ_VERSION_RESTORE_NOTE:-}" in
+    ''|'无需放回本地改动。')
+      ;;
+    *)
+      detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+      ;;
+  esac
+
   printf '%s' "$detail_text"
 }
 
@@ -682,6 +771,7 @@ xmj_version_run_switch() {
   local array_index='0'
   local target_tag=''
   local target_date=''
+  local detail_text=''
 
   selected_number=$((10#$selected_index))
   array_index=$((selected_number - 1))
@@ -711,9 +801,32 @@ xmj_version_run_switch() {
     'switch' \
     'running' \
     '切换版本' \
-    "猫猫正在把酒馆切到 ${target_tag} 喵~"
+    "猫猫正在把酒馆切到 ${target_tag} 喵~ 如有本地改动会先自动收好。"
+
+  if ! xmj_version_prepare_local_changes; then
+    xmj_render_version_result \
+      'failure' \
+      "$XMJ_VERSION_STAGE" \
+      "$XMJ_VERSION_SUMMARY" \
+      "$XMJ_VERSION_DETAIL"
+    return 1
+  fi
 
   if ! xmj_version_checkout_target "$target_tag"; then
+    if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+      if xmj_version_restore_local_changes; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        if [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ] && [ "${XMJ_VERSION_RESTORE_NOTE}" != '无需放回本地改动。' ]; then
+          detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        fi
+        XMJ_VERSION_DETAIL="$detail_text"
+      elif [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ]; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        XMJ_VERSION_DETAIL="$detail_text"
+      fi
+    fi
+
     xmj_render_version_result \
       'failure' \
       "$XMJ_VERSION_STAGE" \
@@ -729,12 +842,32 @@ xmj_version_run_switch() {
     '版本已经切过去了，正在确认依赖是否需要整理。'
 
   if ! xmj_version_sync_dependencies; then
+    if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+      if xmj_version_restore_local_changes; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        if [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ] && [ "${XMJ_VERSION_RESTORE_NOTE}" != '无需放回本地改动。' ]; then
+          detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        fi
+        XMJ_VERSION_DETAIL="$detail_text"
+      elif [ -n "${XMJ_VERSION_RESTORE_NOTE:-}" ]; then
+        detail_text="${XMJ_VERSION_DETAIL}"
+        detail_text="${detail_text} ${XMJ_VERSION_RESTORE_NOTE}"
+        XMJ_VERSION_DETAIL="$detail_text"
+      fi
+    fi
+
     xmj_render_version_result \
       'failure' \
       "$XMJ_VERSION_STAGE" \
       "$XMJ_VERSION_SUMMARY" \
       "$XMJ_VERSION_DETAIL"
     return 1
+  fi
+
+  if [ "${XMJ_VERSION_STASH_CREATED:-0}" = '1' ]; then
+    if ! xmj_version_restore_local_changes; then
+      xmj_version_log_line '版本已切换成功，但本地改动未自动放回。'
+    fi
   fi
 
   XMJ_VERSION_STAGE='done'
