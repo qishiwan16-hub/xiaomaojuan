@@ -15,6 +15,10 @@ xmj_handle_route() {
       xmj_exit_panel
       return 1
       ;;
+    18)
+      xmj_run_script_setting_page
+      return 0
+      ;;
     01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23)
       xmj_render_menu_page "$input"
       return 0
@@ -27,8 +31,62 @@ xmj_handle_route() {
 }
 
 xmj_prompt_input() {
-  printf '%b%s%b' "$XMJ_PINK_SOFT" '  请输入菜单编号 > ' "$XMJ_RESET"
+  local panel_width
+  local prompt='  菜单编号 > '
+
+  panel_width="$(xmj_panel_width)"
+  if [ "$panel_width" -lt 30 ]; then
+    prompt='  编号 > '
+  fi
+
+  printf '%b%s%b' "$XMJ_PINK_SOFT" "$prompt" "$XMJ_RESET"
   IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_prompt_script_setting_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  设置操作 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_handle_script_setting_action() {
+  local input="${1:-}"
+
+  case "$input" in
+    ''|0)
+      xmj_font_clear_notice
+      return 1
+      ;;
+    1)
+      xmj_install_termux_font_preset
+      ;;
+    2)
+      xmj_restore_termux_default_font
+      ;;
+    3)
+      xmj_manual_reload_termux_settings
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 0。'
+      ;;
+  esac
+
+  return 0
+}
+
+xmj_run_script_setting_page() {
+  local input
+
+  xmj_font_clear_notice
+
+  while true; do
+    xmj_render_script_setting_page
+    xmj_prompt_script_setting_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    if ! xmj_handle_script_setting_action "$input"; then
+      return 0
+    fi
+  done
 }
 
 xmj_run_panel() {

@@ -118,7 +118,7 @@ xmj_load_menu_data() {
   XMJ_MENU_LABEL['15']='后续追加'
   XMJ_MENU_LABEL['16']='预留空位'
   XMJ_MENU_LABEL['17']='路径设置'
-  XMJ_MENU_LABEL['18']='主题风格'
+  XMJ_MENU_LABEL['18']='脚本设置'
   XMJ_MENU_LABEL['19']='安全选项'
   XMJ_MENU_LABEL['20']='备份目录'
   XMJ_MENU_LABEL['21']='状态信息'

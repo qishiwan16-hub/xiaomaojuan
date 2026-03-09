@@ -35,6 +35,44 @@ xmj_clear_screen() {
   printf '\033[3J\033[2J\033[H'
 }
 
+xmj_terminal_width() {
+  local width="${COLUMNS:-}"
+
+  case "$width" in
+    ''|*[!0-9]*)
+      width=''
+      ;;
+  esac
+
+  if [ -z "$width" ] && command -v tput >/dev/null 2>&1; then
+    width="$(tput cols 2>/dev/null || true)"
+    case "$width" in
+      ''|*[!0-9]*)
+        width=''
+        ;;
+    esac
+  fi
+
+  if [ -z "$width" ] || [ "$width" -lt 28 ]; then
+    width=62
+  fi
+
+  printf '%s' "$width"
+}
+
+xmj_panel_width() {
+  local width
+
+  width="$(xmj_terminal_width)"
+  width=$((width - 4))
+
+  if [ "$width" -lt 24 ]; then
+    width=24
+  fi
+
+  printf '%s' "$width"
+}
+
 xmj_repeat_char() {
   local char="${1:-─}"
   local count="${2:-62}"
@@ -48,38 +86,55 @@ xmj_repeat_char() {
   printf '%s' "$output"
 }
 
+xmj_repeat_pattern() {
+  local pattern="${1:-°. ⑅♡⑅.°. +.}"
+  local count="${2:-62}"
+  local output=''
+
+  if [ "$count" -le 0 ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while [ "${#output}" -lt "$count" ]; do
+    output+="$pattern"
+  done
+
+  printf '%s' "${output:0:$count}"
+}
+
 xmj_rule_line() {
   local color="${1:-$XMJ_BORDER}"
   local char="${2:-─}"
   local count="${3:-62}"
-  local motif='(=^･ω･^=)'
-  local pad_char='~'
-  local inner_width=0
-  local left_count=0
-  local right_count=0
-  local left_pad=''
-  local right_pad=''
+  local panel_width
+  local pattern='°. ⑅♡⑅.°. +.'
 
-  case "$char" in
-    '═')
-      pad_char='='
-      ;;
-    *)
-      pad_char='~'
+  panel_width="$(xmj_panel_width)"
+  if [ "$panel_width" -gt 6 ]; then
+    panel_width=$((panel_width - 2))
+  fi
+
+  case "$count" in
+    ''|*[!0-9]*)
+      count="$panel_width"
       ;;
   esac
 
-  inner_width=$((count - ${#motif} - 2))
-  if [ "$inner_width" -lt 0 ]; then
-    inner_width=0
+  if [ "$count" -le 0 ] || [ "$count" -gt "$panel_width" ]; then
+    count="$panel_width"
   fi
 
-  left_count=$((inner_width / 2))
-  right_count=$((inner_width - left_count))
-  left_pad="$(xmj_repeat_char "$pad_char" "$left_count")"
-  right_pad="$(xmj_repeat_char "$pad_char" "$right_count")"
+  case "$char" in
+    '═')
+      pattern='°. ⑅♡⑅.°. +.'
+      ;;
+    *)
+      pattern='°. ⑅♡⑅.°.'
+      ;;
+  esac
 
-  printf '%b%s %s %s%b\n' "$color" "$left_pad" "$motif" "$right_pad" "$XMJ_RESET"
+  printf '%b%s%b\n' "$color" "$(xmj_repeat_pattern "$pattern" "$count")" "$XMJ_RESET"
 }
 
 xmj_wait_for_enter() {

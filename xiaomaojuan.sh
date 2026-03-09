@@ -9,6 +9,8 @@ XMJ_ROOT_DIR="$SCRIPT_DIR"
 source "$XMJ_ROOT_DIR/lib/config.sh"
 # shellcheck source=lib/theme.sh
 source "$XMJ_ROOT_DIR/lib/theme.sh"
+# shellcheck source=lib/font.sh
+source "$XMJ_ROOT_DIR/lib/font.sh"
 # shellcheck source=lib/menu_data.sh
 source "$XMJ_ROOT_DIR/lib/menu_data.sh"
 # shellcheck source=lib/render.sh
@@ -19,6 +21,7 @@ source "$XMJ_ROOT_DIR/lib/router.sh"
 main() {
   xmj_bootstrap_config || true
   xmj_init_theme
+  xmj_init_font_state
 
   if [ "${XMJ_CONFIG_READY:-0}" != '1' ]; then
     xmj_render_startup_failure

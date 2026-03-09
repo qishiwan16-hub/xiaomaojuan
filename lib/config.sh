@@ -150,6 +150,15 @@ XMJ_THEME_MODE="pastel"
 
 # 当前运行环境说明，会显示在首页信息区。
 XMJ_RUNTIME_ENV="Termux / Android / Bash"
+
+# 内置 Termux 字体预设名称。
+XMJ_TERMUX_FONT_PRESET_NAME="京华老宋体"
+
+# 内置 Termux 字体预设下载地址。
+XMJ_TERMUX_FONT_PRESET_URL="https://www.ziti.net.cn/static/upload/other/20251228/1766904933891599.ttf"
+
+# 内置 Termux 字体预设 MD5，用于校验下载结果。
+XMJ_TERMUX_FONT_PRESET_MD5="fcde959ec23bf4bbd4de52514f1909e9"
 EOF
   then
     xmj_add_boot_error "默认配置文件写入失败：$XMJ_CONFIG_FILE"
@@ -201,6 +210,9 @@ xmj_apply_config_defaults() {
   : "${XMJ_BACKUP_DIR:=backups}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
+  : "${XMJ_TERMUX_FONT_PRESET_NAME:=京华老宋体}"
+  : "${XMJ_TERMUX_FONT_PRESET_URL:=https://www.ziti.net.cn/static/upload/other/20251228/1766904933891599.ttf}"
+  : "${XMJ_TERMUX_FONT_PRESET_MD5:=fcde959ec23bf4bbd4de52514f1909e9}"
 }
 
 xmj_validate_theme_mode() {
