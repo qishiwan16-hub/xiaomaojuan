@@ -15,11 +15,23 @@ xmj_handle_route() {
       xmj_exit_panel
       return 1
       ;;
-    18)
-      xmj_run_script_setting_page
+    17)
+      xmj_run_script_setting_page 'home'
       return 0
       ;;
-    01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23)
+    18)
+      xmj_run_script_setting_page 'theme'
+      return 0
+      ;;
+    19)
+      xmj_run_script_setting_page 'font'
+      return 0
+      ;;
+    20)
+      xmj_run_script_setting_page 'basic'
+      return 0
+      ;;
+    01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|21|22|23)
       xmj_render_menu_page "$input"
       return 0
       ;;
@@ -44,29 +56,78 @@ xmj_prompt_input() {
 }
 
 xmj_prompt_script_setting_input() {
-  printf '%b%s%b' "$XMJ_PINK_SOFT" '  设置操作 > ' "$XMJ_RESET"
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  设置中心 > ' "$XMJ_RESET"
   IFS= read -r XMJ_LAST_INPUT
 }
 
 xmj_handle_script_setting_action() {
-  local input="${1:-}"
+  local view="${1:-home}"
+  local input="${2:-}"
 
-  case "$input" in
-    ''|0)
-      xmj_font_clear_notice
-      return 1
+  XMJ_SETTING_NEXT_VIEW="$view"
+
+  case "$view" in
+    home)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='exit'
+          ;;
+        1)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='basic'
+          ;;
+        2)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='theme'
+          ;;
+        3)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='font'
+          ;;
+        4)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='advanced'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 0。'
+          ;;
+      esac
       ;;
-    1)
-      xmj_install_termux_font_preset
+    basic|theme|advanced)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='home'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页当前只支持输入 0 返回设置中心。'
+          ;;
+      esac
       ;;
-    2)
-      xmj_restore_termux_default_font
-      ;;
-    3)
-      xmj_manual_reload_termux_settings
+    font)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_install_termux_font_preset
+          ;;
+        2)
+          xmj_restore_termux_default_font
+          ;;
+        3)
+          xmj_manual_reload_termux_settings
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 0。'
+          ;;
+      esac
       ;;
     *)
-      xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 0。'
+      xmj_font_clear_notice
+      XMJ_SETTING_NEXT_VIEW='home'
       ;;
   esac
 
@@ -74,16 +135,20 @@ xmj_handle_script_setting_action() {
 }
 
 xmj_run_script_setting_page() {
+  local view="${1:-home}"
   local input
 
   xmj_font_clear_notice
 
   while true; do
-    xmj_render_script_setting_page
+    xmj_render_setting_center_page "$view"
     xmj_prompt_script_setting_input
     input="${XMJ_LAST_INPUT:-}"
 
-    if ! xmj_handle_script_setting_action "$input"; then
+    xmj_handle_script_setting_action "$view" "$input"
+    view="${XMJ_SETTING_NEXT_VIEW:-$view}"
+
+    if [ "$view" = 'exit' ]; then
       return 0
     fi
   done

@@ -40,7 +40,73 @@ xmj_termux_font_backup_file() {
 }
 
 xmj_termux_font_source_host() {
-  printf '%s' 'ziti.net.cn'
+  local font_url="${XMJ_TERMUX_FONT_PRESET_URL:-}"
+  local host='未设置'
+
+  case "$font_url" in
+    http://*|https://*)
+      host="${font_url#*://}"
+      host="${host%%/*}"
+      ;;
+  esac
+
+  printf '%s' "$host"
+}
+
+xmj_termux_font_extension() {
+  local raw_value="${1:-}"
+  local normalized="${raw_value%%\?*}"
+  local ext=''
+
+  if [ -z "$normalized" ]; then
+    printf '%s' 'unknown'
+    return 0
+  fi
+
+  ext="${normalized##*.}"
+  case "$ext" in
+    ttf|TTF)
+      printf '%s' 'ttf'
+      ;;
+    otf|OTF)
+      printf '%s' 'otf'
+      ;;
+    *)
+      printf '%s' 'unknown'
+      ;;
+  esac
+}
+
+xmj_detect_font_file_kind() {
+  local file_path="${1:-}"
+  local signature=''
+
+  if [ ! -f "$file_path" ]; then
+    return 1
+  fi
+
+  if command -v od >/dev/null 2>&1; then
+    signature="$(od -An -tx1 -N4 "$file_path" 2>/dev/null | tr -d '[:space:]')"
+    case "$signature" in
+      00010000|74727565|74746366)
+        printf '%s' 'ttf'
+        return 0
+        ;;
+      4f54544f)
+        printf '%s' 'otf'
+        return 0
+        ;;
+    esac
+  fi
+
+  case "$(xmj_termux_font_extension "$file_path")" in
+    ttf|otf)
+      xmj_termux_font_extension "$file_path"
+      return 0
+      ;;
+  esac
+
+  return 1
 }
 
 xmj_file_md5() {
@@ -69,6 +135,7 @@ xmj_termux_font_status_text() {
   local font_file
   local current_md5=''
   local preset_md5="${XMJ_TERMUX_FONT_PRESET_MD5:-}"
+  local font_kind=''
 
   font_file="$(xmj_termux_font_file)"
   if [ ! -f "$font_file" ]; then
@@ -76,13 +143,14 @@ xmj_termux_font_status_text() {
     return 0
   fi
 
+  font_kind="$(xmj_detect_font_file_kind "$font_file" || true)"
   current_md5="$(xmj_file_md5 "$font_file" || true)"
   if [ -n "$current_md5" ] && [ -n "$preset_md5" ] && [ "$current_md5" = "$preset_md5" ]; then
-    printf '%s' "${XMJ_TERMUX_FONT_PRESET_NAME:-京华老宋体}（已应用）"
+    printf '%s' "${XMJ_TERMUX_FONT_PRESET_NAME:-内置字体}（已应用）"
     return 0
   fi
 
-  printf '%s' '已检测到自定义字体'
+  printf '%s' "已检测到自定义字体（${font_kind:-未知格式}）"
 }
 
 xmj_download_file() {
@@ -111,7 +179,7 @@ xmj_reload_termux_settings() {
 }
 
 xmj_install_termux_font_preset() {
-  local font_name="${XMJ_TERMUX_FONT_PRESET_NAME:-京华老宋体}"
+  local font_name="${XMJ_TERMUX_FONT_PRESET_NAME:-内置字体}"
   local font_url="${XMJ_TERMUX_FONT_PRESET_URL:-}"
   local expected_md5="${XMJ_TERMUX_FONT_PRESET_MD5:-}"
   local font_dir
@@ -119,6 +187,7 @@ xmj_install_termux_font_preset() {
   local backup_file
   local tmp_file
   local actual_md5=''
+  local detected_kind=''
   local download_status=0
 
   if [ -z "${HOME:-}" ]; then
@@ -149,8 +218,10 @@ xmj_install_termux_font_preset() {
     rm -f "$tmp_file"
     if [ "$download_status" -eq 127 ]; then
       xmj_font_set_notice 'warn' '系统缺少 curl 或 wget，无法下载字体。'
+    elif [ "$download_status" -eq 22 ] || [ "$download_status" -eq 8 ]; then
+      xmj_font_set_notice 'warn' '字体下载失败：链接失效或资源不存在。'
     else
-      xmj_font_set_notice 'warn' "字体下载失败：$font_name"
+      xmj_font_set_notice 'warn' "字体下载失败：${font_name}，请检查网络或下载地址。"
     fi
     return 1
   fi
@@ -158,6 +229,13 @@ xmj_install_termux_font_preset() {
   if [ ! -s "$tmp_file" ]; then
     rm -f "$tmp_file"
     xmj_font_set_notice 'warn' '下载结果为空，已取消应用字体。'
+    return 1
+  fi
+
+  detected_kind="$(xmj_detect_font_file_kind "$tmp_file" || true)"
+  if [ "$detected_kind" != 'ttf' ] && [ "$detected_kind" != 'otf' ]; then
+    rm -f "$tmp_file"
+    xmj_font_set_notice 'warn' '下载结果不是有效的字体文件，已取消应用。'
     return 1
   fi
 
@@ -187,9 +265,9 @@ xmj_install_termux_font_preset() {
   fi
 
   if xmj_reload_termux_settings; then
-    xmj_font_set_notice 'success' "已应用 ${font_name}，若未立即生效请重开 Termux。"
+    xmj_font_set_notice 'success' "已应用 ${font_name}（${detected_kind}），若未立即生效请重开 Termux。"
   else
-    xmj_font_set_notice 'success' "已写入 ${font_name}，请手动执行 termux-reload-settings 或重开 Termux。"
+    xmj_font_set_notice 'success' "已写入 ${font_name}（${detected_kind}），请手动执行 termux-reload-settings 或重开 Termux。"
   fi
 
   return 0
