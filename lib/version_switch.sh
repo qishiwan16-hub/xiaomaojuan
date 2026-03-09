@@ -1032,7 +1032,7 @@ xmj_render_version_focus_fact() {
   case "$(xmj_version_display_kind)" in
     branch)
       if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
-        xmj_render_fact_line '酒馆分支' "${XMJ_VERSION_CURRENT_BRANCH}"
+        xmj_render_fact_line '当前项目分支' "${XMJ_VERSION_CURRENT_BRANCH}"
       fi
       ;;
     *)
@@ -1476,8 +1476,8 @@ xmj_version_target_detail() {
 xmj_branch_target_detail() {
   local detail_text=''
 
-  detail_text="当前已切到分支 ${XMJ_VERSION_TARGET_BRANCH:-unknown}。"
-  detail_text="${detail_text} 最常用默认分支仍是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。"
+  detail_text="当前已切到酒馆项目分支 ${XMJ_VERSION_TARGET_BRANCH:-unknown}。"
+  detail_text="${detail_text} 酒馆项目默认分支通常是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。"
 
   if [ -n "${XMJ_VERSION_BACKUP_NOTE:-}" ]; then
     detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_BACKUP_NOTE")"
@@ -2309,12 +2309,12 @@ xmj_render_switch_mode_page() {
   xmj_render_page_title '版本 / 分支' 'switch mode' 'update'
   printf '\n'
   xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
-  xmj_render_fact_line '酒馆分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '当前项目分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
   xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
   printf '\n'
   xmj_render_setting_card '1 · 切换版本' '按标签切换版本，并显示发行日期。' "推荐：$(xmj_version_recommended_summary)"
   printf '\n'
-  xmj_render_setting_card '2 · 切换分支' '按分支切换工作线。' "默认常用：${XMJ_VERSION_RECOMMENDED_BRANCH:-release}"
+  xmj_render_setting_card '2 · 切换分支' '按酒馆项目分支切换工作线。' "酒馆项目默认：${XMJ_VERSION_RECOMMENDED_BRANCH:-release}"
 
   if [ -n "${XMJ_VERSION_SELECTOR_NOTICE:-}" ]; then
     notice_color="$(xmj_version_selector_notice_color)"
@@ -2438,10 +2438,10 @@ xmj_render_branch_list_page() {
   xmj_render_header
   xmj_render_page_title '切换分支' 'switch branch' 'update'
   printf '\n'
-  xmj_render_setting_card '常用分支' "默认常用分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" ''
+  xmj_render_setting_card '酒馆项目分支' "这里列出的是酒馆项目仓库里的可切换分支。" "默认分支：${XMJ_VERSION_RECOMMENDED_BRANCH:-release}"
   printf '\n'
-  xmj_render_fact_line '酒馆分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
-  xmj_render_fact_line '分支总数' "$total"
+  xmj_render_fact_line '当前项目分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '项目分支总数' "$total"
   xmj_render_fact_line '当前页' "${page}/${total_pages}"
 
   if [ -n "${XMJ_VERSION_FETCH_NOTE:-}" ]; then
@@ -2454,7 +2454,7 @@ xmj_render_branch_list_page() {
 
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
-  printf '  %b♡ 可切换分支%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '  %b♡ 可切换项目分支%b\n' "$XMJ_PINK" "$XMJ_RESET"
   printf '\n'
 
   for ((index = start_index; index <= end_index; index += 1)); do
