@@ -3,7 +3,7 @@ xmj_exit_panel() {
   xmj_render_header
   printf '\n'
   printf '  %b小猫卷面板已退出。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b当前 01 启动酒馆与 02 一键更新已接入真实流程，其余功能仍在整理中。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
+  printf '  %b当前 01 启动酒馆、02 一键更新、03 切换版本已接入真实流程，其余功能仍在整理中。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
   printf '\n'
 }
 
@@ -23,6 +23,10 @@ xmj_handle_route() {
       xmj_run_tavern_update
       return 0
       ;;
+    03)
+      xmj_run_tavern_version_switch
+      return 0
+      ;;
     19)
       xmj_run_script_setting_page 'home'
       return 0
@@ -39,7 +43,7 @@ xmj_handle_route() {
       xmj_run_script_setting_page 'basic'
       return 0
       ;;
-    03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18)
+    04|05|06|07|08|09|10|11|12|13|14|15|16|17|18)
       xmj_render_menu_page "$input"
       return 0
       ;;

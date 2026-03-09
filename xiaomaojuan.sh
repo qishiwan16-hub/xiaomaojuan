@@ -17,6 +17,8 @@ source "$XMJ_ROOT_DIR/lib/menu_data.sh"
 source "$XMJ_ROOT_DIR/lib/render.sh"
 # shellcheck source=lib/update.sh
 source "$XMJ_ROOT_DIR/lib/update.sh"
+# shellcheck source=lib/version_switch.sh
+source "$XMJ_ROOT_DIR/lib/version_switch.sh"
 # shellcheck source=lib/launch.sh
 source "$XMJ_ROOT_DIR/lib/launch.sh"
 # shellcheck source=lib/router.sh
