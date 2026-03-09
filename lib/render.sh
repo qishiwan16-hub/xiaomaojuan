@@ -717,6 +717,20 @@ xmj_render_section_title() {
   printf '%b%s%b %b%s%b %b--%b %b%s%b %b× . *%b\n' "$XMJ_PINK" "$decor" "$XMJ_RESET" "$XMJ_BLUE_SOFT" "$phrase" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$title" "$XMJ_RESET" "$XMJ_LAVENDER" "$XMJ_RESET"
 }
 
+xmj_render_page_title() {
+  local title="${1:-}"
+  local phrase="${2:-preview page}"
+  local section="${3:-update}"
+  local decor="${XMJ_SECTION_DECOR[$section]}"
+
+  printf '%b%s%b %b%s%b %b--%b %b%s%b %b脳 . *%b\n' \
+    "$XMJ_PINK" "$decor" "$XMJ_RESET" \
+    "$XMJ_BLUE_SOFT" "$phrase" "$XMJ_RESET" \
+    "$XMJ_MIST" "$XMJ_RESET" \
+    "$XMJ_WHITE" "$title" "$XMJ_RESET" \
+    "$XMJ_LAVENDER" "$XMJ_RESET"
+}
+
 xmj_render_menu_item() {
   local id="${1:-}"
   printf '%bʚ✞%s✞ɞ%b｜%b%s%b' "$XMJ_PINK" "$id" "$XMJ_RESET" "$XMJ_WHITE" "${XMJ_MENU_LABEL[$id]}" "$XMJ_RESET"
@@ -1210,4 +1224,476 @@ xmj_render_invalid_input() {
   printf '  %b输入无效%b：%b%s%b\n' "$XMJ_WARN" "$XMJ_RESET" "$XMJ_PINK" "$input" "$XMJ_RESET"
   printf '  %b仅支持输入 00 - 25 的菜单编号。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
   xmj_wait_for_enter '按回车返回首页'
+}
+# Slimmed page variants: keep the visual style, drop page intros and file paths.
+xmj_render_update_progress() {
+  local current_stage="${1:-prepare}"
+  local stage_mode="${2:-running}"
+  local headline="${3:-准备中}"
+  local detail_text="${4:-猫猫正在安静整理更新步骤。}"
+  local stage_for_display='prepare'
+
+  stage_for_display="$(xmj_update_display_stage "$current_stage")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'backup' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'recover' "$stage_for_display" "$stage_mode"
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
+    || [ "$stage_for_display" = 'restore' ] \
+    || [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ]; then
+    xmj_render_update_stage_line 'restore' "$stage_for_display" "$stage_mode"
+  fi
+
+  xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_update_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-done}"
+  local summary_text="${3:-当前已经是最新版本。}"
+  local detail_text="${4:-}"
+  local before_commit="${6:-}"
+  local after_commit="${7:-}"
+  local result_title='更新完成'
+  local stage_mode='success'
+  local stage_for_display='done'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='更新失败'
+    stage_mode='failure'
+  fi
+
+  stage_for_display="$(xmj_update_display_stage "$current_stage")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+
+  if [ "$result_mode" = 'success' ] \
+    && [ -n "$before_commit" ] \
+    && [ -n "$after_commit" ] \
+    && [ "$before_commit" != "$after_commit" ]; then
+    printf '  %b版本变化%b：%b%s -> %s%b\n' \
+      "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_WHITE" "$before_commit" "$after_commit" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'backup' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'recover' "$stage_for_display" "$stage_mode"
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
+    || [ "$stage_for_display" = 'restore' ] \
+    || [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ]; then
+    xmj_render_update_stage_line 'restore' "$stage_for_display" "$stage_mode"
+  fi
+
+  xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_reinstall_progress() {
+  local current_stage="${1:-prepare}"
+  local stage_mode="${2:-running}"
+  local headline="${3:-准备中}"
+  local detail_text="${4:-猫猫正在安静整理卸载重装步骤。}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['04']}" 'reinstall tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ 卸载重装进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_reinstall_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'remove' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'install' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'done' "$current_stage" "$stage_mode"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_reinstall_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-done}"
+  local summary_text="${3:-卸载重装已完成。}"
+  local detail_text="${4:-}"
+  local result_title='卸载重装完成'
+  local stage_mode='success'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='卸载重装失败'
+    stage_mode='failure'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['04']}" 'reinstall tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ 卸载重装进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_reinstall_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'remove' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'install' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_reinstall_stage_line 'done' "$current_stage" "$stage_mode"
+
+  if [ -n "${XMJ_REINSTALL_AFTER_VERSION:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '当前版本' "${XMJ_REINSTALL_AFTER_VERSION}"
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_launch_progress() {
+  local current_stage="${1:-prepare}"
+  local headline="${2:-准备启动}"
+  local detail_text="${3:-猫猫正在安静整理启动步骤喵~}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['01']}" 'launch tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" '按 Ctrl+C 可以结束这次启动的酒馆，然后回到首页喵'
+  printf '\n'
+  printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_launch_stage_line 'prepare' "$current_stage" 'running'
+  xmj_render_launch_stage_line 'env' "$current_stage" 'running'
+  xmj_render_launch_stage_line 'boot' "$current_stage" 'running'
+  xmj_render_launch_stage_line 'running' "$current_stage" 'running'
+  xmj_render_launch_tavern_state
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_launch_running_screen() {
+  local entry_url="${XMJ_LAUNCH_ENTRY_URL:-}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['01']}" 'launch tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card \
+    '运行中' \
+    '现在可以直接进入酒馆，也可以继续看下面的实时日志。' \
+    '按 Ctrl+C 会结束这次启动的酒馆，并回到首页。'
+  printf '\n'
+  printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_launch_stage_line 'prepare' 'running' 'running'
+  xmj_render_launch_stage_line 'env' 'running' 'running'
+  xmj_render_launch_stage_line 'boot' 'running' 'running'
+  xmj_render_launch_stage_line 'running' 'running' 'running'
+  xmj_render_launch_tavern_state
+
+  printf '\n'
+  if [ -n "$entry_url" ]; then
+    xmj_render_fact_line '进入链接' "$entry_url"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_PID:-}" ]; then
+    xmj_render_fact_line 'PID' "${XMJ_LAUNCH_PID}"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  printf '  %b♡ 实时日志%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+}
+
+xmj_render_launch_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-running}"
+  local summary_text="${3:-酒馆已经开始运行喵~}"
+  local detail_text="${4:-}"
+  local result_title='运行状态'
+  local stage_mode='success'
+  local auto_back='0'
+
+  case "$result_mode" in
+    failure)
+      result_title='启动失败'
+      stage_mode='failure'
+      ;;
+    stopped)
+      result_title='已停止运行'
+      stage_mode='success'
+      auto_back='1'
+      ;;
+    exited)
+      result_title='运行已结束'
+      stage_mode='success'
+      ;;
+    *)
+      result_title='运行状态'
+      stage_mode='success'
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['01']}" 'launch tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_launch_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_launch_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_launch_stage_line 'boot' "$current_stage" "$stage_mode"
+  xmj_render_launch_stage_line 'running' "$current_stage" "$stage_mode"
+  xmj_render_launch_tavern_state
+
+  if [ "$auto_back" = '1' ]; then
+    printf '\n'
+    xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+    printf '  %b马上回到首页喵%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+    return 0
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_startup_notice() {
+  if [ "${XMJ_BOOT_NOTICE_SHOWN:-0}" = '1' ]; then
+    return 0
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '启动摘要' 'startup brief' 'info'
+  printf '\n'
+
+  if [ "${#XMJ_BOOT_MESSAGES[@]}" -gt 0 ]; then
+    printf '  %b初始化信息%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+    xmj_render_boot_lines "$XMJ_WHITE" "${XMJ_BOOT_MESSAGES[@]}"
+    printf '\n'
+  fi
+
+  if [ "${#XMJ_BOOT_WARNINGS[@]}" -gt 0 ]; then
+    printf '  %b温和提示%b\n' "$XMJ_WARN" "$XMJ_RESET"
+    xmj_render_boot_lines "$XMJ_CREAM" "${XMJ_BOOT_WARNINGS[@]}"
+    printf '\n'
+  fi
+
+  if [ "${#XMJ_BOOT_MESSAGES[@]}" -eq 0 ] && [ "${#XMJ_BOOT_WARNINGS[@]}" -eq 0 ]; then
+    printf '  %b本次启动没有额外提示，配置状态正常。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+    printf '\n'
+  fi
+
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  XMJ_BOOT_NOTICE_SHOWN=1
+  xmj_wait_for_enter '按回车进入首页'
+}
+
+xmj_render_startup_failure() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '启动失败' 'startup failure' 'info'
+  printf '\n'
+  printf '  %b启动配置失败，面板未继续加载。%b\n' "$XMJ_WARN" "$XMJ_RESET"
+  printf '  %b请优先检查以下项目：%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+
+  if [ "${#XMJ_BOOT_ERRORS[@]}" -gt 0 ]; then
+    xmj_render_boot_lines "$XMJ_WARN" "${XMJ_BOOT_ERRORS[@]}"
+  else
+    printf '  %b• 未提供具体错误信息，请检查脚本权限与配置文件语法。%b\n' "$XMJ_WARN" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  xmj_wait_for_enter '按回车结束脚本'
+}
+
+xmj_render_about_status_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['23']}" 'runtime status' 'about'
+  printf '\n'
+  xmj_render_fact_line '状态' "$(xmj_config_status_text)"
+  xmj_render_fact_line '主题' "$(xmj_theme_label)"
+  xmj_render_fact_line '酒馆状态' "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
+  xmj_render_fact_line '备份状态' "$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_setting_overview_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['19']}" 'settings hub' 'setting'
+  printf '\n'
+  xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
+  xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
+  xmj_render_fact_line '配置状态' "$(xmj_config_status_text)"
+  printf '\n'
+  xmj_render_setting_card '1 · 基础设置' '' '脚本信息'
+  printf '\n'
+  xmj_render_setting_card '2 · 主题 / 外观' '' "当前：$(xmj_theme_label)"
+  printf '\n'
+  xmj_render_setting_card '3 · 字体管理' '' "当前：$(xmj_termux_font_status_text)"
+  printf '\n'
+  xmj_render_setting_card '4 · 高级预留' '' '功能预留'
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '进入基础设置'
+  xmj_render_action_item '2' '进入主题 / 外观'
+  xmj_render_action_item '3' '进入字体管理'
+  xmj_render_action_item '4' '查看高级预留'
+  xmj_render_action_item '0' '返回首页'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 0'
+}
+
+xmj_render_setting_basic_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'basic')" 'basic settings' 'setting'
+  printf '\n'
+  xmj_render_fact_line '脚本名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
+  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
+  xmj_render_fact_line '目标项目' "${XMJ_TARGET_PROJECT:-SillyTavern}"
+  xmj_render_fact_line '运行环境' "${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
+  xmj_render_fact_line '配置状态' "$(xmj_config_status_text)"
+  xmj_render_notice_line
+  xmj_render_action_footer '输入 0 返回设置中心'
+}
+
+xmj_render_setting_theme_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'theme')" 'theme look' 'setting'
+  printf '\n'
+  xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
+  xmj_render_fact_line '主题字段' "${XMJ_THEME_MODE:-pastel}"
+  xmj_render_fact_line '边框风格' '软糖感分隔线 / 浅色渐柔边框'
+  xmj_render_fact_line '标题状态' '保持当前主标题装饰'
+  printf '\n'
+  xmj_render_setting_card 'pastel · 粉蓝白系' '' '默认主题'
+  printf '\n'
+  xmj_render_setting_card 'moonlight · 月光蓝紫系' '' '可通过 XMJ_THEME_MODE 切换'
+  xmj_render_notice_line
+  xmj_render_action_footer '输入 0 返回设置中心'
+}
+
+xmj_render_setting_font_page() {
+  local backup_file
+  local backup_state='未生成'
+  local preset_format='未知'
+
+  backup_file="$(xmj_termux_font_backup_file)"
+  if [ -f "$backup_file" ]; then
+    backup_state='已存在'
+  fi
+
+  case "$(xmj_termux_font_extension "${XMJ_TERMUX_FONT_PRESET_URL:-}")" in
+    ttf)
+      preset_format='TTF'
+      ;;
+    otf)
+      preset_format='OTF'
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'font')" 'font manager' 'setting'
+  printf '\n'
+  xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
+  xmj_render_fact_line '备份状态' "$backup_state"
+  xmj_render_fact_line '内置预设' "${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
+  xmj_render_fact_line '下载来源' "$(xmj_termux_font_source_host)"
+  xmj_render_fact_line '资源格式' "$preset_format"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' "安装内置字体：${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
+  xmj_render_action_item '2' '恢复默认字体'
+  xmj_render_action_item '3' '重新加载 Termux 设置'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 0'
+}
+
+xmj_render_setting_advanced_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'advanced')" 'advanced slot' 'setting'
+  printf '\n'
+  xmj_render_fact_line '功能状态' '预留中'
+  xmj_render_fact_line '当前定位' '仅保留结构'
+  xmj_render_notice_line
+  xmj_render_action_footer '输入 0 返回设置中心'
+}
+
+xmj_render_tavern_setting_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_fact_line '页面状态' '占位页'
+  xmj_render_fact_line '业务逻辑' '暂未接入'
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_about_panel_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['24']}" 'about panel' 'about'
+  printf '\n'
+  xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
+  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
+  xmj_render_fact_line '目标' "${XMJ_TARGET_PROJECT:-SillyTavern}"
+  xmj_render_fact_line '环境' "${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
+  xmj_render_fact_line '主题' "$(xmj_theme_label)"
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_author_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['25']}" 'author info' 'about'
+  printf '\n'
+  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
+  xmj_render_fact_line '标题副文' 'little panel memory'
+  xmj_render_fact_line '页面定位' 'preview page'
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_placeholder_page() {
+  local id="${1:-}"
+  local section="${XMJ_MENU_SECTION[$id]}"
+  local title="${XMJ_MENU_LABEL[$id]}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$title" 'coming soon' "$section"
+  printf '\n'
+  xmj_render_fact_line '所属分组' "${XMJ_SECTION_TITLE[$section]}"
+  xmj_render_fact_line '功能状态' '预留中'
+  xmj_render_page_footer '按回车返回首页'
 }

@@ -83,8 +83,8 @@ xmj_load_menu_data() {
   XMJ_INFO_VALUE['作者']="${XMJ_SCRIPT_AUTHOR:-meoroll}"
   XMJ_INFO_VALUE['环境']="${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
   XMJ_INFO_VALUE['目标']="${XMJ_TARGET_PROJECT:-SillyTavern}"
-  XMJ_INFO_VALUE['SillyTavern']="$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}") · $(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
-  XMJ_INFO_VALUE['备份']="$(xmj_display_path "$(xmj_maintenance_backup_dir)") · $(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
+  XMJ_INFO_VALUE['SillyTavern']="状态：$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
+  XMJ_INFO_VALUE['备份']="状态：$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
   XMJ_INFO_VALUE['状态']="$(xmj_config_status_text)"
   XMJ_INFO_VALUE['主题']="$(xmj_theme_label)"
 

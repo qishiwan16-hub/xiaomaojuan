@@ -9,6 +9,293 @@ xmj_version_timestamp() {
   printf '%s' "$timestamp"
 }
 
+xmj_version_panel_title() {
+  case "${XMJ_VERSION_TARGET_KIND:-${XMJ_VERSION_ACTIVE_MODE:-version}}" in
+    branch)
+      printf '%s' '切换分支'
+      ;;
+    *)
+      printf '%s' '切换版本'
+      ;;
+  esac
+}
+
+xmj_version_panel_phrase() {
+  case "${XMJ_VERSION_TARGET_KIND:-${XMJ_VERSION_ACTIVE_MODE:-version}}" in
+    branch)
+      printf '%s' 'switch branch'
+      ;;
+    *)
+      printf '%s' 'switch version'
+      ;;
+  esac
+}
+
+xmj_render_version_progress() {
+  local current_stage="${1:-prepare}"
+  local stage_mode="${2:-running}"
+  local headline="${3:-准备中}"
+  local detail_text="${4:-猫猫正在安静整理切换步骤。}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_version_panel_title)" "$(xmj_version_panel_phrase)" 'update'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ 版本切换进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_version_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'fetch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'local' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'switch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'restore' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_version_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-done}"
+  local summary_text="${3:-版本切换已完成。}"
+  local detail_text="${4:-}"
+  local result_title='切换完成'
+  local stage_mode='success'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='切换失败'
+    stage_mode='failure'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_version_panel_title)" "$(xmj_version_panel_phrase)" 'update'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ 版本切换进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_version_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'fetch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'local' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'switch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'restore' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
+
+  printf '\n'
+  if [ -n "${XMJ_VERSION_CURRENT_LABEL:-}" ]; then
+    xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL}"
+  fi
+  if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
+    xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH}"
+  fi
+  if [ -n "${XMJ_VERSION_CURRENT_COMMIT:-}" ]; then
+    xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT}"
+  fi
+  if [ -n "${XMJ_VERSION_TARGET_DATE:-}" ]; then
+    xmj_render_fact_line '发行日期' "${XMJ_VERSION_TARGET_DATE}"
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_switch_mode_page() {
+  local notice_color=''
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '版本 / 分支' 'switch mode' 'update'
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+  printf '\n'
+  xmj_render_setting_card '1 · 切换版本' '按标签切换版本，并显示发行日期。' "推荐：$(xmj_version_recommended_summary)"
+  printf '\n'
+  xmj_render_setting_card '2 · 切换分支' '按分支切换工作线。' "默认常用：${XMJ_VERSION_RECOMMENDED_BRANCH:-release}"
+
+  if [ -n "${XMJ_VERSION_SELECTOR_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_selector_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_SELECTOR_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  xmj_render_action_item '1' '进入版本列表'
+  xmj_render_action_item '2' '进入分支列表'
+  xmj_render_action_item '0' '返回首页'
+  xmj_render_action_footer '输入 1 / 2 / 0'
+}
+
+xmj_render_version_list_page() {
+  local total="${#XMJ_VERSION_TAGS[@]}"
+  local page="${XMJ_VERSION_PAGE:-1}"
+  local page_size="${XMJ_VERSION_PAGE_SIZE:-12}"
+  local total_pages="${XMJ_VERSION_TOTAL_PAGES:-1}"
+  local start_index='0'
+  local end_index='0'
+  local index='0'
+  local display_index=''
+  local number_width='2'
+  local marker_text=''
+  local marker_color=''
+  local notice_color=''
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size - 1))
+  if [ "$end_index" -ge "$total" ]; then
+    end_index=$((total - 1))
+  fi
+
+  number_width="${#total}"
+  if [ "$number_width" -lt 2 ]; then
+    number_width='2'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '切换版本' 'switch version' 'update'
+  printf '\n'
+  xmj_render_setting_card '推荐版本' "优先试 $(xmj_version_recommended_summary)。" ''
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL:-未知}"
+  xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+  xmj_render_fact_line '版本总数' "$total"
+  xmj_render_fact_line '当前页' "${page}/${total_pages}"
+
+  if [ -n "${XMJ_VERSION_FETCH_NOTE:-}" ]; then
+    xmj_render_fact_line '同步状态' "$XMJ_VERSION_FETCH_NOTE"
+  fi
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  printf '  %b♡ 可切换版本%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+
+  for ((index = start_index; index <= end_index; index += 1)); do
+    display_index="$(printf "%0${number_width}d" $((index + 1)))"
+    marker_text="$(xmj_version_index_marker_text "$index")"
+    marker_color="$(xmj_version_index_marker_color "$index")"
+
+    printf '  %b[%s]%b %b%s%b %b·%b %b%s%b' \
+      "$XMJ_PINK" "$display_index" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_TAGS[$index]}" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_BLUE_SOFT" "${XMJ_VERSION_TAG_DATES[$index]}" "$XMJ_RESET"
+
+    if [ -n "$marker_text" ]; then
+      printf ' %b[%s]%b' "$marker_color" "$marker_text" "$XMJ_RESET"
+    fi
+
+    printf '\n'
+  done
+
+  if [ -n "${XMJ_VERSION_INPUT_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_INPUT_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回上一层。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_branch_list_page() {
+  local total="${#XMJ_VERSION_BRANCHES[@]}"
+  local page="${XMJ_VERSION_PAGE:-1}"
+  local page_size="${XMJ_VERSION_PAGE_SIZE:-12}"
+  local total_pages="${XMJ_VERSION_TOTAL_PAGES:-1}"
+  local start_index='0'
+  local end_index='0'
+  local index='0'
+  local display_index=''
+  local number_width='2'
+  local marker_text=''
+  local marker_color=''
+  local notice_color=''
+  local source_text=''
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size - 1))
+  if [ "$end_index" -ge "$total" ]; then
+    end_index=$((total - 1))
+  fi
+
+  number_width="${#total}"
+  if [ "$number_width" -lt 2 ]; then
+    number_width='2'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '切换分支' 'switch branch' 'update'
+  printf '\n'
+  xmj_render_setting_card '常用分支' "默认常用分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" ''
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '分支总数' "$total"
+  xmj_render_fact_line '当前页' "${page}/${total_pages}"
+
+  if [ -n "${XMJ_VERSION_FETCH_NOTE:-}" ]; then
+    xmj_render_fact_line '同步状态' "$XMJ_VERSION_FETCH_NOTE"
+  fi
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  printf '  %b♡ 可切换分支%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+
+  for ((index = start_index; index <= end_index; index += 1)); do
+    display_index="$(printf "%0${number_width}d" $((index + 1)))"
+    marker_text="$(xmj_branch_index_marker_text "$index")"
+    marker_color="$(xmj_branch_index_marker_color "$index")"
+    source_text="$(xmj_branch_source_text "$index")"
+
+    printf '  %b[%s]%b %b%s%b %b·%b %b%s%b %b·%b %b%s%b' \
+      "$XMJ_PINK" "$display_index" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_BRANCHES[$index]}" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_BLUE_SOFT" "$source_text" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_BRANCH_COMMITS[$index]}" "$XMJ_RESET"
+
+    if [ -n "$marker_text" ]; then
+      printf ' %b[%s]%b' "$marker_color" "$marker_text" "$XMJ_RESET"
+    fi
+
+    printf '\n'
+  done
+
+  if [ -n "${XMJ_VERSION_INPUT_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_INPUT_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回上一层。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
 xmj_version_reset_state() {
   XMJ_VERSION_LOG_FILE=''
   XMJ_VERSION_STAGE='prepare'
@@ -1867,4 +2154,290 @@ xmj_run_tavern_version_switch() {
         ;;
     esac
   done
+}
+xmj_version_panel_title() {
+  case "${XMJ_VERSION_TARGET_KIND:-${XMJ_VERSION_ACTIVE_MODE:-version}}" in
+    branch)
+      printf '%s' '切换分支'
+      ;;
+    *)
+      printf '%s' '切换版本'
+      ;;
+  esac
+}
+
+xmj_version_panel_phrase() {
+  case "${XMJ_VERSION_TARGET_KIND:-${XMJ_VERSION_ACTIVE_MODE:-version}}" in
+    branch)
+      printf '%s' 'switch branch'
+      ;;
+    *)
+      printf '%s' 'switch version'
+      ;;
+  esac
+}
+
+xmj_render_version_progress() {
+  local current_stage="${1:-prepare}"
+  local stage_mode="${2:-running}"
+  local headline="${3:-准备中}"
+  local detail_text="${4:-猫猫正在安静整理切换步骤。}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_version_panel_title)" "$(xmj_version_panel_phrase)" 'update'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ 版本切换进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_version_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'fetch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'local' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'switch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'restore' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_version_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-done}"
+  local summary_text="${3:-版本切换已完成。}"
+  local detail_text="${4:-}"
+  local result_title='切换完成'
+  local stage_mode='success'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='切换失败'
+    stage_mode='failure'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_version_panel_title)" "$(xmj_version_panel_phrase)" 'update'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ 版本切换进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_version_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'fetch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'backup' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'local' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'switch' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'recover' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'restore' "$current_stage" "$stage_mode"
+  xmj_render_version_stage_line 'done' "$current_stage" "$stage_mode"
+
+  printf '\n'
+  if [ -n "${XMJ_VERSION_CURRENT_LABEL:-}" ]; then
+    xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL}"
+  fi
+  if [ -n "${XMJ_VERSION_CURRENT_BRANCH:-}" ]; then
+    xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH}"
+  fi
+  if [ -n "${XMJ_VERSION_CURRENT_COMMIT:-}" ]; then
+    xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT}"
+  fi
+  if [ -n "${XMJ_VERSION_TARGET_DATE:-}" ]; then
+    xmj_render_fact_line '发行日期' "${XMJ_VERSION_TARGET_DATE}"
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_switch_mode_page() {
+  local notice_color=''
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '版本 / 分支' 'switch mode' 'update'
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+  printf '\n'
+  xmj_render_setting_card '1 · 切换版本' '按标签切换版本，并显示发行日期。' "推荐：$(xmj_version_recommended_summary)"
+  printf '\n'
+  xmj_render_setting_card '2 · 切换分支' '按分支切换工作线。' "默认常用：${XMJ_VERSION_RECOMMENDED_BRANCH:-release}"
+
+  if [ -n "${XMJ_VERSION_SELECTOR_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_selector_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_SELECTOR_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  xmj_render_action_item '1' '进入版本列表'
+  xmj_render_action_item '2' '进入分支列表'
+  xmj_render_action_item '0' '返回首页'
+  xmj_render_action_footer '输入 1 / 2 / 0'
+}
+
+xmj_render_version_list_page() {
+  local total="${#XMJ_VERSION_TAGS[@]}"
+  local page="${XMJ_VERSION_PAGE:-1}"
+  local page_size="${XMJ_VERSION_PAGE_SIZE:-12}"
+  local total_pages="${XMJ_VERSION_TOTAL_PAGES:-1}"
+  local start_index='0'
+  local end_index='0'
+  local index='0'
+  local display_index=''
+  local number_width='2'
+  local marker_text=''
+  local marker_color=''
+  local notice_color=''
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size - 1))
+  if [ "$end_index" -ge "$total" ]; then
+    end_index=$((total - 1))
+  fi
+
+  number_width="${#total}"
+  if [ "$number_width" -lt 2 ]; then
+    number_width='2'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '切换版本' 'switch version' 'update'
+  printf '\n'
+  xmj_render_setting_card '推荐版本' "优先试 $(xmj_version_recommended_summary)。" ''
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL:-未知}"
+  xmj_render_fact_line '当前提交' "${XMJ_VERSION_CURRENT_COMMIT:-unknown}"
+  xmj_render_fact_line '版本总数' "$total"
+  xmj_render_fact_line '当前页' "${page}/${total_pages}"
+
+  if [ -n "${XMJ_VERSION_FETCH_NOTE:-}" ]; then
+    xmj_render_fact_line '同步状态' "$XMJ_VERSION_FETCH_NOTE"
+  fi
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  printf '  %b♡ 可切换版本%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+
+  for ((index = start_index; index <= end_index; index += 1)); do
+    display_index="$(printf "%0${number_width}d" $((index + 1)))"
+    marker_text="$(xmj_version_index_marker_text "$index")"
+    marker_color="$(xmj_version_index_marker_color "$index")"
+
+    printf '  %b[%s]%b %b%s%b %b·%b %b%s%b' \
+      "$XMJ_PINK" "$display_index" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_TAGS[$index]}" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_BLUE_SOFT" "${XMJ_VERSION_TAG_DATES[$index]}" "$XMJ_RESET"
+
+    if [ -n "$marker_text" ]; then
+      printf ' %b[%s]%b' "$marker_color" "$marker_text" "$XMJ_RESET"
+    fi
+
+    printf '\n'
+  done
+
+  if [ -n "${XMJ_VERSION_INPUT_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_INPUT_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回上一层。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_render_branch_list_page() {
+  local total="${#XMJ_VERSION_BRANCHES[@]}"
+  local page="${XMJ_VERSION_PAGE:-1}"
+  local page_size="${XMJ_VERSION_PAGE_SIZE:-12}"
+  local total_pages="${XMJ_VERSION_TOTAL_PAGES:-1}"
+  local start_index='0'
+  local end_index='0'
+  local index='0'
+  local display_index=''
+  local number_width='2'
+  local marker_text=''
+  local marker_color=''
+  local notice_color=''
+  local source_text=''
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size - 1))
+  if [ "$end_index" -ge "$total" ]; then
+    end_index=$((total - 1))
+  fi
+
+  number_width="${#total}"
+  if [ "$number_width" -lt 2 ]; then
+    number_width='2'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '切换分支' 'switch branch' 'update'
+  printf '\n'
+  xmj_render_setting_card '常用分支' "默认常用分支是 ${XMJ_VERSION_RECOMMENDED_BRANCH:-release}。" ''
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_VERSION:-未知}"
+  xmj_render_fact_line '当前分支' "${XMJ_VERSION_CURRENT_BRANCH:-detached}"
+  xmj_render_fact_line '分支总数' "$total"
+  xmj_render_fact_line '当前页' "${page}/${total_pages}"
+
+  if [ -n "${XMJ_VERSION_FETCH_NOTE:-}" ]; then
+    xmj_render_fact_line '同步状态' "$XMJ_VERSION_FETCH_NOTE"
+  fi
+
+  if [ "${XMJ_VERSION_HAS_LOCAL_CHANGES:-0}" = '1' ] && [ -n "${XMJ_VERSION_LOCAL_NOTE:-}" ]; then
+    xmj_render_fact_line '本地改动' "$XMJ_VERSION_LOCAL_NOTE"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  printf '  %b♡ 可切换分支%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+
+  for ((index = start_index; index <= end_index; index += 1)); do
+    display_index="$(printf "%0${number_width}d" $((index + 1)))"
+    marker_text="$(xmj_branch_index_marker_text "$index")"
+    marker_color="$(xmj_branch_index_marker_color "$index")"
+    source_text="$(xmj_branch_source_text "$index")"
+
+    printf '  %b[%s]%b %b%s%b %b·%b %b%s%b %b·%b %b%s%b' \
+      "$XMJ_PINK" "$display_index" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_BRANCHES[$index]}" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_BLUE_SOFT" "$source_text" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" \
+      "$XMJ_WHITE" "${XMJ_VERSION_BRANCH_COMMITS[$index]}" "$XMJ_RESET"
+
+    if [ -n "$marker_text" ]; then
+      printf ' %b[%s]%b' "$marker_color" "$marker_text" "$XMJ_RESET"
+    fi
+
+    printf '\n'
+  done
+
+  if [ -n "${XMJ_VERSION_INPUT_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_INPUT_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b输入序号即可切换；n 下一页；p 上一页；r 刷新；0 返回上一层。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
 }

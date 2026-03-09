@@ -29,6 +29,222 @@ xmj_update_reset_state() {
   XMJ_UPDATE_STASH_REF=''
   XMJ_UPDATE_STASH_LABEL=''
   XMJ_UPDATE_RESTORE_NOTE=''
+  XMJ_UPDATE_BRANCH_REPAIR_TARGET=''
+  XMJ_UPDATE_BRANCH_REPAIR_NOTE=''
+}
+
+xmj_update_find_repair_branch() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local remote_head=''
+  local candidate=''
+  local branch=''
+  local seen='|'
+  local -a candidates=()
+
+  remote_head="$(git -C "$repo_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  remote_head="${remote_head#origin/}"
+  if [ -n "$remote_head" ]; then
+    candidates+=("$remote_head")
+    seen="${seen}${remote_head}|"
+  fi
+
+  for candidate in release main master; do
+    case "$seen" in
+      *"|$candidate|"*)
+        ;;
+      *)
+        candidates+=("$candidate")
+        seen="${seen}${candidate}|"
+        ;;
+    esac
+  done
+
+  for branch in "${candidates[@]}"; do
+    if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch" 2>>"$XMJ_UPDATE_LOG_FILE" \
+      || git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>>"$XMJ_UPDATE_LOG_FILE"; then
+      printf '%s' "$branch"
+      return 0
+    fi
+  done
+
+  while IFS= read -r branch || [ -n "$branch" ]; do
+    branch="${branch#origin/}"
+    case "$branch" in
+      ''|HEAD)
+        continue
+        ;;
+    esac
+
+    case "$seen" in
+      *"|$branch|"*)
+        continue
+        ;;
+    esac
+
+    printf '%s' "$branch"
+    return 0
+  done < <(git -C "$repo_path" for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin 2>>"$XMJ_UPDATE_LOG_FILE")
+
+  return 1
+}
+
+xmj_update_check_repository() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local repo_flag=''
+  local worktree_state=''
+
+  repo_flag="$(git -C "$repo_path" rev-parse --is-inside-work-tree 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  if [ "$repo_flag" != 'true' ]; then
+    xmj_update_fail 'repo' '目标目录不是 Git 仓库' '请确认这里是通过 Git clone 安装的 SillyTavern 目录。'
+    return 1
+  fi
+
+  XMJ_UPDATE_BEFORE_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
+  XMJ_UPDATE_BEFORE_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  worktree_state="$(git -C "$repo_path" status --porcelain 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+
+  if [ -n "$worktree_state" ]; then
+    XMJ_UPDATE_HAS_LOCAL_CHANGES='1'
+    XMJ_UPDATE_LOCAL_NOTE='检测到本地改动，更新前会先临时收好。'
+    xmj_update_log_line '检测到本地改动，将在更新前自动 stash。'
+    printf '%s\n' "$worktree_state" >>"$XMJ_UPDATE_LOG_FILE"
+  else
+    XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
+    XMJ_UPDATE_LOCAL_NOTE='工作区干净，无需整理本地改动。'
+    xmj_update_log_line "$XMJ_UPDATE_LOCAL_NOTE"
+  fi
+
+  XMJ_UPDATE_BRANCH="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  if [ -n "$XMJ_UPDATE_BRANCH" ]; then
+    xmj_update_log_line "当前分支：$XMJ_UPDATE_BRANCH"
+    xmj_update_log_line "更新前提交：${XMJ_UPDATE_BEFORE_COMMIT:-unknown}"
+    return 0
+  fi
+
+  XMJ_UPDATE_BRANCH_REPAIR_TARGET="$(xmj_update_find_repair_branch || true)"
+  if [ -z "${XMJ_UPDATE_BRANCH_REPAIR_TARGET:-}" ]; then
+    xmj_update_fail 'repo' '无法识别当前分支' '当前仓库处于 detached HEAD，且没有找到可自动切回的更新分支。请先切回 release 或通过 03 切换到分支后再试。'
+    return 1
+  fi
+
+  XMJ_UPDATE_BRANCH="$XMJ_UPDATE_BRANCH_REPAIR_TARGET"
+  XMJ_UPDATE_BRANCH_REPAIR_NOTE="检测到当前仓库处于 detached HEAD，更新前会自动切回 ${XMJ_UPDATE_BRANCH_REPAIR_TARGET} 分支。"
+  xmj_update_log_line "$XMJ_UPDATE_BRANCH_REPAIR_NOTE"
+  xmj_update_log_line "更新前提交：${XMJ_UPDATE_BEFORE_COMMIT:-unknown}"
+  return 0
+}
+
+xmj_update_repair_branch_if_needed() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local target_branch="${XMJ_UPDATE_BRANCH_REPAIR_TARGET:-}"
+
+  if [ -z "$target_branch" ]; then
+    return 0
+  fi
+
+  xmj_update_log_line "开始自动修复分支状态：${target_branch}"
+
+  if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$target_branch" 2>>"$XMJ_UPDATE_LOG_FILE"; then
+    if ! git -C "$repo_path" checkout "$target_branch" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '自动修复分支失败' '脚本尝试自动切回可更新分支，但没有成功。请先切回 release 或通过 03 切换到分支后再试。'
+      return 1
+    fi
+  elif git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$target_branch" 2>>"$XMJ_UPDATE_LOG_FILE"; then
+    if ! git -C "$repo_path" checkout -B "$target_branch" "origin/$target_branch" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '自动修复分支失败' '脚本尝试自动切回可更新分支，但没有成功。请先切回 release 或通过 03 切换到分支后再试。'
+      return 1
+    fi
+
+    git -C "$repo_path" branch --set-upstream-to="origin/$target_branch" "$target_branch" >>"$XMJ_UPDATE_LOG_FILE" 2>&1 || true
+  else
+    xmj_update_fail 'pull' '自动修复分支失败' '脚本尝试自动切回可更新分支，但没有找到可用分支。请先切回 release 或通过 03 切换到分支后再试。'
+    return 1
+  fi
+
+  XMJ_UPDATE_BRANCH="$target_branch"
+  XMJ_UPDATE_BRANCH_REPAIR_TARGET=''
+  XMJ_UPDATE_BRANCH_REPAIR_NOTE="已自动从 detached HEAD 切回 ${target_branch} 分支。"
+  xmj_update_log_line "$XMJ_UPDATE_BRANCH_REPAIR_NOTE"
+  return 0
+}
+
+xmj_update_pull_repository() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local upstream_ref=''
+
+  if ! xmj_update_repair_branch_if_needed; then
+    return 1
+  fi
+
+  if upstream_ref="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>>"$XMJ_UPDATE_LOG_FILE")"; then
+    xmj_update_log_line "检测到上游分支：$upstream_ref"
+    if ! git -C "$repo_path" pull --ff-only >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '拉取更新失败' '远程内容没有顺利同步，可温和查看日志。'
+      return 1
+    fi
+  else
+    xmj_update_log_line '当前分支未配置上游，尝试使用 origin/<当前分支>。'
+    if ! git -C "$repo_path" remote get-url origin >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '未找到可用的远程仓库' '没有找到可用的远程更新来源。'
+      return 1
+    fi
+
+    if ! git -C "$repo_path" pull --ff-only origin "$XMJ_UPDATE_BRANCH" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '拉取更新失败' '远程内容没有顺利同步，可温和查看日志。'
+      return 1
+    fi
+  fi
+
+  XMJ_UPDATE_AFTER_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  XMJ_UPDATE_AFTER_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
+  xmj_update_log_line "更新后提交：${XMJ_UPDATE_AFTER_COMMIT:-unknown}"
+  xmj_update_log_line "更新后版本：${XMJ_UPDATE_AFTER_VERSION:-unknown}"
+  return 0
+}
+
+xmj_update_success_detail() {
+  local detail_text=''
+
+  if [ -n "${XMJ_UPDATE_BRANCH_REPAIR_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BRANCH_REPAIR_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_BACKUP_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BACKUP_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_RECOVER_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RECOVER_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ] \
+    && [ "$XMJ_UPDATE_RESTORE_NOTE" = '本地改动已自动放回。' ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RESTORE_NOTE")"
+  fi
+
+  printf '%s' "$detail_text"
+}
+
+xmj_update_reset_state() {
+  XMJ_UPDATE_LOG_FILE=''
+  XMJ_UPDATE_STAGE='prepare'
+  XMJ_UPDATE_SUMMARY=''
+  XMJ_UPDATE_DETAIL=''
+  XMJ_UPDATE_BRANCH=''
+  XMJ_UPDATE_BEFORE_VERSION=''
+  XMJ_UPDATE_AFTER_VERSION=''
+  XMJ_UPDATE_BEFORE_COMMIT=''
+  XMJ_UPDATE_AFTER_COMMIT=''
+  XMJ_UPDATE_DEPENDENCY_NOTE=''
+  XMJ_UPDATE_BACKUP_FILE=''
+  XMJ_UPDATE_BACKUP_NOTE=''
+  XMJ_UPDATE_RECOVER_NOTE=''
+  XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
+  XMJ_UPDATE_LOCAL_NOTE=''
+  XMJ_UPDATE_STASH_CREATED='0'
+  XMJ_UPDATE_STASH_REF=''
+  XMJ_UPDATE_STASH_LABEL=''
+  XMJ_UPDATE_RESTORE_NOTE=''
 }
 
 xmj_update_log_line() {
@@ -656,4 +872,219 @@ xmj_run_tavern_update() {
     "${XMJ_SILLYTAVERN_PATH:-}"
 
   return 0
+}
+xmj_update_reset_state() {
+  XMJ_UPDATE_LOG_FILE=''
+  XMJ_UPDATE_STAGE='prepare'
+  XMJ_UPDATE_SUMMARY=''
+  XMJ_UPDATE_DETAIL=''
+  XMJ_UPDATE_BRANCH=''
+  XMJ_UPDATE_BEFORE_VERSION=''
+  XMJ_UPDATE_AFTER_VERSION=''
+  XMJ_UPDATE_BEFORE_COMMIT=''
+  XMJ_UPDATE_AFTER_COMMIT=''
+  XMJ_UPDATE_DEPENDENCY_NOTE=''
+  XMJ_UPDATE_BACKUP_FILE=''
+  XMJ_UPDATE_BACKUP_NOTE=''
+  XMJ_UPDATE_RECOVER_NOTE=''
+  XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
+  XMJ_UPDATE_LOCAL_NOTE=''
+  XMJ_UPDATE_STASH_CREATED='0'
+  XMJ_UPDATE_STASH_REF=''
+  XMJ_UPDATE_STASH_LABEL=''
+  XMJ_UPDATE_RESTORE_NOTE=''
+  XMJ_UPDATE_BRANCH_REPAIR_TARGET=''
+  XMJ_UPDATE_BRANCH_REPAIR_NOTE=''
+}
+
+xmj_update_find_repair_branch() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local remote_head=''
+  local candidate=''
+  local branch=''
+  local seen='|'
+  local -a candidates=()
+
+  remote_head="$(git -C "$repo_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  remote_head="${remote_head#origin/}"
+  if [ -n "$remote_head" ]; then
+    candidates+=("$remote_head")
+    seen="${seen}${remote_head}|"
+  fi
+
+  for candidate in release main master; do
+    case "$seen" in
+      *"|$candidate|"*)
+        ;;
+      *)
+        candidates+=("$candidate")
+        seen="${seen}${candidate}|"
+        ;;
+    esac
+  done
+
+  for branch in "${candidates[@]}"; do
+    if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch" 2>>"$XMJ_UPDATE_LOG_FILE" \
+      || git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>>"$XMJ_UPDATE_LOG_FILE"; then
+      printf '%s' "$branch"
+      return 0
+    fi
+  done
+
+  while IFS= read -r branch || [ -n "$branch" ]; do
+    branch="${branch#origin/}"
+    case "$branch" in
+      ''|HEAD)
+        continue
+        ;;
+    esac
+
+    case "$seen" in
+      *"|$branch|"*)
+        continue
+        ;;
+    esac
+
+    printf '%s' "$branch"
+    return 0
+  done < <(git -C "$repo_path" for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin 2>>"$XMJ_UPDATE_LOG_FILE")
+
+  return 1
+}
+
+xmj_update_check_repository() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local repo_flag=''
+  local worktree_state=''
+
+  repo_flag="$(git -C "$repo_path" rev-parse --is-inside-work-tree 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  if [ "$repo_flag" != 'true' ]; then
+    xmj_update_fail 'repo' '目标目录不是 Git 仓库' '请确认这里是通过 Git clone 安装的 SillyTavern 目录。'
+    return 1
+  fi
+
+  XMJ_UPDATE_BEFORE_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
+  XMJ_UPDATE_BEFORE_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  worktree_state="$(git -C "$repo_path" status --porcelain 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+
+  if [ -n "$worktree_state" ]; then
+    XMJ_UPDATE_HAS_LOCAL_CHANGES='1'
+    XMJ_UPDATE_LOCAL_NOTE='检测到本地改动，更新前会先临时收好。'
+    xmj_update_log_line '检测到本地改动，将在更新前自动 stash。'
+    printf '%s\n' "$worktree_state" >>"$XMJ_UPDATE_LOG_FILE"
+  else
+    XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
+    XMJ_UPDATE_LOCAL_NOTE='工作区干净，无需整理本地改动。'
+    xmj_update_log_line "$XMJ_UPDATE_LOCAL_NOTE"
+  fi
+
+  XMJ_UPDATE_BRANCH="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  if [ -n "$XMJ_UPDATE_BRANCH" ]; then
+    xmj_update_log_line "当前分支：$XMJ_UPDATE_BRANCH"
+    xmj_update_log_line "更新前提交：${XMJ_UPDATE_BEFORE_COMMIT:-unknown}"
+    return 0
+  fi
+
+  XMJ_UPDATE_BRANCH_REPAIR_TARGET="$(xmj_update_find_repair_branch || true)"
+  if [ -z "${XMJ_UPDATE_BRANCH_REPAIR_TARGET:-}" ]; then
+    xmj_update_fail 'repo' '无法识别当前分支' '当前仓库处于 detached HEAD，且没有找到可自动切回的更新分支。请先切回 release 或通过 03 切换到分支后再试。'
+    return 1
+  fi
+
+  XMJ_UPDATE_BRANCH="$XMJ_UPDATE_BRANCH_REPAIR_TARGET"
+  XMJ_UPDATE_BRANCH_REPAIR_NOTE="检测到当前仓库处于 detached HEAD，更新前会自动切回 ${XMJ_UPDATE_BRANCH_REPAIR_TARGET} 分支。"
+  xmj_update_log_line "$XMJ_UPDATE_BRANCH_REPAIR_NOTE"
+  xmj_update_log_line "更新前提交：${XMJ_UPDATE_BEFORE_COMMIT:-unknown}"
+  return 0
+}
+
+xmj_update_repair_branch_if_needed() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local target_branch="${XMJ_UPDATE_BRANCH_REPAIR_TARGET:-}"
+
+  if [ -z "$target_branch" ]; then
+    return 0
+  fi
+
+  xmj_update_log_line "开始自动修复分支状态：${target_branch}"
+
+  if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$target_branch" 2>>"$XMJ_UPDATE_LOG_FILE"; then
+    if ! git -C "$repo_path" checkout "$target_branch" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '自动修复分支失败' '脚本尝试自动切回可更新分支，但没有成功。请先切回 release 或通过 03 切换到分支后再试。'
+      return 1
+    fi
+  elif git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$target_branch" 2>>"$XMJ_UPDATE_LOG_FILE"; then
+    if ! git -C "$repo_path" checkout -B "$target_branch" "origin/$target_branch" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '自动修复分支失败' '脚本尝试自动切回可更新分支，但没有成功。请先切回 release 或通过 03 切换到分支后再试。'
+      return 1
+    fi
+
+    git -C "$repo_path" branch --set-upstream-to="origin/$target_branch" "$target_branch" >>"$XMJ_UPDATE_LOG_FILE" 2>&1 || true
+  else
+    xmj_update_fail 'pull' '自动修复分支失败' '脚本尝试自动切回可更新分支，但没有找到可用分支。请先切回 release 或通过 03 切换到分支后再试。'
+    return 1
+  fi
+
+  XMJ_UPDATE_BRANCH="$target_branch"
+  XMJ_UPDATE_BRANCH_REPAIR_TARGET=''
+  XMJ_UPDATE_BRANCH_REPAIR_NOTE="已自动从 detached HEAD 切回 ${target_branch} 分支。"
+  xmj_update_log_line "$XMJ_UPDATE_BRANCH_REPAIR_NOTE"
+  return 0
+}
+
+xmj_update_pull_repository() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local upstream_ref=''
+
+  if ! xmj_update_repair_branch_if_needed; then
+    return 1
+  fi
+
+  if upstream_ref="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>>"$XMJ_UPDATE_LOG_FILE")"; then
+    xmj_update_log_line "检测到上游分支：$upstream_ref"
+    if ! git -C "$repo_path" pull --ff-only >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '拉取更新失败' '远程内容没有顺利同步，可温和查看日志。'
+      return 1
+    fi
+  else
+    xmj_update_log_line '当前分支未配置上游，尝试使用 origin/<当前分支>。'
+    if ! git -C "$repo_path" remote get-url origin >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '未找到可用的远程仓库' '没有找到可用的远程更新来源。'
+      return 1
+    fi
+
+    if ! git -C "$repo_path" pull --ff-only origin "$XMJ_UPDATE_BRANCH" >>"$XMJ_UPDATE_LOG_FILE" 2>&1; then
+      xmj_update_fail 'pull' '拉取更新失败' '远程内容没有顺利同步，可温和查看日志。'
+      return 1
+    fi
+  fi
+
+  XMJ_UPDATE_AFTER_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_UPDATE_LOG_FILE" || true)"
+  XMJ_UPDATE_AFTER_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$XMJ_UPDATE_LOG_FILE")"
+  xmj_update_log_line "更新后提交：${XMJ_UPDATE_AFTER_COMMIT:-unknown}"
+  xmj_update_log_line "更新后版本：${XMJ_UPDATE_AFTER_VERSION:-unknown}"
+  return 0
+}
+
+xmj_update_success_detail() {
+  local detail_text=''
+
+  if [ -n "${XMJ_UPDATE_BRANCH_REPAIR_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BRANCH_REPAIR_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_BACKUP_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BACKUP_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_RECOVER_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RECOVER_NOTE")"
+  fi
+
+  if [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ] \
+    && [ "$XMJ_UPDATE_RESTORE_NOTE" = '本地改动已自动放回。' ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RESTORE_NOTE")"
+  fi
+
+  printf '%s' "$detail_text"
 }

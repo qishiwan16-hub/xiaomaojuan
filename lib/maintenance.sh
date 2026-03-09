@@ -264,7 +264,7 @@ xmj_maintenance_create_backup() {
   XMJ_MAINT_BACKUP_NAME="$archive_name"
   XMJ_MAINT_BACKUP_ITEMS="$joined_items"
   XMJ_MAINT_BACKUP_MISSING_ITEMS="$joined_missing"
-  XMJ_MAINT_BACKUP_NOTE="已自动备份 ${joined_items} 到 $(xmj_display_path "$archive_file")。"
+  XMJ_MAINT_BACKUP_NOTE="已自动备份 ${joined_items}。"
 
   if [ -n "$joined_missing" ]; then
     XMJ_MAINT_BACKUP_NOTE="${XMJ_MAINT_BACKUP_NOTE} 本次未发现 ${joined_missing}，压缩包只包含已有内容。"
@@ -310,7 +310,7 @@ xmj_maintenance_restore_backup() {
     return 1
   fi
 
-  XMJ_MAINT_BACKUP_RESTORE_NOTE="已从 $(xmj_display_path "$XMJ_MAINT_BACKUP_FILE") 覆盖恢复备份内容。"
+  XMJ_MAINT_BACKUP_RESTORE_NOTE='已覆盖恢复备份内容。'
   xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_RESTORE_NOTE"
   return 0
 }
@@ -764,7 +764,7 @@ xmj_run_tavern_reinstall() {
     '正在重新拉取酒馆代码。'
 
   if ! xmj_reinstall_clone_repo; then
-    XMJ_REINSTALL_DETAIL="${XMJ_REINSTALL_DETAIL} 自动备份仍保留在 $(xmj_display_path "${XMJ_REINSTALL_BACKUP_FILE:-}")。"
+    XMJ_REINSTALL_DETAIL="${XMJ_REINSTALL_DETAIL} 自动备份已保留，可稍后继续处理。"
     xmj_render_reinstall_result \
       'failure' \
       "$XMJ_REINSTALL_STAGE" \
@@ -836,4 +836,67 @@ xmj_run_tavern_reinstall() {
     "$XMJ_REINSTALL_SUMMARY" \
     "$XMJ_REINSTALL_DETAIL"
   return 0
+}
+xmj_render_reinstall_confirm_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['04']}" 'reinstall tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card \
+    '即将开始卸载重装' \
+    "当前版本：${XMJ_REINSTALL_BEFORE_VERSION}" \
+    "目标分支：${XMJ_REINSTALL_BRANCH}"
+  printf '\n'
+  printf '  %b♡ 执行内容%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '  %b• 会先自动备份，再移除当前酒馆并重新安装。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b• 完成后会把 data、third-party 和 config.yaml 覆盖恢复回来。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '\n'
+  printf '  %b输入 y 开始卸载重装；输入其它任意内容取消并返回首页。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+}
+
+xmj_run_update_history_page() {
+  local history_file=''
+  local total_lines='0'
+  local start_line='1'
+  local display_lines='18'
+  local line=''
+
+  history_file="$(xmj_maintenance_history_file)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['05']}" 'update history' 'update'
+  printf '\n'
+
+  if [ ! -f "$history_file" ] || [ ! -s "$history_file" ]; then
+    xmj_render_setting_card \
+      '还没有历史记录' \
+      '当前还没有写入任何更新、回退或卸载条目。' \
+      '等你执行真实维护操作后，这里会自动出现记录。'
+    xmj_render_page_footer '按回车返回首页'
+    return 0
+  fi
+
+  total_lines="$(wc -l <"$history_file" 2>/dev/null || true)"
+  total_lines="${total_lines//[[:space:]]/}"
+  case "$total_lines" in
+    ''|*[!0-9]*)
+      total_lines='0'
+      ;;
+  esac
+
+  if [ "$total_lines" -gt "$display_lines" ]; then
+    start_line=$((total_lines - display_lines + 1))
+  fi
+
+  printf '  %b♡ 最近记录%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '  %b%s%b\n' "$XMJ_WHITE" "$line" "$XMJ_RESET"
+  done < <(sed -n "${start_line},${total_lines}p" "$history_file" 2>/dev/null)
+
+  xmj_render_page_footer '按回车返回首页'
 }
