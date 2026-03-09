@@ -171,9 +171,6 @@ xmj_render_menu_row() {
 xmj_render_setting_home_block() {
   xmj_render_section_title 'setting'
   printf '\n'
-  xmj_render_fact_line '当前摘要' "$(xmj_theme_label) · $(xmj_termux_font_status_text)"
-  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
-  printf '\n'
   xmj_render_menu_row '17' '18'
   printf '\n'
 }
