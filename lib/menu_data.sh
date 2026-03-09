@@ -40,7 +40,6 @@ xmj_dir_state() {
 
 xmj_load_menu_data() {
   XMJ_SECTION_ORDER=(
-    "info"
     "update"
     "backup"
     "dependency"

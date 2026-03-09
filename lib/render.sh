@@ -47,15 +47,6 @@ xmj_render_header() {
   xmj_rule_line "$XMJ_BORDER" '═' 68
 }
 
-xmj_render_info_block() {
-  local key
-
-  xmj_render_section_title 'info'
-  for key in "${XMJ_INFO_ORDER[@]}"; do
-    printf '  %b%s%b｜%b%s%b\n' "$XMJ_BLUE_SOFT" "$key" "$XMJ_RESET" "$XMJ_WHITE" "${XMJ_INFO_VALUE[$key]}" "$XMJ_RESET"
-  done
-  printf '\n'
-}
 
 xmj_render_fact_line() {
   local label="${1:-}"
@@ -233,12 +224,8 @@ xmj_render_home() {
   xmj_clear_screen
   xmj_render_header
   printf '\n'
-  xmj_render_info_block
 
   for section in "${XMJ_SECTION_ORDER[@]}"; do
-    if [ "$section" = 'info' ]; then
-      continue
-    fi
     xmj_render_menu_block "$section"
   done
 
