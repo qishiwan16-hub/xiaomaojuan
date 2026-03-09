@@ -2,16 +2,33 @@ xmj_init_theme() {
   XMJ_RESET=$'\033[0m'
   XMJ_BOLD=$'\033[1m'
   XMJ_DIM=$'\033[2m'
-  XMJ_PINK=$'\033[38;5;218m'
-  XMJ_PINK_SOFT=$'\033[38;5;225m'
-  XMJ_BLUE=$'\033[38;5;153m'
-  XMJ_BLUE_SOFT=$'\033[38;5;159m'
-  XMJ_WHITE=$'\033[38;5;230m'
-  XMJ_CREAM=$'\033[38;5;224m'
-  XMJ_LAVENDER=$'\033[38;5;183m'
-  XMJ_BORDER=$'\033[38;5;189m'
-  XMJ_MIST=$'\033[38;5;252m'
-  XMJ_WARN=$'\033[38;5;217m'
+
+  case "${XMJ_THEME_MODE:-pastel}" in
+    moonlight)
+      XMJ_PINK=$'\033[38;5;183m'
+      XMJ_PINK_SOFT=$'\033[38;5;189m'
+      XMJ_BLUE=$'\033[38;5;111m'
+      XMJ_BLUE_SOFT=$'\033[38;5;153m'
+      XMJ_WHITE=$'\033[38;5;255m'
+      XMJ_CREAM=$'\033[38;5;225m'
+      XMJ_LAVENDER=$'\033[38;5;147m'
+      XMJ_BORDER=$'\033[38;5;111m'
+      XMJ_MIST=$'\033[38;5;250m'
+      XMJ_WARN=$'\033[38;5;217m'
+      ;;
+    *)
+      XMJ_PINK=$'\033[38;5;218m'
+      XMJ_PINK_SOFT=$'\033[38;5;225m'
+      XMJ_BLUE=$'\033[38;5;153m'
+      XMJ_BLUE_SOFT=$'\033[38;5;159m'
+      XMJ_WHITE=$'\033[38;5;230m'
+      XMJ_CREAM=$'\033[38;5;224m'
+      XMJ_LAVENDER=$'\033[38;5;183m'
+      XMJ_BORDER=$'\033[38;5;189m'
+      XMJ_MIST=$'\033[38;5;252m'
+      XMJ_WARN=$'\033[38;5;217m'
+      ;;
+  esac
 }
 
 xmj_clear_screen() {

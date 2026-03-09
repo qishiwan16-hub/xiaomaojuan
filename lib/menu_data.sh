@@ -1,3 +1,43 @@
+xmj_theme_label() {
+  case "${XMJ_THEME_MODE:-pastel}" in
+    moonlight)
+      printf '%s' '月光蓝紫系'
+      ;;
+    *)
+      printf '%s' '粉蓝白系'
+      ;;
+  esac
+}
+
+xmj_display_path() {
+  local raw_path="${1:-}"
+
+  if [ -z "$raw_path" ]; then
+    printf '%s' '未设置'
+    return 0
+  fi
+
+  if [ -n "${HOME:-}" ]; then
+    printf '%s' "${raw_path/#$HOME/~}"
+    return 0
+  fi
+
+  printf '%s' "$raw_path"
+}
+
+xmj_dir_state() {
+  local dir_path="${1:-}"
+  local ok_text="${2:-已就绪}"
+  local miss_text="${3:-未找到}"
+
+  if [ -n "$dir_path" ] && [ -d "$dir_path" ]; then
+    printf '%s' "$ok_text"
+    return 0
+  fi
+
+  printf '%s' "$miss_text"
+}
+
 xmj_load_menu_data() {
   XMJ_SECTION_ORDER=(
     "info"
@@ -33,17 +73,21 @@ xmj_load_menu_data() {
     '作者'
     '环境'
     '目标'
+    'SillyTavern'
+    '备份'
     '状态'
     '主题'
   )
 
   declare -gA XMJ_INFO_VALUE=()
-  XMJ_INFO_VALUE['名称']='小猫卷'
-  XMJ_INFO_VALUE['作者']='meoroll'
-  XMJ_INFO_VALUE['环境']='Termux'
-  XMJ_INFO_VALUE['目标']='SillyTavern'
-  XMJ_INFO_VALUE['状态']='展示预览版'
-  XMJ_INFO_VALUE['主题']='粉蓝白系'
+  XMJ_INFO_VALUE['名称']="${XMJ_SCRIPT_NAME:-小猫卷}"
+  XMJ_INFO_VALUE['作者']="${XMJ_SCRIPT_AUTHOR:-meoroll}"
+  XMJ_INFO_VALUE['环境']="${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
+  XMJ_INFO_VALUE['目标']="${XMJ_TARGET_PROJECT:-SillyTavern}"
+  XMJ_INFO_VALUE['SillyTavern']="$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}") · $(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
+  XMJ_INFO_VALUE['备份']="$(xmj_display_path "${XMJ_BACKUP_DIR:-}") · $(xmj_dir_state "${XMJ_BACKUP_DIR:-}" '已就绪' '待创建')"
+  XMJ_INFO_VALUE['状态']="$(xmj_config_status_text)"
+  XMJ_INFO_VALUE['主题']="$(xmj_theme_label)"
 
   XMJ_MENU_IDS=(
     '01' '02' '03' '04'

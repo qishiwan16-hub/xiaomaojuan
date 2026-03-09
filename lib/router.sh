@@ -36,6 +36,12 @@ xmj_run_panel() {
 
   xmj_load_menu_data
 
+  if [ "${XMJ_CONFIG_CREATED:-0}" = '1' ] \
+    || [ "${#XMJ_BOOT_MESSAGES[@]}" -gt 0 ] \
+    || [ "${#XMJ_BOOT_WARNINGS[@]}" -gt 0 ]; then
+    xmj_render_startup_notice
+  fi
+
   while true; do
     xmj_render_home
     XMJ_LAST_INPUT=''
