@@ -945,74 +945,91 @@ xmj_tavern_setting_user_settings_file() {
   printf '%s/data/%s/settings.json' "${XMJ_SILLYTAVERN_PATH:-}" "$user_name"
 }
 
+xmj_tavern_setting_trim_spaces() {
+  local text="${1:-}"
+
+  text="${text#"${text%%[![:space:]]*}"}"
+  text="${text%"${text##*[![:space:]]}"}"
+  printf '%s' "$text"
+}
+
 xmj_tavern_setting_yaml_section_value() {
   local file_path="${1:-}"
   local section="${2:-}"
   local key="${3:-}"
+  local line=''
+  local in_section='0'
+  local value=''
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$section" ] || [ -z "$key" ]; then
     printf '%s' ''
     return 0
   fi
 
-  awk -v section="$section" -v key="$key" '
-    $0 ~ ("^" section ":[[:space:]]*($|#)") {
-      in_section=1
-      next
-    }
-    in_section && $0 ~ /^[^[:space:]#][^:]*:/ {
-      in_section=0
-    }
-    in_section && $0 ~ ("^[[:space:]]+" key ":[[:space:]]*") {
-      line=$0
-      sub("^[[:space:]]*" key ":[[:space:]]*", "", line)
-      sub("[[:space:]]+#.*$", "", line)
-      sub(/[[:space:]]+$/, "", line)
-      print line
-      exit
-    }
-  ' "$file_path" 2>/dev/null
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$in_section" = '1' ] && [[ "$line" =~ ^[^[:space:]#][^:]*:[[:space:]]* ]]; then
+      in_section='0'
+    fi
+
+    if [[ "$line" =~ ^${section}:[[:space:]]*($|#) ]]; then
+      in_section='1'
+      continue
+    fi
+
+    if [ "$in_section" = '1' ] && [[ "$line" =~ ^[[:space:]]+${key}:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]}"
+      value="${value%%#*}"
+      xmj_tavern_setting_trim_spaces "$value"
+      return 0
+    fi
+  done <"$file_path"
+
+  printf '%s' ''
 }
 
 xmj_tavern_setting_yaml_top_value() {
   local file_path="${1:-}"
   local key="${2:-}"
+  local line=''
+  local value=''
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
     printf '%s' ''
     return 0
   fi
 
-  awk -v key="$key" '
-    $0 ~ ("^" key ":[[:space:]]*") {
-      line=$0
-      sub("^" key ":[[:space:]]*", "", line)
-      sub("[[:space:]]+#.*$", "", line)
-      sub(/[[:space:]]+$/, "", line)
-      print line
-      exit
-    }
-  ' "$file_path" 2>/dev/null
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^${key}:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]}"
+      value="${value%%#*}"
+      xmj_tavern_setting_trim_spaces "$value"
+      return 0
+    fi
+  done <"$file_path"
+
+  printf '%s' ''
 }
 
 xmj_tavern_setting_json_key_value() {
   local file_path="${1:-}"
   local key="${2:-}"
+  local line=''
+  local pattern=''
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
     printf '%s' ''
     return 0
   fi
 
-  awk -v key="$key" '
-    match($0, "\"" key "\"[[:space:]]*:[[:space:]]*(true|false|null|[0-9]+|\"[^\"]*\")") {
-      line=substr($0, RSTART, RLENGTH)
-      sub("^\"" key "\"[[:space:]]*:[[:space:]]*", "", line)
-      sub(/[[:space:]]*,?$/, "", line)
-      print line
-      exit
+  pattern="\"${key}\"[[:space:]]*:[[:space:]]*(true|false|null|[0-9]+|\"[^\"]*\")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ $pattern ]]; then
+      printf '%s' "${BASH_REMATCH[1]}"
+      return 0
     }
-  ' "$file_path" 2>/dev/null
+  done <"$file_path"
+
+  printf '%s' ''
 }
 
 xmj_tavern_setting_set_yaml_top_value() {
@@ -1020,31 +1037,47 @@ xmj_tavern_setting_set_yaml_top_value() {
   local key="${2:-}"
   local value="${3:-}"
   local temp_file=''
+  local line=''
+  local updated='0'
+  local wrote_any='0'
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
     return 1
   fi
 
   temp_file="${file_path}.tmp.$$"
-  if ! awk -v key="$key" -v value="$value" '
-    BEGIN { updated=0 }
-    $0 ~ ("^" key ":[[:space:]]*") {
-      print key ": " value
-      updated=1
-      next
-    }
-    { print }
-    END {
-      if (!updated) {
-        if (NR > 0) {
-          print ""
-        }
-        print key ": " value
-      }
-    }
-  ' "$file_path" >"$temp_file"; then
-    rm -f "$temp_file" 2>/dev/null || true
+  if ! : >"$temp_file" 2>/dev/null; then
     return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    wrote_any='1'
+
+    if [[ "$line" =~ ^${key}:[[:space:]]* ]]; then
+      if ! printf '%s: %s\n' "$key" "$value" >>"$temp_file"; then
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+      }
+      updated='1'
+      continue
+    fi
+
+    if ! printf '%s\n' "$line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  done <"$file_path"
+
+  if [ "$updated" != '1' ]; then
+    if [ "$wrote_any" = '1' ] && ! printf '\n' >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+
+    if ! printf '%s: %s\n' "$key" "$value" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
   fi
 
   if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
@@ -1061,56 +1094,82 @@ xmj_tavern_setting_set_yaml_section_value() {
   local key="${3:-}"
   local value="${4:-}"
   local temp_file=''
+  local line=''
+  local section_found='0'
+  local in_section='0'
+  local key_written='0'
+  local wrote_any='0'
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$section" ] || [ -z "$key" ]; then
     return 1
   fi
 
   temp_file="${file_path}.tmp.$$"
-  if ! awk -v section="$section" -v key="$key" -v value="$value" '
-    function write_missing_key() {
-      if (in_section && !key_written) {
-        print "  " key ": " value
-        key_written=1
-      }
-    }
-    {
-      line=$0
-
-      if (in_section && line ~ /^[^[:space:]#][^:]*:/) {
-        write_missing_key()
-        in_section=0
-      }
-
-      if (line ~ ("^" section ":[[:space:]]*($|#)")) {
-        section_found=1
-        in_section=1
-        key_written=0
-        print line
-        next
-      }
-
-      if (in_section && line ~ ("^[[:space:]]+" key ":[[:space:]]*")) {
-        print "  " key ": " value
-        key_written=1
-        next
-      }
-
-      print line
-    }
-    END {
-      write_missing_key()
-      if (!section_found) {
-        if (NR > 0) {
-          print ""
-        }
-        print section ":"
-        print "  " key ": " value
-      }
-    }
-  ' "$file_path" >"$temp_file"; then
-    rm -f "$temp_file" 2>/dev/null || true
+  if ! : >"$temp_file" 2>/dev/null; then
     return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    wrote_any='1'
+
+    if [ "$in_section" = '1' ] && [[ "$line" =~ ^[^[:space:]#][^:]*:[[:space:]]* ]]; then
+      if [ "$key_written" != '1' ]; then
+        if ! printf '  %s: %s\n' "$key" "$value" >>"$temp_file"; then
+          rm -f "$temp_file" 2>/dev/null || true
+          return 1
+        fi
+        key_written='1'
+      fi
+      in_section='0'
+    }
+
+    if [[ "$line" =~ ^${section}:[[:space:]]*($|#) ]]; then
+      section_found='1'
+      in_section='1'
+      key_written='0'
+      if ! printf '%s\n' "$line" >>"$temp_file"; then
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+      }
+      continue
+    fi
+
+    if [ "$in_section" = '1' ] && [[ "$line" =~ ^[[:space:]]+${key}:[[:space:]]* ]]; then
+      if ! printf '  %s: %s\n' "$key" "$value" >>"$temp_file"; then
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+      }
+      key_written='1'
+      continue
+    fi
+
+    if ! printf '%s\n' "$line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  done <"$file_path"
+
+  if [ "$in_section" = '1' ] && [ "$key_written" != '1' ]; then
+    if ! printf '  %s: %s\n' "$key" "$value" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    }
+    key_written='1'
+  fi
+
+  if [ "$section_found" != '1' ]; then
+    if [ "$wrote_any" = '1' ] && ! printf '\n' >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+
+    if ! {
+      printf '%s:\n' "$section"
+      printf '  %s: %s\n' "$key" "$value"
+    } >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    }
   fi
 
   if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
@@ -1126,27 +1185,42 @@ xmj_tavern_setting_set_json_bool_value() {
   local key="${2:-}"
   local value="${3:-false}"
   local temp_file=''
+  local line=''
+  local found='0'
+  local indent=''
+  local comma=''
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
     return 1
   fi
 
   temp_file="${file_path}.tmp.$$"
-  if ! awk -v key="$key" -v value="$value" '
-    {
-      line=$0
-      if (line ~ "\"" key "\"[[:space:]]*:") {
-        gsub("\"" key "\"[[:space:]]*:[[:space:]]*(true|false|null|[0-9]+|\"[^\"]*\")", "\"" key "\": " value, line)
-        found=1
+  if ! : >"$temp_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^([[:space:]]*)\"${key}\"[[:space:]]*: ]]; then
+      indent="${BASH_REMATCH[1]}"
+      comma=''
+      if [[ "$line" =~ ,[[:space:]]*$ ]]; then
+        comma=','
       }
-      print line
-    }
-    END {
-      if (!found) {
-        exit 1
-      }
-    }
-  ' "$file_path" >"$temp_file"; then
+      if ! printf '%s"%s": %s%s\n' "$indent" "$key" "$value" "$comma" >>"$temp_file"; then
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+      fi
+      found='1'
+      continue
+    fi
+
+    if ! printf '%s\n' "$line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  done <"$file_path"
+
+  if [ "$found" != '1' ]; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
   fi
