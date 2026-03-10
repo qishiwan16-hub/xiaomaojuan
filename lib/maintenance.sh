@@ -52,6 +52,9 @@ xmj_maintenance_clear_state() {
   XMJ_MAINT_BACKUP_RESTORE_NOTE=''
   XMJ_MAINT_BACKUP_ITEMS=''
   XMJ_MAINT_BACKUP_MISSING_ITEMS=''
+  XMJ_MAINT_BACKUP_SCOPE='full'
+  XMJ_MAINT_BACKUP_COMPAT_MODE='0'
+  XMJ_MAINT_BACKUP_COMPAT_NOTE=''
   XMJ_MAINT_HISTORY_FILE=''
   XMJ_MAINT_LAST_ERROR=''
 }
@@ -89,6 +92,193 @@ xmj_maintenance_backup_label() {
       printf '%s' "${1:-未知内容}"
       ;;
   esac
+}
+
+xmj_maintenance_compat_floor_version() {
+  printf '%s' '1.13.4'
+}
+
+xmj_maintenance_tavern_setting_hint() {
+  printf '%s' '设置中心 -> 酒馆设置'
+}
+
+xmj_maintenance_extract_semver() {
+  local raw_text="${1:-}"
+
+  if [[ "$raw_text" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    printf '%s.%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    return 0
+  fi
+
+  printf '%s' ''
+  return 1
+}
+
+xmj_maintenance_version_lt() {
+  local left_text="${1:-}"
+  local right_text="${2:-}"
+  local left_version=''
+  local right_version=''
+  local left_major='0'
+  local left_minor='0'
+  local left_patch='0'
+  local right_major='0'
+  local right_minor='0'
+  local right_patch='0'
+
+  left_version="$(xmj_maintenance_extract_semver "$left_text")"
+  right_version="$(xmj_maintenance_extract_semver "$right_text")"
+
+  if [ -z "$left_version" ] || [ -z "$right_version" ]; then
+    return 1
+  fi
+
+  IFS='.' read -r left_major left_minor left_patch <<EOF
+$left_version
+EOF
+  IFS='.' read -r right_major right_minor right_patch <<EOF
+$right_version
+EOF
+
+  if [ $((10#$left_major)) -lt $((10#$right_major)) ]; then
+    return 0
+  fi
+  if [ $((10#$left_major)) -gt $((10#$right_major)) ]; then
+    return 1
+  fi
+
+  if [ $((10#$left_minor)) -lt $((10#$right_minor)) ]; then
+    return 0
+  fi
+  if [ $((10#$left_minor)) -gt $((10#$right_minor)) ]; then
+    return 1
+  fi
+
+  [ $((10#$left_patch)) -lt $((10#$right_patch)) ]
+}
+
+xmj_maintenance_data_only_backup_reason() {
+  local current_version="${1:-}"
+  local target_version="${2:-}"
+  local compat_floor=''
+  local current_is_old='0'
+  local target_is_old='0'
+
+  compat_floor="$(xmj_maintenance_compat_floor_version)"
+
+  if xmj_maintenance_version_lt "$current_version" "$compat_floor"; then
+    current_is_old='1'
+  fi
+
+  if xmj_maintenance_version_lt "$target_version" "$compat_floor"; then
+    target_is_old='1'
+  fi
+
+  case "${current_is_old}:${target_is_old}" in
+    1:1)
+      printf '%s' "当前酒馆版本和目标版本都低于 ${compat_floor}"
+      ;;
+    1:0)
+      printf '%s' "当前酒馆版本低于 ${compat_floor}"
+      ;;
+    0:1)
+      printf '%s' "目标版本低于 ${compat_floor}"
+      ;;
+    *)
+      printf '%s' ''
+      ;;
+  esac
+}
+
+xmj_maintenance_should_backup_data_only() {
+  [ -n "$(xmj_maintenance_data_only_backup_reason "${1:-}" "${2:-}")" ]
+}
+
+xmj_maintenance_cross_version_notice() {
+  printf '%s' "因为跨版本兼容，部分装在多用户上的插件需要重新安装，还要重新修改酒馆设置；可以去 $(xmj_maintenance_tavern_setting_hint) 看看。"
+}
+
+xmj_maintenance_backup_scope_text() {
+  if xmj_maintenance_should_backup_data_only "${1:-}" "${2:-}"; then
+    printf '%s' 'data 文件夹'
+    return 0
+  fi
+
+  printf '%s' 'data / third-party / config.yaml'
+}
+
+xmj_maintenance_backup_stage_text() {
+  local reason_text=''
+
+  reason_text="$(xmj_maintenance_data_only_backup_reason "${1:-}" "${2:-}")"
+  if [ -n "$reason_text" ]; then
+    printf '%s' "${reason_text}，这次只先收好 data 文件夹。"
+    return 0
+  fi
+
+  printf '%s' '正在把 data、third-party 和 config.yaml 打成 1 个备份压缩包。'
+}
+
+xmj_maintenance_backup_preview_note() {
+  local reason_text=''
+
+  reason_text="$(xmj_maintenance_data_only_backup_reason "${1:-}" "${2:-}")"
+  if [ -n "$reason_text" ]; then
+    printf '%s' "${reason_text}，猫猫这次只会收好 data 文件夹。$(xmj_maintenance_cross_version_notice)"
+    return 0
+  fi
+
+  printf '%s' '会把 data、third-party 和 config.yaml 一起收进 1 个备份压缩包。'
+}
+
+xmj_maintenance_backup_meta_name() {
+  printf '%s' '.xmj-backup-meta'
+}
+
+xmj_maintenance_write_backup_meta() {
+  local bundle_root="${1:-}"
+  local meta_file=''
+
+  if [ -z "$bundle_root" ] || [ ! -d "$bundle_root" ]; then
+    return 1
+  fi
+
+  meta_file="$bundle_root/$(xmj_maintenance_backup_meta_name)"
+  {
+    printf 'scope=%s\n' "${XMJ_MAINT_BACKUP_SCOPE:-full}"
+    printf 'compat_mode=%s\n' "${XMJ_MAINT_BACKUP_COMPAT_MODE:-0}"
+  } > "$meta_file"
+}
+
+xmj_maintenance_load_backup_meta() {
+  local bundle_root="${1:-}"
+  local meta_file=''
+  local key=''
+  local value=''
+
+  meta_file="$bundle_root/$(xmj_maintenance_backup_meta_name)"
+  if [ ! -f "$meta_file" ]; then
+    return 1
+  fi
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      scope)
+        XMJ_MAINT_BACKUP_SCOPE="${value:-full}"
+        ;;
+      compat_mode)
+        XMJ_MAINT_BACKUP_COMPAT_MODE="${value:-0}"
+        ;;
+    esac
+  done < "$meta_file"
+
+  if [ "${XMJ_MAINT_BACKUP_COMPAT_MODE:-0}" = '1' ]; then
+    XMJ_MAINT_BACKUP_COMPAT_NOTE="$(xmj_maintenance_cross_version_notice)"
+  else
+    XMJ_MAINT_BACKUP_COMPAT_NOTE=''
+  fi
+
+  return 0
 }
 
 xmj_maintenance_require_archive_tools() {
@@ -449,6 +639,10 @@ xmj_reinstall_fail() {
   local stage="${1:-env}"
   local summary="${2:-卸载重装失败}"
   local detail="${3:-请温和查看日志。}"
+
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail="$(xmj_reinstall_append_detail "$detail" "$XMJ_MAINT_BACKUP_COMPAT_NOTE")"
+  fi
 
   XMJ_REINSTALL_STAGE="$stage"
   XMJ_REINSTALL_SUMMARY="$summary"

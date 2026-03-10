@@ -1492,26 +1492,31 @@ xmj_render_startup_notice() {
   xmj_render_page_title '启动摘要' 'startup brief' 'info'
   printf '\n'
 
+  if [ "${#XMJ_BOOT_MESSAGES[@]}" -gt 0 ] || [ "${#XMJ_BOOT_WARNINGS[@]}" -gt 0 ]; then
+    printf '  %b猫猫把开场小纸条叠好啦，你看一眼就能进首页。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+    printf '\n'
+  fi
+
   if [ "${#XMJ_BOOT_MESSAGES[@]}" -gt 0 ]; then
-    printf '  %b初始化信息%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+    printf '  %b猫猫刚刚顺手做好的事%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
     xmj_render_boot_lines "$XMJ_WHITE" "${XMJ_BOOT_MESSAGES[@]}"
     printf '\n'
   fi
 
   if [ "${#XMJ_BOOT_WARNINGS[@]}" -gt 0 ]; then
-    printf '  %b温和提示%b\n' "$XMJ_WARN" "$XMJ_RESET"
+    printf '  %b猫猫想轻轻提醒你%b\n' "$XMJ_WARN" "$XMJ_RESET"
     xmj_render_boot_lines "$XMJ_CREAM" "${XMJ_BOOT_WARNINGS[@]}"
     printf '\n'
   fi
 
   if [ "${#XMJ_BOOT_MESSAGES[@]}" -eq 0 ] && [ "${#XMJ_BOOT_WARNINGS[@]}" -eq 0 ]; then
-    printf '  %b本次启动没有额外提示，配置状态正常。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+    printf '  %b猫猫已经把开场收拾好了，直接进首页就行喵。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
     printf '\n'
   fi
 
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
   XMJ_BOOT_NOTICE_SHOWN=1
-  xmj_wait_for_enter '按回车进入首页'
+  xmj_wait_for_enter '按回车让猫猫带你进首页'
 }
 
 xmj_render_startup_failure() {
@@ -1519,18 +1524,18 @@ xmj_render_startup_failure() {
   xmj_render_header
   xmj_render_page_title '启动失败' 'startup failure' 'info'
   printf '\n'
-  printf '  %b启动配置失败，面板未继续加载。%b\n' "$XMJ_WARN" "$XMJ_RESET"
-  printf '  %b请优先检查以下项目：%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '  %b猫猫这次没把开场整理好，先看看下面这些喵。%b\n' "$XMJ_WARN" "$XMJ_RESET"
+  printf '\n'
 
   if [ "${#XMJ_BOOT_ERRORS[@]}" -gt 0 ]; then
     xmj_render_boot_lines "$XMJ_WARN" "${XMJ_BOOT_ERRORS[@]}"
   else
-    printf '  %b• 未提供具体错误信息，请检查脚本权限与配置文件语法。%b\n' "$XMJ_WARN" "$XMJ_RESET"
+    printf '  %b• 这次没拿到具体报错，先查脚本权限和配置语法喵。%b\n' "$XMJ_WARN" "$XMJ_RESET"
   fi
 
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
-  xmj_wait_for_enter '按回车结束脚本'
+  xmj_wait_for_enter '按回车先结束这次启动'
 }
 
 xmj_render_about_status_page() {
@@ -1538,11 +1543,12 @@ xmj_render_about_status_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['23']}" 'runtime status' 'about'
   printf '\n'
-  xmj_render_fact_line '状态' "$(xmj_config_status_text)"
-  xmj_render_fact_line '主题' "$(xmj_theme_label)"
-  xmj_render_fact_line '酒馆状态' "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
-  xmj_render_fact_line '备份状态' "$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
-  xmj_render_page_footer '按回车返回首页'
+  printf '  %b猫猫现在的状态都叠在这里啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '配置' "$(xmj_config_status_text)"
+  xmj_render_fact_line '酒馆' "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
+  xmj_render_fact_line '备份' "$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
+  xmj_render_page_footer '按回车回首页'
 }
 
 xmj_render_setting_overview_page() {
@@ -1550,11 +1556,9 @@ xmj_render_setting_overview_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['19']}" 'settings hub' 'setting'
   printf '\n'
-  xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
-  xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
-  xmj_render_fact_line '配置状态' "$(xmj_config_status_text)"
+  printf '  %b想调哪里就点哪里，猫猫把说明都压短啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '\n'
-  xmj_render_setting_card '1 · 基础设置' '' '脚本信息'
+  xmj_render_setting_card '1 · 基础设置' '' '名字、作者、环境'
   printf '\n'
   xmj_render_setting_card '2 · 主题 / 外观' '' "当前：$(xmj_theme_label)"
   printf '\n'
@@ -1568,7 +1572,7 @@ xmj_render_setting_overview_page() {
   xmj_render_action_item '3' '进入字体管理'
   xmj_render_action_item '4' '查看高级预留'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 0'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 0 就好喵'
 }
 
 xmj_render_setting_basic_page() {
@@ -1576,13 +1580,14 @@ xmj_render_setting_basic_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'basic')" 'basic settings' 'setting'
   printf '\n'
+  printf '  %b这些是猫猫会一直记着的基础信息。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '\n'
   xmj_render_fact_line '脚本名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
   xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
   xmj_render_fact_line '目标项目' "${XMJ_TARGET_PROJECT:-SillyTavern}"
   xmj_render_fact_line '运行环境' "${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
-  xmj_render_fact_line '配置状态' "$(xmj_config_status_text)"
   xmj_render_notice_line
-  xmj_render_action_footer '输入 0 返回设置中心'
+  xmj_render_action_footer '输入 0 回设置中心'
 }
 
 xmj_render_setting_theme_page() {
@@ -1590,53 +1595,40 @@ xmj_render_setting_theme_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'theme')" 'theme look' 'setting'
   printf '\n'
-  xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
-  xmj_render_fact_line '主题字段' "${XMJ_THEME_MODE:-pastel}"
-  xmj_render_fact_line '边框风格' '软糖感分隔线 / 浅色渐柔边框'
-  xmj_render_fact_line '标题状态' '保持当前主标题装饰'
+  printf '  %b猫猫现在穿的是：%s。%b\n' "$XMJ_WHITE" "$(xmj_theme_label)" "$XMJ_RESET"
   printf '\n'
-  xmj_render_setting_card 'pastel · 粉蓝白系' '' '默认主题'
+  xmj_render_setting_card 'pastel · 粉蓝白系' '' '轻一点，软一点'
   printf '\n'
-  xmj_render_setting_card 'moonlight · 月光蓝紫系' '' '可通过 XMJ_THEME_MODE 切换'
+  xmj_render_setting_card 'moonlight · 月光蓝紫系' '' '冷一点，安静一点'
   xmj_render_notice_line
-  xmj_render_action_footer '输入 0 返回设置中心'
+  xmj_render_action_footer '输入 0 回设置中心'
 }
 
 xmj_render_setting_font_page() {
   local backup_file
   local backup_state='未生成'
-  local preset_format='未知'
 
   backup_file="$(xmj_termux_font_backup_file)"
   if [ -f "$backup_file" ]; then
     backup_state='已存在'
   fi
 
-  case "$(xmj_termux_font_extension "${XMJ_TERMUX_FONT_PRESET_URL:-}")" in
-    ttf)
-      preset_format='TTF'
-      ;;
-    otf)
-      preset_format='OTF'
-      ;;
-  esac
-
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'font')" 'font manager' 'setting'
   printf '\n'
+  printf '  %b字体这边猫猫也帮你收得很短啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '\n'
   xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
   xmj_render_fact_line '备份状态' "$backup_state"
   xmj_render_fact_line '内置预设' "${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
-  xmj_render_fact_line '下载来源' "$(xmj_termux_font_source_host)"
-  xmj_render_fact_line '资源格式' "$preset_format"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' "安装内置字体：${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
   xmj_render_action_item '2' '恢复默认字体'
   xmj_render_action_item '3' '重新加载 Termux 设置'
   xmj_render_action_item '0' '返回设置中心'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 0'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 0 就好喵'
 }
 
 xmj_render_setting_advanced_page() {
@@ -1644,10 +1636,9 @@ xmj_render_setting_advanced_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'advanced')" 'advanced slot' 'setting'
   printf '\n'
-  xmj_render_fact_line '功能状态' '预留中'
-  xmj_render_fact_line '当前定位' '仅保留结构'
+  xmj_render_setting_card '这里先留白喵' '猫猫还没往高级区塞东西。' ''
   xmj_render_notice_line
-  xmj_render_action_footer '输入 0 返回设置中心'
+  xmj_render_action_footer '输入 0 回设置中心'
 }
 
 xmj_render_tavern_setting_page() {
@@ -1655,9 +1646,21 @@ xmj_render_tavern_setting_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
   printf '\n'
-  xmj_render_fact_line '页面状态' '占位页'
-  xmj_render_fact_line '业务逻辑' '暂未接入'
-  xmj_render_page_footer '按回车返回首页'
+  xmj_render_setting_card \
+    '低版本兼容提醒' \
+    "如果当前版本或要切过去的版本低于 $(xmj_maintenance_compat_floor_version)，猫猫只会备份 / 恢复 data。" \
+    '这是为了尽量避开跨版本不兼容'
+  printf '\n'
+  xmj_render_setting_card \
+    '多用户插件' \
+    '部分装在多用户上的插件要重新安装。' \
+    '跨版本后别忘了回来对照这里'
+  printf '\n'
+  xmj_render_setting_card \
+    '酒馆设置' \
+    '酒馆设置也要重新改一遍，尤其是你自己动过的那些项。' \
+    '更新、切版本、恢复备份之后都可以回这页查一眼'
+  xmj_render_page_footer '按回车回首页'
 }
 
 xmj_render_about_panel_page() {
@@ -1665,12 +1668,8 @@ xmj_render_about_panel_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['24']}" 'about panel' 'about'
   printf '\n'
-  xmj_render_fact_line '名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
-  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
-  xmj_render_fact_line '目标' "${XMJ_TARGET_PROJECT:-SillyTavern}"
-  xmj_render_fact_line '环境' "${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
-  xmj_render_fact_line '主题' "$(xmj_theme_label)"
-  xmj_render_page_footer '按回车返回首页'
+  xmj_render_setting_card '小猫卷面板' '一只负责把常用动作收整齐的小面板。' "当前主题：$(xmj_theme_label)"
+  xmj_render_page_footer '按回车回首页'
 }
 
 xmj_render_author_page() {
@@ -1678,22 +1677,18 @@ xmj_render_author_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['25']}" 'author info' 'about'
   printf '\n'
-  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
-  xmj_render_fact_line '标题副文' 'little panel memory'
-  xmj_render_fact_line '页面定位' 'preview page'
-  xmj_render_page_footer '按回车返回首页'
+  xmj_render_setting_card '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}" '猫猫在这里轻轻留个名'
+  xmj_render_page_footer '按回车回首页'
 }
 
 xmj_render_placeholder_page() {
   local id="${1:-}"
-  local section="${XMJ_MENU_SECTION[$id]}"
   local title="${XMJ_MENU_LABEL[$id]}"
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title "$title" 'coming soon' "$section"
+  xmj_render_page_title "$title" 'coming soon' "${XMJ_MENU_SECTION[$id]}"
   printf '\n'
-  xmj_render_fact_line '所属分组' "${XMJ_SECTION_TITLE[$section]}"
-  xmj_render_fact_line '功能状态' '预留中'
-  xmj_render_page_footer '按回车返回首页'
+  xmj_render_setting_card '这里先空着喵' '猫猫还没把这页补完，之后再慢慢长内容。' ''
+  xmj_render_page_footer '按回车回首页'
 }

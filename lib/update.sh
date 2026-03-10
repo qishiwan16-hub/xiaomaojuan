@@ -22,6 +22,7 @@ xmj_update_reset_state() {
   XMJ_UPDATE_DEPENDENCY_NOTE=''
   XMJ_UPDATE_BACKUP_FILE=''
   XMJ_UPDATE_BACKUP_NOTE=''
+  XMJ_UPDATE_BACKUP_COMPAT_NOTE=''
   XMJ_UPDATE_RECOVER_NOTE=''
   XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
   XMJ_UPDATE_LOCAL_NOTE=''
@@ -222,6 +223,10 @@ xmj_update_success_detail() {
     detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RESTORE_NOTE")"
   fi
 
+  if [ -n "${XMJ_UPDATE_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BACKUP_COMPAT_NOTE")"
+  fi
+
   printf '%s' "$detail_text"
 }
 
@@ -287,6 +292,10 @@ xmj_update_fail() {
   local stage="${1:-repo}"
   local summary="${2:-更新失败}"
   local detail="${3:-请查看日志文件。}"
+
+  if [ -n "${XMJ_UPDATE_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail="$(xmj_update_append_detail "$detail" "$XMJ_UPDATE_BACKUP_COMPAT_NOTE")"
+  fi
 
   XMJ_UPDATE_STAGE="$stage"
   XMJ_UPDATE_SUMMARY="$summary"
@@ -416,13 +425,20 @@ xmj_update_prepare_local_changes() {
 xmj_update_run_backup() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
-  if ! xmj_maintenance_create_backup "$repo_path" 'xmj_update_log_line' "$XMJ_UPDATE_LOG_FILE" '一键更新'; then
+  if ! xmj_maintenance_create_backup \
+    "$repo_path" \
+    'xmj_update_log_line' \
+    "$XMJ_UPDATE_LOG_FILE" \
+    '一键更新' \
+    "${XMJ_UPDATE_BEFORE_VERSION:-}" \
+    ''; then
     xmj_update_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成 zip 备份。}"
     return 1
   fi
 
   XMJ_UPDATE_BACKUP_FILE="$XMJ_MAINT_BACKUP_FILE"
   XMJ_UPDATE_BACKUP_NOTE="$XMJ_MAINT_BACKUP_NOTE"
+  XMJ_UPDATE_BACKUP_COMPAT_NOTE="${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}"
   return 0
 }
 
@@ -553,6 +569,10 @@ xmj_update_success_detail() {
     detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_RESTORE_NOTE")"
   fi
 
+  if [ -n "${XMJ_UPDATE_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail_text="$(xmj_update_append_detail "$detail_text" "$XMJ_UPDATE_BACKUP_COMPAT_NOTE")"
+  fi
+
   printf '%s' "$detail_text"
 }
 
@@ -648,7 +668,7 @@ xmj_run_tavern_update() {
     'backup' \
     'running' \
     '自动备份' \
-    '正在把 data、third-party 和 config.yaml 打包成 zip 备份。'
+    "$(xmj_maintenance_backup_stage_text "${XMJ_UPDATE_BEFORE_VERSION:-}" '')"
 
   if ! xmj_update_run_backup; then
     xmj_render_update_result \
@@ -886,6 +906,7 @@ xmj_update_reset_state() {
   XMJ_UPDATE_DEPENDENCY_NOTE=''
   XMJ_UPDATE_BACKUP_FILE=''
   XMJ_UPDATE_BACKUP_NOTE=''
+  XMJ_UPDATE_BACKUP_COMPAT_NOTE=''
   XMJ_UPDATE_RECOVER_NOTE=''
   XMJ_UPDATE_HAS_LOCAL_CHANGES='0'
   XMJ_UPDATE_LOCAL_NOTE=''

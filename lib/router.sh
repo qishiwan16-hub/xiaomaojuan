@@ -2,8 +2,8 @@ xmj_exit_panel() {
   xmj_clear_screen
   xmj_render_header
   printf '\n'
-  printf '  %b小猫卷面板已退出。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b当前 01 - 18 已能进入实际页面，扩展区也支持自定义脚本入口。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
+  printf '  %b猫猫先收起面板啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b下次再来，我还在这里等你喵。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
   printf '\n'
 }
 

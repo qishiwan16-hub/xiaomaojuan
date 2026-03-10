@@ -98,6 +98,8 @@ xmj_maintenance_create_backup() {
   local logger_name="${2:-}"
   local log_file="${3:-}"
   local op_name="${4:-维护}"
+  local current_version_hint="${5:-}"
+  local target_version_hint="${6:-}"
   local shell_log='/dev/null'
   local backup_dir=''
   local archive_name=''
@@ -109,6 +111,8 @@ xmj_maintenance_create_backup() {
   local target_path=''
   local joined_items=''
   local joined_missing=''
+  local current_version=''
+  local compat_reason=''
   local -a items=()
   local -a item_labels=()
   local -a missing_labels=()
@@ -124,6 +128,22 @@ xmj_maintenance_create_backup() {
     return 1
   fi
 
+  current_version="$current_version_hint"
+  if [ -z "$current_version" ]; then
+    current_version="$(xmj_maintenance_repo_version "$repo_path" "$shell_log")"
+  fi
+
+  compat_reason="$(xmj_maintenance_data_only_backup_reason "$current_version" "$target_version_hint")"
+  if [ -n "$compat_reason" ]; then
+    XMJ_MAINT_BACKUP_SCOPE='data-only'
+    XMJ_MAINT_BACKUP_COMPAT_MODE='1'
+    XMJ_MAINT_BACKUP_COMPAT_NOTE="$(xmj_maintenance_cross_version_notice)"
+  else
+    XMJ_MAINT_BACKUP_SCOPE='full'
+    XMJ_MAINT_BACKUP_COMPAT_MODE='0'
+    XMJ_MAINT_BACKUP_COMPAT_NOTE=''
+  fi
+
   backup_dir="$(xmj_maintenance_backup_dir)"
   if ! mkdir -p "$backup_dir" 2>/dev/null; then
     XMJ_MAINT_LAST_ERROR="无法创建备份目录：$backup_dir"
@@ -134,7 +154,13 @@ xmj_maintenance_create_backup() {
   archive_file="$backup_dir/$archive_name"
   bundle_name="${archive_name%.zip}"
 
-  for item in 'data' 'public/scripts/extensions/third-party' 'config.yaml'; do
+  if [ "${XMJ_MAINT_BACKUP_SCOPE:-full}" = 'data-only' ]; then
+    set -- 'data'
+  else
+    set -- 'data' 'public/scripts/extensions/third-party' 'config.yaml'
+  fi
+
+  for item in "$@"; do
     if [ -d "$repo_path/$item" ] || [ -f "$repo_path/$item" ]; then
       items+=("$item")
       item_labels+=("$(xmj_maintenance_backup_label "$item")")
@@ -153,8 +179,15 @@ xmj_maintenance_create_backup() {
 
   if [ "${#items[@]}" -eq 0 ]; then
     XMJ_MAINT_BACKUP_FILE=''
-    XMJ_MAINT_BACKUP_NOTE='没有发现 data、third-party 或 config.yaml，已跳过自动备份。'
+    if [ "${XMJ_MAINT_BACKUP_SCOPE:-full}" = 'data-only' ]; then
+      XMJ_MAINT_BACKUP_NOTE='这次只准备收 data，但当前没有发现 data 文件夹。'
+    else
+      XMJ_MAINT_BACKUP_NOTE='没有发现 data、third-party 或 config.yaml，已跳过自动备份。'
+    fi
     xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_NOTE"
+    if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+      xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_COMPAT_NOTE"
+    fi
     return 0
   fi
 
@@ -176,6 +209,12 @@ xmj_maintenance_create_backup() {
   if ! mkdir -p "$bundle_root" 2>/dev/null; then
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='无法准备自动备份临时目录。'
+    return 1
+  fi
+
+  if ! xmj_maintenance_write_backup_meta "$bundle_root"; then
+    rm -rf "$temp_root" 2>/dev/null || true
+    XMJ_MAINT_LAST_ERROR='无法写入备份元信息。'
     return 1
   fi
 
@@ -210,12 +249,19 @@ xmj_maintenance_create_backup() {
   xmj_backup_stop_busy
 
   XMJ_MAINT_BACKUP_FILE="$archive_file"
-  XMJ_MAINT_BACKUP_NOTE="已把 ${joined_items} 打成 1 个备份压缩包。"
+  if [ "${XMJ_MAINT_BACKUP_SCOPE:-full}" = 'data-only' ]; then
+    XMJ_MAINT_BACKUP_NOTE="${compat_reason}，这次只把 ${joined_items} 打成了 1 个备份压缩包。"
+  else
+    XMJ_MAINT_BACKUP_NOTE="已把 ${joined_items} 打成 1 个备份压缩包。"
+  fi
   if [ -n "$joined_missing" ]; then
     XMJ_MAINT_BACKUP_NOTE="${XMJ_MAINT_BACKUP_NOTE} 本次未发现 ${joined_missing}。"
   fi
 
   xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_NOTE"
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_COMPAT_NOTE"
+  fi
   return 0
 }
 
@@ -231,6 +277,7 @@ xmj_maintenance_restore_backup() {
   local source_path=''
   local target_path=''
   local restored_count='0'
+  local restored_items=''
 
   if [ -n "$log_file" ]; then
     shell_log="$log_file"
@@ -282,6 +329,11 @@ xmj_maintenance_restore_backup() {
     bundle_root="$temp_root"
   fi
 
+  XMJ_MAINT_BACKUP_SCOPE='full'
+  XMJ_MAINT_BACKUP_COMPAT_MODE='0'
+  XMJ_MAINT_BACKUP_COMPAT_NOTE=''
+  xmj_maintenance_load_backup_meta "$bundle_root" || true
+
   for item in 'data' 'public/scripts/extensions/third-party' 'config.yaml'; do
     source_path="$bundle_root/$item"
     if [ ! -d "$source_path" ] && [ ! -f "$source_path" ]; then
@@ -304,6 +356,7 @@ xmj_maintenance_restore_backup() {
       return 1
     fi
 
+    restored_items="$(xmj_maintenance_join_labels "$restored_items" "$(xmj_maintenance_backup_label "$item")")"
     restored_count=$((restored_count + 1))
   done
 
@@ -315,8 +368,15 @@ xmj_maintenance_restore_backup() {
     return 1
   fi
 
-  XMJ_MAINT_BACKUP_RESTORE_NOTE='已把备份压缩包中的内容覆盖恢复到原位置。'
+  if [ "${XMJ_MAINT_BACKUP_SCOPE:-full}" = 'data-only' ]; then
+    XMJ_MAINT_BACKUP_RESTORE_NOTE='已把备份里的 data 文件夹覆盖恢复回原位置。'
+  else
+    XMJ_MAINT_BACKUP_RESTORE_NOTE='已把备份压缩包中的内容覆盖恢复到原位置。'
+  fi
   xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_RESTORE_NOTE"
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    xmj_maintenance_log "$logger_name" "$XMJ_MAINT_BACKUP_COMPAT_NOTE"
+  fi
   return 0
 }
 
@@ -655,9 +715,15 @@ xmj_run_tavern_uninstall_flow() {
       'backup' \
       'running' \
       '自动备份' \
-      '正在把 data、third-party 和 config.yaml 打成 1 个备份压缩包。'
+      "$(xmj_maintenance_backup_stage_text "${XMJ_REINSTALL_BEFORE_VERSION:-}" '')"
 
-    if ! xmj_maintenance_create_backup "$XMJ_SILLYTAVERN_PATH" 'xmj_reinstall_log_line' "$XMJ_REINSTALL_LOG_FILE" '卸载酒馆'; then
+    if ! xmj_maintenance_create_backup \
+      "$XMJ_SILLYTAVERN_PATH" \
+      'xmj_reinstall_log_line' \
+      "$XMJ_REINSTALL_LOG_FILE" \
+      '卸载酒馆' \
+      "${XMJ_REINSTALL_BEFORE_VERSION:-}" \
+      ''; then
       xmj_reinstall_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成备份压缩包。}"
       xmj_render_reinstall_result 'failure' "$XMJ_REINSTALL_STAGE" "$XMJ_REINSTALL_SUMMARY" "$XMJ_REINSTALL_DETAIL"
       return 0
@@ -688,6 +754,9 @@ xmj_run_tavern_uninstall_flow() {
   XMJ_REINSTALL_STAGE='done'
   XMJ_REINSTALL_SUMMARY='卸载酒馆已完成。'
   XMJ_REINSTALL_DETAIL="$XMJ_REINSTALL_BACKUP_NOTE"
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    XMJ_REINSTALL_DETAIL="$(xmj_reinstall_append_detail "$XMJ_REINSTALL_DETAIL" "$XMJ_MAINT_BACKUP_COMPAT_NOTE")"
+  fi
   xmj_render_reinstall_result 'success' "$XMJ_REINSTALL_STAGE" "$XMJ_REINSTALL_SUMMARY" "$XMJ_REINSTALL_DETAIL"
   return 0
 }
@@ -700,9 +769,15 @@ xmj_run_tavern_reinstall_flow() {
       'backup' \
       'running' \
       '自动备份' \
-      '正在把 data、third-party 和 config.yaml 打成 1 个备份压缩包。'
+      "$(xmj_maintenance_backup_stage_text "${XMJ_REINSTALL_BEFORE_VERSION:-}" '')"
 
-    if ! xmj_maintenance_create_backup "$XMJ_SILLYTAVERN_PATH" 'xmj_reinstall_log_line' "$XMJ_REINSTALL_LOG_FILE" '重装酒馆'; then
+    if ! xmj_maintenance_create_backup \
+      "$XMJ_SILLYTAVERN_PATH" \
+      'xmj_reinstall_log_line' \
+      "$XMJ_REINSTALL_LOG_FILE" \
+      '重装酒馆' \
+      "${XMJ_REINSTALL_BEFORE_VERSION:-}" \
+      ''; then
       xmj_reinstall_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成备份压缩包。}"
       xmj_render_reinstall_result 'failure' "$XMJ_REINSTALL_STAGE" "$XMJ_REINSTALL_SUMMARY" "$XMJ_REINSTALL_DETAIL"
       return 0
@@ -788,6 +863,9 @@ xmj_run_tavern_reinstall_flow() {
 
   detail_text="$(xmj_reinstall_append_detail "$detail_text" "$XMJ_REINSTALL_BACKUP_NOTE")"
   detail_text="$(xmj_reinstall_append_detail "$detail_text" "$XMJ_REINSTALL_RESTORE_NOTE")"
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail_text="$(xmj_reinstall_append_detail "$detail_text" "$XMJ_MAINT_BACKUP_COMPAT_NOTE")"
+  fi
 
   XMJ_REINSTALL_STAGE='done'
   if [ "${XMJ_REINSTALL_TARGET_EXISTS:-0}" = '1' ]; then
@@ -908,6 +986,7 @@ xmj_maintenance_backup_dir() {
 }
 
 declare -ga XMJ_BACKUP_ARCHIVE_FILES=()
+declare -ga XMJ_BACKUP_ARCHIVE_SCOPES=()
 
 xmj_backup_busy_tip() {
   case "${1:-备份处理中}" in
@@ -1106,11 +1185,118 @@ xmj_backup_archive_time_text() {
   printf '%s' "${archive_name%.zip}"
 }
 
+xmj_backup_join_scope_labels() {
+  local joined=''
+  local label=''
+
+  for label in "$@"; do
+    if [ -z "$label" ]; then
+      continue
+    fi
+
+    if [ -n "$joined" ]; then
+      joined="${joined} / "
+    fi
+    joined="${joined}${label}"
+  done
+
+  printf '%s' "$joined"
+}
+
+xmj_backup_archive_entry_lines() {
+  local archive_file="${1:-}"
+  local python_cmd=''
+
+  if [ -z "$archive_file" ] || [ ! -f "$archive_file" ]; then
+    return 1
+  fi
+
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -Z1 "$archive_file" 2>/dev/null
+    return $?
+  fi
+
+  python_cmd="$(xmj_maintenance_python_cmd)"
+  if [ -z "$python_cmd" ]; then
+    return 1
+  fi
+
+  "$python_cmd" - "$archive_file" 2>/dev/null <<'PY'
+import sys
+import zipfile
+
+archive_file = sys.argv[1]
+
+with zipfile.ZipFile(archive_file, "r") as zf:
+    for name in zf.namelist():
+        print(name)
+PY
+}
+
+xmj_backup_archive_scope_text() {
+  local archive_file="${1:-}"
+  local entry=''
+  local normalized=''
+  local has_data='0'
+  local has_third_party='0'
+  local has_config='0'
+  local labels=()
+  local joined=''
+
+  if [ -z "$archive_file" ] || [ ! -f "$archive_file" ]; then
+    printf '%s' '范围未知'
+    return 0
+  fi
+
+  while IFS= read -r entry || [ -n "$entry" ]; do
+    if [ -z "$entry" ]; then
+      continue
+    fi
+
+    normalized="${entry%/}"
+    case "$normalized" in
+      data|data/*|*/data|*/data/*)
+        has_data='1'
+        ;;
+      public/scripts/extensions/third-party|public/scripts/extensions/third-party/*|*/public/scripts/extensions/third-party|*/public/scripts/extensions/third-party/*)
+        has_third_party='1'
+        ;;
+      config.yaml|*/config.yaml)
+        has_config='1'
+        ;;
+    esac
+  done < <(xmj_backup_archive_entry_lines "$archive_file")
+
+  if [ "$has_data" = '1' ]; then
+    labels+=('data')
+  fi
+  if [ "$has_third_party" = '1' ]; then
+    labels+=('third-party')
+  fi
+  if [ "$has_config" = '1' ]; then
+    labels+=('config.yaml')
+  fi
+
+  if [ "${#labels[@]}" -eq 0 ]; then
+    printf '%s' '范围未知'
+    return 0
+  fi
+
+  joined="$(xmj_backup_join_scope_labels "${labels[@]}")"
+  if [ "${#labels[@]}" -eq 1 ]; then
+    printf '仅 %s' "$joined"
+    return 0
+  fi
+
+  printf '%s' "$joined"
+}
+
 xmj_backup_refresh_archives() {
   local backup_dir=''
   local archive_file=''
 
   XMJ_BACKUP_ARCHIVE_FILES=()
+  XMJ_BACKUP_ARCHIVE_SCOPES=()
   backup_dir="$(xmj_maintenance_backup_dir)"
 
   if [ -z "$backup_dir" ] || [ ! -d "$backup_dir" ]; then
@@ -1123,6 +1309,7 @@ xmj_backup_refresh_archives() {
     fi
 
     XMJ_BACKUP_ARCHIVE_FILES+=("$archive_file")
+    XMJ_BACKUP_ARCHIVE_SCOPES+=("$(xmj_backup_archive_scope_text "$archive_file")")
   done < <(find "$backup_dir" -maxdepth 1 -type f -name '*.zip' 2>/dev/null | LC_ALL=C sort -r)
 
   return 0
@@ -1175,20 +1362,22 @@ xmj_backup_prompt_create_input() {
 
 xmj_render_backup_create_page() {
   local backup_dir=''
+  local current_version=''
 
   backup_dir="$(xmj_maintenance_backup_dir)"
+  current_version="$(xmj_maintenance_repo_version "${XMJ_SILLYTAVERN_PATH:-}" '')"
 
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['07']}" 'create backup' 'backup'
   printf '\n'
   xmj_render_page_intro \
-    '会把 data、third-party 和 config.yaml 整理成 1 个压缩备份。' \
-    '缺少的内容会自动跳过，已有内容会一起收进同一个 zip。'
+    "$(xmj_maintenance_backup_preview_note "$current_version" '')" \
+    '缺少的内容会自动跳过，已有内容会被猫猫收进同一个 zip。'
   printf '\n'
   xmj_render_fact_line '酒馆目录' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
   xmj_render_fact_line '备份目录' "$(xmj_display_path "$backup_dir")"
-  xmj_render_fact_line '打包范围' 'data / third-party / config.yaml'
+  xmj_render_fact_line '打包范围' "$(xmj_maintenance_backup_scope_text "$current_version" '')"
   xmj_render_backup_notice
   printf '\n'
   xmj_render_action_item 'y' '立即创建手动备份'
@@ -1223,6 +1412,11 @@ xmj_render_backup_create_result() {
 
   if [ -n "${XMJ_MAINT_BACKUP_MISSING_ITEMS:-}" ]; then
     xmj_render_fact_line '本次跳过' "$XMJ_MAINT_BACKUP_MISSING_ITEMS"
+  fi
+
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    printf '\n'
+    printf '  %b%s%b\n' "$XMJ_WARN" "$XMJ_MAINT_BACKUP_COMPAT_NOTE" "$XMJ_RESET"
   fi
 
   xmj_render_page_footer '按回车返回首页'
@@ -1385,8 +1579,8 @@ xmj_render_backup_restore_page() {
   xmj_render_page_title "${XMJ_MENU_LABEL['09']}" 'restore data' 'backup'
   printf '\n'
   xmj_render_page_intro \
-    '恢复时会把备份中的 data、third-party 和 config.yaml 覆盖回酒馆目录。' \
-    '请选择目标备份后再确认，避免把较旧的数据盖回去。'
+    '恢复时会把备份里实际带着的内容覆盖回酒馆目录。' \
+    "如果这是低版本兼容备份，猫猫只会放回 data；$(xmj_maintenance_cross_version_notice)"
   printf '\n'
   xmj_render_fact_line '酒馆目录' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
   xmj_render_fact_line '备份总数' "$total"
@@ -1422,7 +1616,7 @@ xmj_render_backup_restore_confirm_page() {
   printf '\n'
   xmj_render_page_intro \
     '这次会把所选备份覆盖恢复到当前酒馆目录。' \
-    '同名内容会被直接覆盖，请确认已经选对备份档。'
+    '如果这是低版本兼容备份，恢复时只会放回 data。'
   printf '\n'
   xmj_render_fact_line '备份文件' "$archive_name"
   xmj_render_fact_line '备份时间' "$(xmj_backup_archive_time_text "$archive_file")"
@@ -1458,6 +1652,12 @@ xmj_render_backup_restore_result() {
   fi
 
   xmj_render_fact_line '恢复到' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+
+  if [ -n "${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}" ]; then
+    printf '\n'
+    printf '  %b%s%b\n' "$XMJ_WARN" "$XMJ_MAINT_BACKUP_COMPAT_NOTE" "$XMJ_RESET"
+  fi
+
   xmj_render_page_footer '按回车返回首页'
 }
 
@@ -3025,4 +3225,117 @@ xmj_run_dependency_repair_page() {
   fi
 
   xmj_render_dependency_result 'repair' 'success' 'done' "$(xmj_dependency_repair_result_summary)" "$detail_text"
+}
+
+xmj_render_backup_archive_lines() {
+  local page="${1:-1}"
+  local page_size="${2:-5}"
+  local total="${#XMJ_BACKUP_ARCHIVE_FILES[@]}"
+  local start_index='0'
+  local end_index='0'
+  local i='0'
+  local archive_file=''
+  local archive_name=''
+  local archive_scope=''
+
+  if [ "$total" -eq 0 ]; then
+    xmj_render_setting_card \
+      '还没有备份档' \
+      '当前备份目录里还没有 zip 备份。' \
+      '可以先去 07 创建备份，再回来翻翻看。'
+    return 0
+  fi
+
+  start_index=$(((page - 1) * page_size))
+  end_index=$((start_index + page_size))
+  if [ "$end_index" -gt "$total" ]; then
+    end_index="$total"
+  fi
+
+  printf '  %b♡ 备份档案%b\n' "$XMJ_PINK" "$XMJ_RESET"
+
+  for ((i = start_index; i < end_index; i++)); do
+    archive_file="${XMJ_BACKUP_ARCHIVE_FILES[$i]}"
+    archive_name="$(basename "$archive_file")"
+    archive_scope="${XMJ_BACKUP_ARCHIVE_SCOPES[$i]:-}"
+
+    if [ -z "$archive_scope" ]; then
+      archive_scope="$(xmj_backup_archive_scope_text "$archive_file")"
+    fi
+
+    printf '\n'
+    printf '  %b[%02d]%b %b%s%b\n' \
+      "$XMJ_PINK" $((i + 1)) "$XMJ_RESET" \
+      "$XMJ_WHITE" "$archive_name" "$XMJ_RESET"
+    printf '      %b时间%b：%b%s%b   %b大小%b：%b%s%b   %b范围%b：%b%s%b\n' \
+      "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$(xmj_backup_archive_time_text "$archive_file")" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$(xmj_backup_archive_size_text "$archive_file")" "$XMJ_RESET" \
+      "$XMJ_MIST" "$XMJ_RESET" "$XMJ_WHITE" "$archive_scope" "$XMJ_RESET"
+  done
+}
+
+xmj_render_backup_restore_confirm_page() {
+  local archive_file="${1:-}"
+  local archive_name=''
+
+  archive_name="$(basename "$archive_file")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['09']}" 'restore data' 'backup'
+  printf '\n'
+  xmj_render_page_intro \
+    '这次会把选中的备份覆盖恢复到当前酒馆目录。' \
+    '如果这是低版本兼容备份，恢复时只会放回 data。'
+  printf '\n'
+  xmj_render_fact_line '备份文件' "$archive_name"
+  xmj_render_fact_line '备份时间' "$(xmj_backup_archive_time_text "$archive_file")"
+  xmj_render_fact_line '备份大小' "$(xmj_backup_archive_size_text "$archive_file")"
+  xmj_render_fact_line '备份范围' "$(xmj_backup_archive_scope_text "$archive_file")"
+  xmj_render_fact_line '恢复到' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_backup_notice
+  printf '\n'
+  xmj_render_action_item 'y' '确认恢复这个备份'
+  xmj_render_action_item '0' '取消并返回上一页'
+  xmj_render_action_footer '输入 y / 0。'
+}
+
+xmj_render_backup_cleanup_confirm_page() {
+  local mode="${1:-single}"
+  local archive_file="${2:-}"
+  local keep_count=''
+  local summary_text=''
+  local detail_text=''
+
+  keep_count="$(xmj_backup_cleanup_keep_count)"
+
+  case "$mode" in
+    auto)
+      summary_text="会保留最新 ${keep_count} 个备份。"
+      detail_text='更旧的 zip 备份会直接删掉，删完就不自动回来啦。'
+      ;;
+    *)
+      summary_text="即将删除：$(basename "$archive_file")"
+      detail_text='这里只会删掉备份档，不会碰酒馆目录本体。'
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['10']}" 'cleanup archive' 'backup'
+  printf '\n'
+  xmj_render_setting_card '执行前确认' "$summary_text" "$detail_text"
+
+  if [ "$mode" = 'single' ] && [ -n "$archive_file" ]; then
+    printf '\n'
+    xmj_render_fact_line '备份时间' "$(xmj_backup_archive_time_text "$archive_file")"
+    xmj_render_fact_line '备份大小' "$(xmj_backup_archive_size_text "$archive_file")"
+    xmj_render_fact_line '备份范围' "$(xmj_backup_archive_scope_text "$archive_file")"
+  fi
+
+  xmj_render_backup_notice
+  printf '\n'
+  xmj_render_action_item 'y' '确认执行这次清理'
+  xmj_render_action_item '0' '取消并返回上一页'
+  xmj_render_action_footer '输入 y / 0。'
 }

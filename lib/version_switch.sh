@@ -304,6 +304,7 @@ xmj_version_reset_state() {
   XMJ_VERSION_DEPENDENCY_NOTE=''
   XMJ_VERSION_BACKUP_FILE=''
   XMJ_VERSION_BACKUP_NOTE=''
+  XMJ_VERSION_BACKUP_COMPAT_NOTE=''
   XMJ_VERSION_RECOVER_NOTE=''
   XMJ_VERSION_STASH_CREATED='0'
   XMJ_VERSION_STASH_REF=''
@@ -398,6 +399,10 @@ xmj_version_fail() {
   local stage="${1:-env}"
   local summary="${2:-切换版本失败}"
   local detail="${3:-请温和查看日志。}"
+
+  if [ -n "${XMJ_VERSION_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail="$(xmj_version_append_detail "$detail" "$XMJ_VERSION_BACKUP_COMPAT_NOTE")"
+  fi
 
   XMJ_VERSION_STAGE="$stage"
   XMJ_VERSION_SUMMARY="$summary"
@@ -696,13 +701,20 @@ xmj_version_restore_local_changes() {
 xmj_version_run_backup() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
-  if ! xmj_maintenance_create_backup "$repo_path" 'xmj_version_log_line' "$XMJ_VERSION_LOG_FILE" '版本切换'; then
+  if ! xmj_maintenance_create_backup \
+    "$repo_path" \
+    'xmj_version_log_line' \
+    "$XMJ_VERSION_LOG_FILE" \
+    '版本切换' \
+    "${XMJ_VERSION_BEFORE_VERSION:-}" \
+    "${XMJ_VERSION_TARGET_TAG:-}"; then
     xmj_version_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成 zip 备份。}"
     return 1
   fi
 
   XMJ_VERSION_BACKUP_FILE="$XMJ_MAINT_BACKUP_FILE"
   XMJ_VERSION_BACKUP_NOTE="$XMJ_MAINT_BACKUP_NOTE"
+  XMJ_VERSION_BACKUP_COMPAT_NOTE="${XMJ_MAINT_BACKUP_COMPAT_NOTE:-}"
   return 0
 }
 
@@ -1468,6 +1480,10 @@ xmj_version_target_detail() {
     detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_RECOVER_NOTE")"
   fi
 
+  if [ -n "${XMJ_VERSION_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_BACKUP_COMPAT_NOTE")"
+  fi
+
   case "${XMJ_VERSION_RESTORE_NOTE:-}" in
     ''|'无需放回本地改动。')
       ;;
@@ -1491,6 +1507,10 @@ xmj_branch_target_detail() {
 
   if [ -n "${XMJ_VERSION_RECOVER_NOTE:-}" ]; then
     detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_RECOVER_NOTE")"
+  fi
+
+  if [ -n "${XMJ_VERSION_BACKUP_COMPAT_NOTE:-}" ]; then
+    detail_text="$(xmj_version_append_detail "$detail_text" "$XMJ_VERSION_BACKUP_COMPAT_NOTE")"
   fi
 
   case "${XMJ_VERSION_RESTORE_NOTE:-}" in
@@ -1652,7 +1672,7 @@ xmj_version_run_switch() {
     'backup' \
     'running' \
     '自动备份' \
-    '正在把 data、third-party 和 config.yaml 打包成 zip 备份。'
+    "$(xmj_maintenance_backup_stage_text "${XMJ_VERSION_BEFORE_VERSION:-}" "${XMJ_VERSION_TARGET_TAG:-}")"
 
   if ! xmj_version_run_backup; then
     xmj_render_version_result \
@@ -1841,7 +1861,7 @@ xmj_branch_run_switch() {
     'backup' \
     'running' \
     '自动备份' \
-    '正在把 data、third-party 和 config.yaml 打包成 zip 备份。'
+    "$(xmj_maintenance_backup_stage_text "${XMJ_VERSION_BEFORE_VERSION:-}" '')"
 
   if ! xmj_version_run_backup; then
     xmj_render_version_result \
