@@ -935,6 +935,15 @@ xmj_setting_view_title() {
     logs)
       printf '%s' '日志查看'
       ;;
+    logs_keep_count)
+      printf '%s' '日志保留数量'
+      ;;
+    logs_delete_confirm)
+      printf '%s' '删除日志确认'
+      ;;
+    logs_cleanup_confirm)
+      printf '%s' '清理日志确认'
+      ;;
     *)
       printf '%s' '设置中心'
       ;;
@@ -959,6 +968,15 @@ xmj_setting_view_id() {
       ;;
     logs)
       printf '%s' '19-5'
+      ;;
+    logs_keep_count)
+      printf '%s' '19-5-1'
+      ;;
+    logs_delete_confirm)
+      printf '%s' '19-5-2'
+      ;;
+    logs_cleanup_confirm)
+      printf '%s' '19-5-3'
       ;;
     *)
       printf '%s' '19'
@@ -1133,6 +1151,15 @@ xmj_render_setting_center_page() {
       ;;
     logs)
       xmj_render_setting_logs_page
+      ;;
+    logs_keep_count)
+      xmj_render_setting_logs_keep_count_page
+      ;;
+    logs_delete_confirm)
+      xmj_render_setting_logs_delete_confirm_page
+      ;;
+    logs_cleanup_confirm)
+      xmj_render_setting_logs_cleanup_confirm_page
       ;;
     *)
       xmj_render_setting_overview_page
@@ -1659,6 +1686,7 @@ xmj_render_setting_script_update_page() {
   xmj_render_page_title "$(xmj_setting_view_title 'script_update')" 'script update' 'setting'
   printf '\n'
   printf '  %b这里会在小猫卷仓库里执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b如果只有 config/xiaomaojuan.conf 有本地改动，猫猫会先临时护住它再更新。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b如果这次真的拉到了新代码，猫猫会自动帮你重开小猫卷。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '当前版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
@@ -1720,10 +1748,11 @@ xmj_render_setting_logs_page() {
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
   printf '\n'
   printf '  %b这里先摆最新日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b详细内容还是留在原日志文件里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b详细内容还是留在原日志文件里；删单个和按保留数量清理也都放这页了。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
   xmj_render_fact_line '日志数量' "${#XMJ_SETTING_LOG_FILES[@]}"
+  xmj_render_fact_line '保留策略' "保留最新 $(xmj_setting_log_keep_count) 份"
 
   if [ "$display_count" -gt 0 ]; then
     xmj_render_fact_line '当前查看' "$selected_name"
@@ -1747,9 +1776,83 @@ xmj_render_setting_logs_page() {
 
   xmj_render_notice_line
   printf '\n'
+  if [ "$display_count" -gt 0 ]; then
+    xmj_render_action_item 'd' '删除当前查看日志'
+    xmj_render_action_item 'a' '按保留数量清理旧日志'
+  fi
+  xmj_render_action_item 'k' '修改日志保留数量'
   xmj_render_action_item 'r' '刷新日志列表'
   xmj_render_action_item '0' '返回设置中心'
-  xmj_render_action_footer '输入日志序号 / r / 0 就好喵'
+  if [ "$display_count" -gt 0 ]; then
+    xmj_render_action_footer '输入日志序号 / d / a / k / r / 0 就好喵'
+  else
+    xmj_render_action_footer '输入 k / r / 0 就好喵'
+  fi
+}
+
+xmj_render_setting_logs_keep_count_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'logs_keep_count')" 'log viewer' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里改的是日志页自动清理时要保留的数量' \
+    '输入新的正整数后，会直接写进 xiaomaojuan.conf。' \
+    '改完不会立刻删日志；要真正清理旧日志，回日志页按 a 再执行一次。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_keep_count')"
+  xmj_render_fact_line '当前数量' "$(xmj_setting_log_keep_count)"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成新的日志保留数量'
+  xmj_render_action_item '0' '返回日志查看'
+  xmj_render_action_footer '输入新的保留数量 / 0 返回日志查看'
+}
+
+xmj_render_setting_logs_delete_confirm_page() {
+  local target_file="${XMJ_SETTING_LOG_DELETE_TARGET:-}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'logs_delete_confirm')" 'log viewer' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这次会删掉当前选中的那一份日志' \
+    "${target_file##*/}" \
+    '删除后不会自动恢复。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_delete_confirm')"
+  xmj_render_fact_line '目标文件' "$(xmj_display_path "$target_file")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item 'y' '确认删除这份日志'
+  xmj_render_action_item '0' '取消并返回日志查看'
+  xmj_render_action_footer '输入 y / 0 就好喵'
+}
+
+xmj_render_setting_logs_cleanup_confirm_page() {
+  local keep_count=''
+
+  keep_count="$(xmj_setting_log_keep_count)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'logs_cleanup_confirm')" 'log viewer' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这次会按当前保留策略整理旧日志' \
+    "只保留最新 ${keep_count} 份日志。" \
+    '更旧的日志会被直接删除，删除后不会自动恢复。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_cleanup_confirm')"
+  xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
+  xmj_render_fact_line '当前策略' "保留最新 ${keep_count} 份"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item 'y' '确认执行这次清理'
+  xmj_render_action_item '0' '取消并返回日志查看'
+  xmj_render_action_footer '输入 y / 0 就好喵'
 }
 
 xmj_render_tavern_setting_page() {

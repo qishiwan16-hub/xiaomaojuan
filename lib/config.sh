@@ -149,6 +149,10 @@ XMJ_BACKUP_DIR="backups"
 # 启动 / 更新日志等详细输出会写到这里，避免直接刷满前台。
 XMJ_LOG_DIR="logs"
 
+# 日志自动清理时保留的数量。
+# 设为正整数；在日志查看页里可以按这个数量执行清理。
+XMJ_LOG_KEEP_COUNT="20"
+
 # 自动清理备份时保留的数量。
 # 设为正整数；值越小，自动清理时删掉的旧备份越多。
 XMJ_BACKUP_KEEP_COUNT="5"
@@ -230,6 +234,7 @@ xmj_apply_config_defaults() {
   : "${XMJ_BACKUP_DIR:=backups}"
   : "${XMJ_BACKUP_KEEP_COUNT:=5}"
   : "${XMJ_LOG_DIR:=logs}"
+  : "${XMJ_LOG_KEEP_COUNT:=20}"
   : "${XMJ_TAVERN_HOST:=127.0.0.1}"
   : "${XMJ_TAVERN_PORT:=8000}"
   : "${XMJ_TAVERN_ENTRY_PATH:=/}"
@@ -356,6 +361,7 @@ xmj_validate_config() {
   xmj_validate_required_text 'XMJ_BACKUP_DIR' '备份目录' 'backups'
   xmj_validate_positive_int_value 'XMJ_BACKUP_KEEP_COUNT' '自动清理备份保留数量' '5' '1'
   xmj_validate_required_text 'XMJ_LOG_DIR' '日志目录' 'logs'
+  xmj_validate_positive_int_value 'XMJ_LOG_KEEP_COUNT' '日志保留数量' '20' '1'
   xmj_validate_required_text 'XMJ_TAVERN_HOST' '酒馆访问主机' '127.0.0.1'
   xmj_validate_port_value 'XMJ_TAVERN_PORT' '酒馆访问端口' '8000'
   xmj_normalize_web_path_value 'XMJ_TAVERN_ENTRY_PATH' '酒馆入口路径'

@@ -31,11 +31,17 @@ xmj_maintenance_create_archive() {
   local archive_file="${3:-}"
   local shell_log="${4:-/dev/null}"
   local python_cmd=''
+  local bundle_root=''
+
+  bundle_root="$source_dir/$bundle_name"
 
   if command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1; then
     (
-      cd "$source_dir" || exit 1
-      zip -rq "$archive_file" "$bundle_name"
+      cd "$bundle_root" || exit 1
+      find . -mindepth 1 -maxdepth 1 -print \
+        | LC_ALL=C sort \
+        | sed 's#^\./##' \
+        | zip -rq "$archive_file" -@
     ) >>"$shell_log" 2>&1
     return $?
   fi
@@ -57,12 +63,12 @@ if not os.path.isdir(root):
 
 with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     for current_root, dirnames, filenames in os.walk(root):
-        rel_root = os.path.relpath(current_root, source_dir)
+        rel_root = os.path.relpath(current_root, root)
         if rel_root != ".":
             zf.write(current_root, rel_root)
         for filename in filenames:
             file_path = os.path.join(current_root, filename)
-            arcname = os.path.relpath(file_path, source_dir)
+            arcname = os.path.relpath(file_path, root)
             zf.write(file_path, arcname)
 PY
 }

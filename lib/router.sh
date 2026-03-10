@@ -506,12 +506,176 @@ xmj_setting_script_worktree_text() {
   printf '%s' '工作区干净'
 }
 
+xmj_setting_script_update_protected_config_relpath() {
+  printf '%s' 'config/xiaomaojuan.conf'
+}
+
+xmj_setting_script_update_config_backup_path() {
+  local stamp="${1:-}"
+  local log_dir="${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+  local temp_file=''
+
+  temp_file="$(mktemp "$log_dir/.xmj-script-config-${stamp}-XXXXXX" 2>/dev/null || true)"
+  if [ -n "$temp_file" ]; then
+    printf '%s' "$temp_file"
+    return 0
+  fi
+
+  printf '%s/.xmj-script-config-%s-%s.bak' "$log_dir" "$stamp" "$$"
+}
+
+xmj_setting_script_update_protect_local_config() {
+  local repo_path="${1:-}"
+  local log_file="${2:-/dev/null}"
+  local relpath=''
+  local status_line=''
+  local path=''
+  local has_config_dirty='0'
+  local has_other_dirty='0'
+  local temp_file=''
+  local stash_message=''
+  local stash_ref=''
+  local config_state=''
+  local stamp=''
+
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_CONFIG='0'
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE=''
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_STASH=''
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    return 0
+  fi
+
+  relpath="$(xmj_setting_script_update_protected_config_relpath)"
+  while IFS= read -r status_line || [ -n "$status_line" ]; do
+    [ -n "$status_line" ] || continue
+    path="${status_line#???}"
+    case "$path" in
+      *' -> '*)
+        path="${path##* -> }"
+        ;;
+    esac
+
+    if [ "$path" = "$relpath" ]; then
+      has_config_dirty='1'
+    else
+      has_other_dirty='1'
+    fi
+  done < <(git -C "$repo_path" status --porcelain --untracked-files=no 2>>"$log_file" || true)
+
+  if [ "$has_config_dirty" != '1' ]; then
+    return 0
+  fi
+
+  if [ "$has_other_dirty" = '1' ]; then
+    printf '[warn] 检测到除了 %s 之外还有别的本地改动，本次不自动更新。\n' "$relpath" >>"$log_file"
+    xmj_font_set_notice 'warn' "除了 ${relpath} 之外还有别的本地改动，先处理完再更新脚本。"
+    return 1
+  fi
+
+  stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='manual'
+  fi
+
+  temp_file="$(xmj_setting_script_update_config_backup_path "$stamp")"
+  if ! cp -f "$repo_path/$relpath" "$temp_file" 2>>"$log_file"; then
+    xmj_font_set_notice 'warn' "本地配置暂存失败：$(xmj_display_path "$repo_path/$relpath")"
+    return 1
+  fi
+
+  stash_message="xmj-script-update-config-${stamp}-$$"
+  if ! git -C "$repo_path" stash push --quiet --message "$stash_message" -- "$relpath" >>"$log_file" 2>&1; then
+    rm -f "$temp_file" 2>/dev/null || true
+    xmj_font_set_notice 'warn' '临时保护本地配置失败，这次脚本更新先停一下。'
+    return 1
+  fi
+
+  stash_ref="$(
+    git -C "$repo_path" stash list --format='%gd %gs' 2>>"$log_file" \
+      | while IFS= read -r status_line || [ -n "$status_line" ]; do
+          case "$status_line" in
+            *"$stash_message"*)
+              printf '%s' "${status_line%% *}"
+              break
+              ;;
+          esac
+        done
+  )"
+  if [ -z "$stash_ref" ]; then
+    stash_ref="$(git -C "$repo_path" stash list -1 --format='%gd' 2>>"$log_file" || true)"
+  fi
+
+  config_state="$(git -C "$repo_path" status --porcelain --untracked-files=no -- "$relpath" 2>>"$log_file" || true)"
+  if [ -n "$config_state" ]; then
+    printf '[warn] 已尝试暂存本地配置，但 %s 仍然不是干净状态。\n' "$relpath" >>"$log_file"
+    xmj_setting_script_update_release_protected_config "$repo_path" "$log_file"
+    rm -f "$temp_file" 2>/dev/null || true
+    xmj_font_set_notice 'warn' '本地配置没有成功让开更新流程，这次脚本更新先停一下。'
+    return 1
+  fi
+
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_CONFIG='1'
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE="$temp_file"
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_STASH="$stash_ref"
+  printf '[info] 检测到本地 %s 改动，已先临时保护后继续更新。\n' "$relpath" >>"$log_file"
+  return 0
+}
+
+xmj_setting_script_update_release_protected_config() {
+  local repo_path="${1:-}"
+  local log_file="${2:-/dev/null}"
+  local stash_ref="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_STASH:-}"
+
+  if [ -n "$stash_ref" ] && [ -n "$repo_path" ] && [ -d "$repo_path" ]; then
+    git -C "$repo_path" stash drop --quiet "$stash_ref" >>"$log_file" 2>&1 || true
+  fi
+
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_STASH=''
+}
+
+xmj_setting_script_update_restore_local_config() {
+  local repo_path="${1:-}"
+  local log_file="${2:-/dev/null}"
+  local relpath=''
+  local backup_file="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+  local target_file=''
+
+  if [ "${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_CONFIG:-0}" != '1' ]; then
+    return 0
+  fi
+
+  relpath="$(xmj_setting_script_update_protected_config_relpath)"
+  target_file="$repo_path/$relpath"
+
+  if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
+    xmj_setting_script_update_release_protected_config "$repo_path" "$log_file"
+    XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_CONFIG='0'
+    return 1
+  fi
+
+  if ! cat "$backup_file" >"$target_file" 2>>"$log_file"; then
+    xmj_setting_script_update_release_protected_config "$repo_path" "$log_file"
+    XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_CONFIG='0'
+    return 1
+  fi
+
+  printf '[info] 本地 %s 已恢复回更新前的内容。\n' "$relpath" >>"$log_file"
+  xmj_setting_script_update_release_protected_config "$repo_path" "$log_file"
+  rm -f "$backup_file" 2>/dev/null || true
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE=''
+  XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_CONFIG='0'
+  return 0
+}
+
 xmj_setting_run_script_update() {
   local repo_path="${XMJ_ROOT_DIR:-}"
   local before_commit=''
   local after_commit=''
   local stamp=''
   local log_file=''
+  local restore_failed='0'
+  local backup_hint=''
 
   if ! xmj_require_script_password 'script_update'; then
     xmj_font_set_notice 'info' '这次脚本更新先取消啦。'
@@ -563,11 +727,31 @@ xmj_setting_run_script_update() {
     printf '[info] 根目录：%s\n' "$repo_path"
     printf '[info] 当前分支：%s\n' "${XMJ_SETTING_SCRIPT_BRANCH:-detached}"
     printf '[info] 当前提交：%s\n' "$before_commit"
-    git -C "$repo_path" pull --ff-only
   } >>"$log_file" 2>&1
 
-  if [ "$?" -ne 0 ]; then
-    xmj_font_set_notice 'warn' "脚本更新没跑通，细节可看：$(xmj_display_path "$log_file")"
+  if ! xmj_setting_script_update_protect_local_config "$repo_path" "$log_file"; then
+    xmj_setting_refresh_script_repo_state
+    return 1
+  fi
+
+  if ! git -C "$repo_path" pull --ff-only >>"$log_file" 2>&1; then
+    if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+      restore_failed='1'
+      backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+    fi
+
+    if [ "$restore_failed" = '1' ]; then
+      xmj_font_set_notice 'warn' "脚本更新没跑通，而且本地配置恢复失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+    else
+      xmj_font_set_notice 'warn' "脚本更新没跑通，细节可看：$(xmj_display_path "$log_file")"
+    fi
+    xmj_setting_refresh_script_repo_state
+    return 1
+  fi
+
+  if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+    backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+    xmj_font_set_notice 'warn' "脚本已经拉到新代码，但本地配置恢复失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
     xmj_setting_refresh_script_repo_state
     return 1
   fi
@@ -617,6 +801,22 @@ xmj_restart_script_process() {
 
 xmj_setting_log_display_limit() {
   printf '%s' '12'
+}
+
+xmj_setting_log_keep_count() {
+  local keep_count="${XMJ_LOG_KEEP_COUNT:-20}"
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      keep_count='20'
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    keep_count='20'
+  fi
+
+  printf '%s' "$keep_count"
 }
 
 xmj_setting_refresh_log_files() {
@@ -686,6 +886,86 @@ xmj_setting_selected_log_file() {
   fi
 
   printf '%s' "${XMJ_SETTING_LOG_FILES[$array_index]}"
+}
+
+xmj_setting_delete_log_file() {
+  local file_path="${1:-}"
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    xmj_font_set_notice 'warn' '没找到要删除的日志文件。'
+    return 1
+  fi
+
+  if ! rm -f "$file_path" 2>/dev/null; then
+    xmj_font_set_notice 'warn' "删除日志失败：$(xmj_display_path "$file_path")"
+    return 1
+  fi
+
+  xmj_setting_refresh_log_files
+  xmj_font_set_notice 'success' "已删除日志：$(basename "$file_path")"
+  return 0
+}
+
+xmj_setting_cleanup_old_logs() {
+  local keep_count="${1:-$(xmj_setting_log_keep_count)}"
+  local total='0'
+  local index='0'
+  local removed='0'
+  local file_path=''
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      keep_count="$(xmj_setting_log_keep_count)"
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    keep_count="$(xmj_setting_log_keep_count)"
+  fi
+
+  xmj_setting_refresh_log_files
+  total="${#XMJ_SETTING_LOG_FILES[@]}"
+  if [ "$total" -le "$keep_count" ]; then
+    xmj_font_set_notice 'info' "当前只有 ${total} 份日志，少于或等于保留数量，无需清理。"
+    return 0
+  fi
+
+  for ((index = keep_count; index < total; index += 1)); do
+    file_path="${XMJ_SETTING_LOG_FILES[$index]}"
+    if ! rm -f "$file_path" 2>/dev/null; then
+      xmj_font_set_notice 'warn' "清理日志失败：$(xmj_display_path "$file_path")"
+      return 1
+    fi
+    removed=$((removed + 1))
+  done
+
+  xmj_setting_refresh_log_files
+  xmj_font_set_notice 'success' "已清理 ${removed} 份旧日志，保留最新 ${keep_count} 份。"
+  return 0
+}
+
+xmj_setting_update_log_keep_count() {
+  local keep_count="${1:-}"
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      xmj_font_set_notice 'warn' '这里只支持输入正整数。'
+      return 1
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    xmj_font_set_notice 'warn' '日志保留数量至少要是 1。'
+    return 1
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_LOG_KEEP_COUNT' "$keep_count"; then
+    xmj_font_set_notice 'warn' "日志保留数量写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已把日志保留数量改成 ${keep_count}。"
+  return 0
 }
 
 xmj_setting_log_line_count() {
@@ -848,12 +1128,35 @@ xmj_handle_script_setting_action() {
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='home'
           ;;
+        d|D)
+          xmj_setting_refresh_log_files
+          XMJ_SETTING_LOG_DELETE_TARGET="$(xmj_setting_selected_log_file)"
+          if [ -z "${XMJ_SETTING_LOG_DELETE_TARGET:-}" ]; then
+            xmj_font_set_notice 'warn' '当前还没有可删除的日志。'
+          else
+            xmj_font_clear_notice
+            XMJ_SETTING_NEXT_VIEW='logs_delete_confirm'
+          fi
+          ;;
+        a|A)
+          xmj_setting_refresh_log_files
+          if [ "${#XMJ_SETTING_LOG_FILES[@]}" -eq 0 ]; then
+            xmj_font_set_notice 'warn' '当前还没有可清理的日志。'
+          else
+            xmj_font_clear_notice
+            XMJ_SETTING_NEXT_VIEW='logs_cleanup_confirm'
+          fi
+          ;;
+        k|K)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs_keep_count'
+          ;;
         r|R)
           xmj_font_clear_notice
           xmj_setting_refresh_log_files
           ;;
         *[!0-9]*)
-          xmj_font_set_notice 'warn' '仅支持输入日志序号、r 或 0。'
+          xmj_font_set_notice 'warn' '仅支持输入日志序号、d、a、k、r 或 0。'
           ;;
         *)
           xmj_setting_refresh_log_files
@@ -866,6 +1169,55 @@ xmj_handle_script_setting_action() {
             xmj_font_clear_notice
             XMJ_SETTING_LOG_SELECTED_INDEX="$input"
           fi
+          ;;
+      esac
+      ;;
+    logs_keep_count)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
+          ;;
+        *[!0-9]*)
+          xmj_font_set_notice 'warn' '这里只支持输入正整数或 0。'
+          ;;
+        *)
+          if xmj_setting_update_log_keep_count "$input"; then
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+      esac
+      ;;
+    logs_delete_confirm)
+      case "$input" in
+        0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
+          ;;
+        y|Y|yes|YES|Yes)
+          if xmj_setting_delete_log_file "${XMJ_SETTING_LOG_DELETE_TARGET:-}"; then
+            XMJ_SETTING_LOG_DELETE_TARGET=''
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '请输入 y / 0。'
+          ;;
+      esac
+      ;;
+    logs_cleanup_confirm)
+      case "$input" in
+        0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
+          ;;
+        y|Y|yes|YES|Yes)
+          if xmj_setting_cleanup_old_logs "$(xmj_setting_log_keep_count)"; then
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '请输入 y / 0。'
           ;;
       esac
       ;;
