@@ -197,6 +197,36 @@ xmj_extend_normalize_script_path() {
   printf '%s' "$candidate"
 }
 
+xmj_extend_validate_script_file() {
+  local script_path="${1:-}"
+  local first_line=''
+
+  XMJ_EXTEND_LAST_SCRIPT_CHECK_MESSAGE=''
+
+  if [ -z "$script_path" ] || [ ! -f "$script_path" ]; then
+    XMJ_EXTEND_LAST_SCRIPT_CHECK_MESSAGE='这个路径下没有脚本文件喵。'
+    return 1
+  fi
+
+  IFS= read -r first_line < "$script_path" || true
+  case "$first_line" in
+    '#!'*bash*)
+      return 0
+      ;;
+    '#!'*)
+      XMJ_EXTEND_LAST_SCRIPT_CHECK_MESSAGE='目前只支持 bash 启动脚本喵，这个文件第一行不是 bash。'
+      return 1
+      ;;
+  esac
+
+  if bash -n "$script_path" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  XMJ_EXTEND_LAST_SCRIPT_CHECK_MESSAGE='目前只支持 bash 启动脚本喵，这个文件没通过 bash 检查。'
+  return 1
+}
+
 xmj_extend_export_context() {
   export XMJ_ROOT_DIR
   export XMJ_CONFIG_FILE
@@ -224,6 +254,11 @@ xmj_extend_execute_script() {
     return 1
   fi
 
+  if ! xmj_extend_validate_script_file "$script_path"; then
+    xmj_extend_set_notice 'warn' "${XMJ_EXTEND_LAST_SCRIPT_CHECK_MESSAGE:-目前只支持 bash 启动脚本喵。}"
+    return 1
+  fi
+
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$script_name" 'tool launcher' 'extend'
@@ -237,12 +272,7 @@ xmj_extend_execute_script() {
   (
     cd "${XMJ_ROOT_DIR:-.}" || exit 1
     xmj_extend_export_context
-
-    if [ -x "$script_path" ]; then
-      "$script_path"
-    else
-      bash "$script_path"
-    fi
+    bash "$script_path"
   )
   exit_code=$?
 
@@ -358,12 +388,12 @@ xmj_render_extend_add_page() {
     xmj_render_setting_card \
       '还没有登记好的工具喵' \
       '按 1 开始新增，名字和脚本路径都告诉猫猫就行。' \
-      ''
+      '目前只支持 bash 启动脚本。'
   else
     xmj_render_setting_card \
       '猫猫已经记住这些工具啦' \
       '要继续加新的，按 1 就好。' \
-      ''
+      '目前只支持 bash 启动脚本。'
     printf '\n'
 
     for ((index = 0; index < count; index += 1)); do
@@ -406,6 +436,11 @@ xmj_extend_add_entry() {
 
   if [ ! -f "$normalized_path" ]; then
     xmj_extend_set_notice 'warn' '这个路径下没有脚本文件喵。'
+    return 1
+  fi
+
+  if ! xmj_extend_validate_script_file "$normalized_path"; then
+    xmj_extend_set_notice 'warn' "${XMJ_EXTEND_LAST_SCRIPT_CHECK_MESSAGE:-目前只支持 bash 启动脚本喵。}"
     return 1
   fi
 
