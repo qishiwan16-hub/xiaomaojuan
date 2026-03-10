@@ -1920,7 +1920,16 @@ xmj_render_tavern_setting_page() {
     stutter_fix_user)
       xmj_render_tavern_setting_stutter_fix_user_page
       ;;
-    file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
+    file_chat_limit)
+      xmj_render_tavern_setting_file_chat_limit_page
+      ;;
+    memory_limit)
+      xmj_render_tavern_setting_memory_limit_page
+      ;;
+    port_conflict)
+      xmj_render_tavern_setting_port_conflict_page
+      ;;
+    chat_freeze_fix|beautify_freeze_fix)
       xmj_render_tavern_setting_placeholder_detail_page "$view"
       ;;
     backup_keep_count)
@@ -2019,6 +2028,15 @@ xmj_tavern_setting_status_text() {
     stutter_fix)
       xmj_tavern_setting_stutter_fix_status_text
       ;;
+    file_chat_limit)
+      xmj_tavern_setting_file_chat_limit_status_text
+      ;;
+    memory_limit)
+      xmj_tavern_setting_memory_limit_status_text
+      ;;
+    port_conflict)
+      xmj_tavern_setting_port_conflict_status_text
+      ;;
     backup_keep_count)
       printf '当前：保留最新 %s 个' "$(xmj_backup_cleanup_keep_count)"
       ;;
@@ -2078,18 +2096,19 @@ xmj_render_tavern_setting_browser_redirect_page() {
   xmj_render_page_title "$(xmj_tavern_setting_view_title 'browser_redirect')" 'tavern setting' 'setting'
   printf '\n'
   xmj_render_setting_card \
-    '这项会关掉浏览器自动跳转' \
-    '猫猫会去酒馆配置文件里找到 browserLaunch 这一段，把 enabled 改成 false。' \
-    '改完后重开酒馆，就不会再自己弹去系统浏览器。'
+    '这项可以开关浏览器自动跳转' \
+    '猫猫会去酒馆配置文件里找到 browserLaunch 这一段，按你的选择把 enabled 改成 true 或 false。' \
+    '改完后重开酒馆，就会按新的开关状态决定要不要自动弹去系统浏览器。'
   printf '\n'
   xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'browser_redirect')"
   xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'browser_redirect')"
   xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '1' '开启浏览器跳转'
+  xmj_render_action_item '2' '关闭浏览器跳转'
   xmj_render_action_item '0' '返回酒馆设置'
-  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+  xmj_render_action_footer '输入 1 开启 / 2 关闭 / 0 返回酒馆设置'
 }
 
 xmj_render_tavern_setting_avatar_hd_page() {
@@ -2169,6 +2188,102 @@ xmj_render_tavern_setting_stutter_fix_user_page() {
   xmj_render_action_item '直接输入用户名' '输入后会保存并回到上一页'
   xmj_render_action_item '0' '返回卡顿修复'
   xmj_render_action_footer '直接输入用户名 / 0 返回卡顿修复'
+}
+
+xmj_render_tavern_setting_file_chat_limit_page() {
+  local config_file=''
+  local target=''
+  local scope=''
+  local section=''
+  local key=''
+  local unit_hint=''
+  local current_value=''
+  local resolved_unit=''
+  local matched_key='当前版本没匹配到'
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  target="$(xmj_tavern_setting_file_chat_limit_target)"
+
+  if [ -n "$target" ]; then
+    IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
+$target
+EOF
+    resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
+    matched_key="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key") = $(xmj_tavern_setting_size_display_text "$current_value" "$resolved_unit")"
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'file_chat_limit')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会去改酒馆当前版本真的在用的文件聊天上限键' \
+    '不同版本键名不完全一样，所以猫猫会先在当前 config.yaml 里找已经存在的那一项，再只改那一项。' \
+    '这里输入的是 MB 数字；如果那一项配置本身记的是 bytes，猫猫会自动帮你换算。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'file_chat_limit')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'file_chat_limit')"
+  xmj_render_fact_line '匹配到的键' "$matched_key"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成新的文件聊天上限（按 MB 输入）'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入新的上限数字 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_memory_limit_page() {
+  local memory_limit_mb="${XMJ_TAVERN_NODE_MEMORY_MB:-0}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'memory_limit')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项改的是小猫卷启动酒馆时附加的 Node 内存上限' \
+    '猫猫会把数值写进 xiaomaojuan.conf 里的 XMJ_TAVERN_NODE_MEMORY_MB，01 启动酒馆时自动拼进 NODE_OPTIONS。' \
+    '直接输入新的 MB 数值就行；输入 0 恢复默认启动内存，回车可以直接返回酒馆设置。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'memory_limit')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'memory_limit')"
+  xmj_render_fact_line '当前数值' "${memory_limit_mb} MB"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成新的内存上限（MB）'
+  xmj_render_action_item '0' '恢复默认启动内存'
+  xmj_render_action_item '回车' '返回酒馆设置'
+  xmj_render_action_footer '输入新的 MB 数值 / 0 恢复默认 / 回车返回酒馆设置'
+}
+
+xmj_render_tavern_setting_port_conflict_page() {
+  local config_file=''
+  local tavern_port=''
+  local script_port="${XMJ_TAVERN_PORT:-8000}"
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  tavern_port="$(xmj_tavern_setting_yaml_top_value "$config_file" 'port')"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'port_conflict')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会一起同步酒馆监听端口和小猫卷访问端口' \
+    '第 1 步会把酒馆 config.yaml 顶层的 port 改掉；第 2 步会把小猫卷自己的 XMJ_TAVERN_PORT 也同步成一样。' \
+    '直接输入新的端口数字就行；改完后重开酒馆，小猫卷就会按新的端口检测和进入。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'port_conflict')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'port_conflict')"
+  xmj_render_fact_line '酒馆配置端口' "${tavern_port:-未读取到}"
+  xmj_render_fact_line '面板访问端口' "$script_port"
+  xmj_render_fact_line '酒馆配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_fact_line '面板配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '端口数字' '直接改成新的端口'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入新的端口数字 / 0 返回酒馆设置'
 }
 
 xmj_render_tavern_setting_placeholder_detail_page() {

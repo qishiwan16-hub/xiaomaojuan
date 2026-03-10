@@ -1233,6 +1233,161 @@ xmj_tavern_setting_set_json_bool_value() {
   return 0
 }
 
+xmj_tavern_setting_is_integer() {
+  local value="${1:-}"
+
+  case "$value" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+xmj_tavern_setting_size_unit_from_hint() {
+  local hint="${1:-raw}"
+  local current_value="${2:-}"
+
+  case "$hint" in
+    bytes|mb|raw)
+      printf '%s' "$hint"
+      return 0
+      ;;
+    guess)
+      if xmj_tavern_setting_is_integer "$current_value" && [ "$current_value" -ge 1048576 ]; then
+        printf '%s' 'bytes'
+        return 0
+      fi
+      printf '%s' 'mb'
+      return 0
+      ;;
+  esac
+
+  printf '%s' 'raw'
+}
+
+xmj_tavern_setting_size_display_text() {
+  local raw_value="${1:-}"
+  local unit="${2:-raw}"
+  local approx_mb='0'
+
+  case "$unit" in
+    bytes)
+      if ! xmj_tavern_setting_is_integer "$raw_value"; then
+        printf '%s' "$raw_value"
+        return 0
+      fi
+      approx_mb=$((raw_value / 1048576))
+      if [ "$approx_mb" -lt 1 ] && [ "$raw_value" -gt 0 ]; then
+        approx_mb='1'
+      fi
+      printf '%s bytes（约 %s MB）' "$raw_value" "$approx_mb"
+      ;;
+    mb)
+      printf '%s MB' "$raw_value"
+      ;;
+    *)
+      printf '%s' "$raw_value"
+      ;;
+  esac
+}
+
+xmj_tavern_setting_size_value_for_write() {
+  local input_mb="${1:-}"
+  local unit="${2:-raw}"
+
+  case "$unit" in
+    bytes)
+      printf '%s' "$((input_mb * 1048576))"
+      ;;
+    *)
+      printf '%s' "$input_mb"
+      ;;
+  esac
+}
+
+xmj_tavern_setting_file_chat_limit_key_label() {
+  local scope="${1:-}"
+  local section="${2:-}"
+  local key="${3:-}"
+
+  case "$scope" in
+    yaml_section)
+      printf '%s.%s' "$section" "$key"
+      ;;
+    *)
+      printf '%s' "$key"
+      ;;
+  esac
+}
+
+xmj_tavern_setting_file_chat_limit_target() {
+  local config_file=''
+  local scope=''
+  local section=''
+  local key=''
+  local unit_hint=''
+  local current_value=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while IFS='|' read -r scope section key unit_hint; do
+    [ -n "$scope" ] || continue
+
+    case "$scope" in
+      yaml_section)
+        current_value="$(xmj_tavern_setting_yaml_section_value "$config_file" "$section" "$key")"
+        ;;
+      yaml_top)
+        current_value="$(xmj_tavern_setting_yaml_top_value "$config_file" "$key")"
+        ;;
+      *)
+        current_value=''
+        ;;
+    esac
+
+    if ! xmj_tavern_setting_is_integer "$current_value"; then
+      continue
+    fi
+
+    printf '%s|%s|%s|%s|%s|%s' "$scope" "$config_file" "$section" "$key" "$unit_hint" "$current_value"
+    return 0
+  done <<'EOF'
+yaml_section|uploads|sizeLimitBytes|bytes
+yaml_section|uploads|fileSizeLimitBytes|bytes
+yaml_section|uploads|maxFileSizeBytes|bytes
+yaml_section|uploads|sizeLimit|guess
+yaml_section|uploads|fileSizeLimit|guess
+yaml_section|uploads|maxFileSize|guess
+yaml_section|fileChat|sizeLimitBytes|bytes
+yaml_section|fileChat|uploadLimitBytes|bytes
+yaml_section|fileChat|maxFileSizeBytes|bytes
+yaml_section|fileChat|sizeLimit|guess
+yaml_section|fileChat|uploadLimit|guess
+yaml_section|fileChat|maxFileSize|guess
+yaml_section|attachments|maxFileSizeBytes|bytes
+yaml_section|attachments|maxFileSize|guess
+yaml_section|fileUploads|sizeLimitBytes|bytes
+yaml_section|fileUploads|maxFileSizeBytes|bytes
+yaml_section|fileUploads|sizeLimit|guess
+yaml_section|fileUploads|maxFileSize|guess
+yaml_top|_|fileUploadSizeLimitBytes|bytes
+yaml_top|_|fileUploadLimitBytes|bytes
+yaml_top|_|fileChatSizeLimitBytes|bytes
+yaml_top|_|fileUploadSizeLimit|guess
+yaml_top|_|fileUploadLimit|guess
+yaml_top|_|fileChatSizeLimit|guess
+yaml_top|_|fileChatLimit|guess
+EOF
+
+  printf '%s' ''
+}
+
 xmj_tavern_setting_browser_redirect_status_text() {
   local config_file=''
   local current_value=''
@@ -1308,6 +1463,73 @@ xmj_tavern_setting_stutter_fix_status_text() {
   printf '当前：用户名 %s' "$user_name"
 }
 
+xmj_tavern_setting_file_chat_limit_status_text() {
+  local target=''
+  local scope=''
+  local config_file=''
+  local section=''
+  local key=''
+  local unit_hint=''
+  local current_value=''
+  local resolved_unit=''
+  local key_label=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到配置文件'
+    return 0
+  fi
+
+  target="$(xmj_tavern_setting_file_chat_limit_target)"
+  if [ -z "$target" ]; then
+    printf '%s' '当前：没匹配到已知上限键'
+    return 0
+  fi
+
+  IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
+$target
+EOF
+  resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
+  key_label="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key")"
+  printf '当前：%s = %s' "$key_label" "$(xmj_tavern_setting_size_display_text "$current_value" "$resolved_unit")"
+}
+
+xmj_tavern_setting_memory_limit_status_text() {
+  local memory_limit_mb="${XMJ_TAVERN_NODE_MEMORY_MB:-0}"
+
+  if ! xmj_tavern_setting_is_integer "$memory_limit_mb" || [ "$memory_limit_mb" -lt 1 ]; then
+    printf '%s' '当前：走默认启动内存'
+    return 0
+  fi
+
+  printf '当前：启动时附加 %s MB' "$memory_limit_mb"
+}
+
+xmj_tavern_setting_port_conflict_status_text() {
+  local config_file=''
+  local tavern_port=''
+  local script_port="${XMJ_TAVERN_PORT:-8000}"
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    printf '当前：面板走 %s，酒馆配置文件未找到' "$script_port"
+    return 0
+  fi
+
+  tavern_port="$(xmj_tavern_setting_yaml_top_value "$config_file" 'port')"
+  if ! xmj_tavern_setting_is_integer "$tavern_port"; then
+    printf '当前：面板走 %s，酒馆配置里还没读到 port' "$script_port"
+    return 0
+  fi
+
+  if [ "$tavern_port" = "$script_port" ]; then
+    printf '当前：酒馆和面板都走 %s' "$script_port"
+    return 0
+  fi
+
+  printf '当前：酒馆写 %s / 面板走 %s' "$tavern_port" "$script_port"
+}
+
 xmj_tavern_setting_update_stutter_user() {
   local user_name="${1:-}"
 
@@ -1328,8 +1550,111 @@ xmj_tavern_setting_update_stutter_user() {
   return 0
 }
 
-xmj_tavern_setting_apply_browser_redirect_fix() {
+xmj_tavern_setting_update_file_chat_limit() {
+  local input_mb="${1:-}"
+  local target=''
+  local scope=''
   local config_file=''
+  local section=''
+  local key=''
+  local unit_hint=''
+  local current_value=''
+  local resolved_unit=''
+  local stored_value=''
+  local key_label=''
+
+  case "$input_mb" in
+    ''|*[!0-9]*)
+      xmj_font_set_notice 'warn' '这里只支持输入正整数上限。'
+      return 1
+      ;;
+  esac
+
+  if [ "$input_mb" -lt 1 ]; then
+    xmj_font_set_notice 'warn' '文件聊天上限至少要是 1。'
+    return 1
+  fi
+
+  target="$(xmj_tavern_setting_file_chat_limit_target)"
+  if [ -z "$target" ]; then
+    xmj_font_set_notice 'warn' '没在当前酒馆配置里找到已知的文件聊天上限键，这一项暂时没动。'
+    return 1
+  fi
+
+  IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
+$target
+EOF
+  resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
+  stored_value="$(xmj_tavern_setting_size_value_for_write "$input_mb" "$resolved_unit")"
+  key_label="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key")"
+
+  case "$scope" in
+    yaml_section)
+      if ! xmj_tavern_setting_set_yaml_section_value "$config_file" "$section" "$key" "$stored_value"; then
+        xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
+        return 1
+      fi
+      ;;
+    yaml_top)
+      if ! xmj_tavern_setting_set_yaml_top_value "$config_file" "$key" "$stored_value"; then
+        xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
+        return 1
+      fi
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '文件聊天上限这次没匹配到可写入位置。'
+      return 1
+      ;;
+  esac
+
+  xmj_font_set_notice 'success' "已把 ${key_label} 改成 $(xmj_tavern_setting_size_display_text "$stored_value" "$resolved_unit")：$(xmj_display_path "$config_file")"
+  return 0
+}
+
+xmj_tavern_setting_update_memory_limit() {
+  local memory_limit_mb="${1:-}"
+
+  case "$memory_limit_mb" in
+    ''|*[!0-9]*)
+      xmj_font_set_notice 'warn' '这里只支持输入数字，单位是 MB。'
+      return 1
+      ;;
+  esac
+
+  if [ "$memory_limit_mb" -eq 0 ]; then
+    if ! xmj_config_upsert_value 'XMJ_TAVERN_NODE_MEMORY_MB' '0'; then
+      xmj_font_set_notice 'warn' "默认启动内存没写回配置：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+      return 1
+    fi
+
+    xmj_font_set_notice 'success' '已恢复默认启动内存；下次 01 启动酒馆时生效。'
+    return 0
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_TAVERN_NODE_MEMORY_MB' "$memory_limit_mb"; then
+    xmj_font_set_notice 'warn' "运行内存设置没写回配置：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已把启动内存改成 ${memory_limit_mb} MB；下次 01 启动酒馆时生效。"
+  return 0
+}
+
+xmj_tavern_setting_update_port_conflict() {
+  local port_value="${1:-}"
+  local config_file=''
+
+  case "$port_value" in
+    ''|*[!0-9]*)
+      xmj_font_set_notice 'warn' '这里只支持输入 1 到 65535 的端口。'
+      return 1
+      ;;
+  esac
+
+  if [ "$port_value" -lt 1 ] || [ "$port_value" -gt 65535 ]; then
+    xmj_font_set_notice 'warn' '端口只能在 1 到 65535 之间。'
+    return 1
+  fi
 
   config_file="$(xmj_tavern_setting_config_file)"
   if [ -z "$config_file" ]; then
@@ -1337,12 +1662,51 @@ xmj_tavern_setting_apply_browser_redirect_fix() {
     return 1
   fi
 
-  if ! xmj_tavern_setting_set_yaml_section_value "$config_file" 'browserLaunch' 'enabled' 'false'; then
-    xmj_font_set_notice 'warn' "浏览器跳转修复没写进去：$(xmj_display_path "$config_file")"
+  if ! xmj_tavern_setting_set_yaml_top_value "$config_file" 'port' "$port_value"; then
+    xmj_font_set_notice 'warn' "酒馆端口没写进去：$(xmj_display_path "$config_file")"
     return 1
   fi
 
-  xmj_font_set_notice 'success' "已关闭自动跳浏览器，重开酒馆后生效：$(xmj_display_path "$config_file")"
+  if ! xmj_config_upsert_value 'XMJ_TAVERN_PORT' "$port_value"; then
+    xmj_font_set_notice 'warn' "酒馆 port 已改成 ${port_value}，但小猫卷自己的访问端口没同步写回：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已把酒馆 port 和小猫卷访问端口一起改成 ${port_value}；重开酒馆后生效。"
+  return 0
+}
+
+xmj_tavern_setting_apply_browser_redirect_fix() {
+  xmj_tavern_setting_apply_browser_redirect_value 'false'
+}
+
+xmj_tavern_setting_apply_browser_redirect_value() {
+  local target_value="${1:-false}"
+  local config_file=''
+  local success_text=''
+
+  case "$target_value" in
+    true)
+      success_text='已开启浏览器跳转，重开酒馆后会重新按配置自动拉起浏览器。'
+      ;;
+    *)
+      target_value='false'
+      success_text='已关闭自动跳浏览器，重开酒馆后生效。'
+      ;;
+  esac
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_yaml_section_value "$config_file" 'browserLaunch' 'enabled' "$target_value"; then
+    xmj_font_set_notice 'warn' "浏览器跳转设置没写进去：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "${success_text} $(xmj_display_path "$config_file")"
   return 0
 }
 
@@ -1482,10 +1846,13 @@ xmj_handle_tavern_setting_action() {
           XMJ_TAVERN_SETTING_NEXT_VIEW='home'
           ;;
         1)
-          xmj_tavern_setting_apply_browser_redirect_fix
+          xmj_tavern_setting_apply_browser_redirect_value 'true'
+          ;;
+        2)
+          xmj_tavern_setting_apply_browser_redirect_value 'false'
           ;;
         *)
-          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 0。'
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;
@@ -1551,7 +1918,49 @@ xmj_handle_tavern_setting_action() {
           ;;
       esac
       ;;
-    file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
+    file_chat_limit)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        *[!0-9]*)
+          xmj_font_set_notice 'warn' '这里直接输入新的上限数字就行，或者输入 0 返回酒馆设置。'
+          ;;
+        *)
+          xmj_tavern_setting_update_file_chat_limit "$input"
+          ;;
+      esac
+      ;;
+    memory_limit)
+      case "$input" in
+        '')
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        *[!0-9]*)
+          xmj_font_set_notice 'warn' '这里直接输入 MB 数值；输入 0 恢复默认，回车返回酒馆设置。'
+          ;;
+        *)
+          xmj_tavern_setting_update_memory_limit "$input"
+          ;;
+      esac
+      ;;
+    port_conflict)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        *[!0-9]*)
+          xmj_font_set_notice 'warn' '这里直接输入新的端口数字就行，或者输入 0 返回酒馆设置。'
+          ;;
+        *)
+          xmj_tavern_setting_update_port_conflict "$input"
+          ;;
+      esac
+      ;;
+    chat_freeze_fix|beautify_freeze_fix)
       case "$input" in
         ''|0)
           xmj_font_clear_notice

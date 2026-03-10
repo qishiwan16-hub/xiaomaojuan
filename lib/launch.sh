@@ -272,6 +272,48 @@ xmj_launch_detect_command() {
   return 1
 }
 
+xmj_launch_merged_node_options() {
+  local memory_limit_mb="${XMJ_TAVERN_NODE_MEMORY_MB:-0}"
+  local current_options="${NODE_OPTIONS:-}"
+  local merged_options=''
+  local option=''
+  local memory_option=''
+
+  case "$memory_limit_mb" in
+    ''|*[!0-9]*)
+      printf '%s' "$current_options"
+      return 0
+      ;;
+  esac
+
+  if [ "$memory_limit_mb" -lt 1 ]; then
+    printf '%s' "$current_options"
+    return 0
+  fi
+
+  memory_option="--max-old-space-size=${memory_limit_mb}"
+  for option in $current_options; do
+    case "$option" in
+      --max-old-space-size=*)
+        continue
+        ;;
+    esac
+
+    if [ -n "$merged_options" ]; then
+      merged_options="${merged_options} ${option}"
+    else
+      merged_options="$option"
+    fi
+  done
+
+  if [ -n "$merged_options" ]; then
+    printf '%s %s' "$merged_options" "$memory_option"
+    return 0
+  fi
+
+  printf '%s' "$memory_option"
+}
+
 xmj_launch_capture_int_trap() {
   XMJ_LAUNCH_PREVIOUS_INT_TRAP="$(trap -p INT 2>/dev/null || true)"
 }
@@ -325,6 +367,7 @@ xmj_launch_wait_process() {
 
 xmj_launch_start_process() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local merged_node_options=''
 
   if [ -z "${XMJ_LAUNCH_COMMAND:-}" ]; then
     xmj_launch_fail 'boot' '缺少启动命令' '当前还没有识别出可用的酒馆启动方式。'
@@ -334,10 +377,20 @@ xmj_launch_start_process() {
   XMJ_LAUNCH_WAITED='0'
   XMJ_LAUNCH_EXIT_CODE=''
   XMJ_LAUNCH_USE_PGID='0'
+  merged_node_options="$(xmj_launch_merged_node_options)"
+
+  if [ -n "$merged_node_options" ]; then
+    xmj_launch_log_line "已附加 NODE_OPTIONS：$merged_node_options"
+  else
+    xmj_launch_log_line '当前未附加额外的 Node 内存参数。'
+  fi
 
   if command -v setsid >/dev/null 2>&1; then
     (
       cd "$repo_path" || exit 1
+      if [ -n "$merged_node_options" ]; then
+        export NODE_OPTIONS="$merged_node_options"
+      fi
       exec setsid bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
     ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
     XMJ_LAUNCH_USE_PGID='1'
@@ -345,6 +398,9 @@ xmj_launch_start_process() {
   else
     (
       cd "$repo_path" || exit 1
+      if [ -n "$merged_node_options" ]; then
+        export NODE_OPTIONS="$merged_node_options"
+      fi
       exec bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
     ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
     xmj_launch_log_line '当前环境未检测到 setsid，已退回普通后台启动。'

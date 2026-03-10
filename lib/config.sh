@@ -160,6 +160,10 @@ XMJ_TAVERN_HOST="127.0.0.1"
 XMJ_TAVERN_PORT="8000"
 XMJ_TAVERN_ENTRY_PATH="/"
 
+# 启动酒馆时额外附加的 Node 内存上限，单位 MB。
+# 设为 0 表示不额外覆盖，走酒馆默认启动内存。
+XMJ_TAVERN_NODE_MEMORY_MB="0"
+
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -229,6 +233,7 @@ xmj_apply_config_defaults() {
   : "${XMJ_TAVERN_HOST:=127.0.0.1}"
   : "${XMJ_TAVERN_PORT:=8000}"
   : "${XMJ_TAVERN_ENTRY_PATH:=/}"
+  : "${XMJ_TAVERN_NODE_MEMORY_MB:=0}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
@@ -275,6 +280,21 @@ xmj_validate_positive_int_value() {
     printf -v "$var_name" '%s' "$fallback"
     xmj_add_boot_warning "${label}不能小于 ${min_value}，已自动回退为默认值：$fallback"
   fi
+}
+
+xmj_validate_non_negative_int_value() {
+  local var_name="${1:-}"
+  local label="${2:-数值}"
+  local fallback="${3:-0}"
+  local current_value="${!var_name-}"
+
+  case "$current_value" in
+    ''|*[!0-9]*)
+      printf -v "$var_name" '%s' "$fallback"
+      xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
+      return 0
+      ;;
+  esac
 }
 
 xmj_normalize_web_path_value() {
@@ -339,6 +359,7 @@ xmj_validate_config() {
   xmj_validate_required_text 'XMJ_TAVERN_HOST' '酒馆访问主机' '127.0.0.1'
   xmj_validate_port_value 'XMJ_TAVERN_PORT' '酒馆访问端口' '8000'
   xmj_normalize_web_path_value 'XMJ_TAVERN_ENTRY_PATH' '酒馆入口路径'
+  xmj_validate_non_negative_int_value 'XMJ_TAVERN_NODE_MEMORY_MB' '酒馆 Node 内存上限' '0'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 
