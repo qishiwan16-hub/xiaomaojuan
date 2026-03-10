@@ -1881,3 +1881,1148 @@ xmj_run_backup_cleanup_page() {
     esac
   done
 }
+
+xmj_dependency_timestamp() {
+  local stamp=''
+
+  stamp="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='unknown-time'
+  fi
+
+  printf '%s' "$stamp"
+}
+
+xmj_dependency_append_detail() {
+  local base_text="${1:-}"
+  local extra_text="${2:-}"
+
+  if [ -z "$extra_text" ]; then
+    printf '%s' "$base_text"
+    return 0
+  fi
+
+  if [ -z "$base_text" ]; then
+    printf '%s' "$extra_text"
+    return 0
+  fi
+
+  printf '%s %s' "$base_text" "$extra_text"
+}
+
+xmj_dependency_join_parts() {
+  local joined=''
+  local item=''
+
+  for item in "$@"; do
+    if [ -z "$item" ]; then
+      continue
+    fi
+
+    if [ -n "$joined" ]; then
+      joined="${joined}；"
+    fi
+    joined="${joined}${item}"
+  done
+
+  printf '%s' "$joined"
+}
+
+xmj_dependency_bool_text() {
+  local flag="${1:-0}"
+  local true_text="${2:-是}"
+  local false_text="${3:-否}"
+
+  if [ "$flag" = '1' ]; then
+    printf '%s' "$true_text"
+    return 0
+  fi
+
+  printf '%s' "$false_text"
+}
+
+xmj_dependency_capture_first_line() {
+  local output=''
+
+  output="$("$@" 2>/dev/null || true)"
+  output="${output%%$'\n'*}"
+
+  printf '%s' "$output"
+}
+
+xmj_dependency_reset_state() {
+  XMJ_DEP_LOG_FILE=''
+  XMJ_DEP_NOTICE=''
+  XMJ_DEP_NOTICE_KIND='info'
+  XMJ_DEP_LAST_ERROR=''
+  XMJ_DEP_CHECK_LEVEL='info'
+  XMJ_DEP_CHECK_SUMMARY=''
+  XMJ_DEP_CHECK_DETAIL=''
+  XMJ_DEP_CHECK_RECOMMEND=''
+  XMJ_DEP_REPO_EXISTS='0'
+  XMJ_DEP_REPO_GIT='0'
+  XMJ_DEP_PACKAGE_JSON='0'
+  XMJ_DEP_NODE_MODULES='0'
+  XMJ_DEP_BACKUP_DIR_OK='0'
+  XMJ_DEP_LOG_DIR_OK='0'
+  XMJ_DEP_GIT_STATE='missing'
+  XMJ_DEP_NODE_STATE='missing'
+  XMJ_DEP_NPM_STATE='missing'
+  XMJ_DEP_PYTHON_STATE='missing'
+  XMJ_DEP_ZIP_STATE='missing'
+  XMJ_DEP_UNZIP_STATE='missing'
+  XMJ_DEP_PKG_STATE='missing'
+  XMJ_DEP_GIT_VERSION='未检测到'
+  XMJ_DEP_NODE_VERSION='未检测到'
+  XMJ_DEP_NPM_VERSION='未检测到'
+  XMJ_DEP_PYTHON_VERSION='未检测到'
+  XMJ_DEP_ZIP_VERSION='未检测到'
+  XMJ_DEP_UNZIP_VERSION='未检测到'
+  XMJ_DEP_PKG_VERSION='未检测到'
+  XMJ_DEP_PYTHON_CMD=''
+  XMJ_DEP_CURRENT_VERSION='未识别'
+  XMJ_DEP_CURRENT_BRANCH='未识别'
+  XMJ_DEP_CURRENT_COMMIT='未识别'
+  XMJ_DEP_REMOTE_URL='未配置'
+  XMJ_DEP_UPSTREAM='未配置'
+  XMJ_DEP_AHEAD='0'
+  XMJ_DEP_BEHIND='0'
+  XMJ_DEP_DETACHED='0'
+  XMJ_DEP_WORKTREE_DIRTY='0'
+  XMJ_DEP_WORKTREE_TEXT='未检测'
+  XMJ_DEP_REPAIR_BRANCH=''
+  XMJ_DEP_PACKAGE_INSTALL_NOTE=''
+  XMJ_DEP_DIRECTORY_NOTE=''
+  XMJ_DEP_REPO_REPAIR_NOTE=''
+  XMJ_DEP_PROJECT_DEP_NOTE=''
+  declare -ga XMJ_DEP_MISSING_PACKAGES=()
+}
+
+xmj_dependency_log_line() {
+  local line="${1:-}"
+
+  if [ -z "${XMJ_DEP_LOG_FILE:-}" ] || [ -z "$line" ]; then
+    return 0
+  fi
+
+  printf '[%s] %s\n' "$(xmj_dependency_timestamp)" "$line" >>"$XMJ_DEP_LOG_FILE"
+}
+
+xmj_dependency_prepare_log_file() {
+  local prefix="${1:-dependency}"
+  local stamp=''
+
+  if [ -z "${XMJ_LOG_DIR:-}" ]; then
+    XMJ_LOG_DIR="${XMJ_ROOT_DIR:-.}/logs"
+  fi
+
+  if ! mkdir -p "$XMJ_LOG_DIR" 2>/dev/null; then
+    XMJ_DEP_LAST_ERROR='无法创建日志目录。'
+    return 1
+  fi
+
+  stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='manual'
+  fi
+
+  XMJ_DEP_LOG_FILE="$XMJ_LOG_DIR/${prefix}-${stamp}.log"
+  if ! : >"$XMJ_DEP_LOG_FILE" 2>/dev/null; then
+    XMJ_DEP_LAST_ERROR="无法创建日志文件：$XMJ_DEP_LOG_FILE"
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_dependency_notice_color() {
+  case "${1:-info}" in
+    warn)
+      printf '%s' "$XMJ_WARN"
+      ;;
+    success)
+      printf '%s' "$XMJ_CREAM"
+      ;;
+    *)
+      printf '%s' "$XMJ_BLUE_SOFT"
+      ;;
+  esac
+}
+
+xmj_dependency_clear_notice() {
+  XMJ_DEP_NOTICE=''
+  XMJ_DEP_NOTICE_KIND='info'
+}
+
+xmj_dependency_set_notice() {
+  XMJ_DEP_NOTICE_KIND="${1:-info}"
+  XMJ_DEP_NOTICE="${2:-}"
+}
+
+xmj_dependency_render_notice() {
+  local notice_text="${XMJ_DEP_NOTICE:-}"
+  local notice_color=''
+
+  if [ -z "$notice_text" ]; then
+    return 0
+  fi
+
+  notice_color="$(xmj_dependency_notice_color "${XMJ_DEP_NOTICE_KIND:-info}")"
+  printf '\n'
+  printf '  %b%s%b\n' "$notice_color" "$notice_text" "$XMJ_RESET"
+}
+
+xmj_dependency_find_repair_branch() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local remote_head=''
+  local candidate=''
+  local branch=''
+  local seen='|'
+  local shell_log=''
+  local -a candidates=()
+
+  shell_log="$(xmj_maintenance_shell_log_target "${XMJ_DEP_LOG_FILE:-}")"
+
+  remote_head="$(git -C "$repo_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>>"$shell_log" || true)"
+  remote_head="${remote_head#origin/}"
+  if [ -n "$remote_head" ]; then
+    candidates+=("$remote_head")
+    seen="${seen}${remote_head}|"
+  fi
+
+  for candidate in release main master; do
+    case "$seen" in
+      *"|$candidate|"*)
+        ;;
+      *)
+        candidates+=("$candidate")
+        seen="${seen}${candidate}|"
+        ;;
+    esac
+  done
+
+  for branch in "${candidates[@]}"; do
+    if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch" 2>>"$shell_log" \
+      || git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>>"$shell_log"; then
+      printf '%s' "$branch"
+      return 0
+    fi
+  done
+
+  while IFS= read -r branch || [ -n "$branch" ]; do
+    branch="${branch#origin/}"
+    case "$branch" in
+      ''|HEAD)
+        continue
+        ;;
+    esac
+
+    case "$seen" in
+      *"|$branch|"*)
+        continue
+        ;;
+    esac
+
+    printf '%s' "$branch"
+    return 0
+  done < <(git -C "$repo_path" for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin 2>>"$shell_log")
+
+  return 1
+}
+
+xmj_dependency_collect_missing_packages() {
+  declare -ga XMJ_DEP_MISSING_PACKAGES=()
+
+  if [ "${XMJ_DEP_GIT_STATE:-missing}" != 'ok' ]; then
+    XMJ_DEP_MISSING_PACKAGES+=('git')
+  fi
+
+  if [ "${XMJ_DEP_NODE_STATE:-missing}" != 'ok' ] || [ "${XMJ_DEP_NPM_STATE:-missing}" != 'ok' ]; then
+    XMJ_DEP_MISSING_PACKAGES+=('nodejs-lts')
+  fi
+
+  if [ "${XMJ_DEP_ZIP_STATE:-missing}" != 'ok' ]; then
+    XMJ_DEP_MISSING_PACKAGES+=('zip')
+  fi
+
+  if [ "${XMJ_DEP_UNZIP_STATE:-missing}" != 'ok' ]; then
+    XMJ_DEP_MISSING_PACKAGES+=('unzip')
+  fi
+}
+
+xmj_dependency_missing_packages_text() {
+  local joined=''
+  local item=''
+
+  for item in "${XMJ_DEP_MISSING_PACKAGES[@]}"; do
+    if [ -n "$joined" ]; then
+      joined="${joined}、"
+    fi
+    joined="${joined}${item}"
+  done
+
+  printf '%s' "$joined"
+}
+
+xmj_dependency_finalize_check() {
+  local detail_text=''
+  local recommend_text=''
+  local -a blockers=()
+  local -a warnings=()
+
+  if [ "${XMJ_DEP_REPO_EXISTS:-0}" != '1' ]; then
+    blockers+=('未找到 SillyTavern 目录')
+  fi
+
+  if [ "${XMJ_DEP_GIT_STATE:-missing}" != 'ok' ]; then
+    blockers+=('未检测到 git')
+  fi
+
+  if [ "${XMJ_DEP_NODE_STATE:-missing}" != 'ok' ] || [ "${XMJ_DEP_NPM_STATE:-missing}" != 'ok' ]; then
+    blockers+=('未检测到 node / npm')
+  fi
+
+  if [ "${XMJ_DEP_REPO_EXISTS:-0}" = '1' ] && [ "${XMJ_DEP_PACKAGE_JSON:-0}" != '1' ]; then
+    blockers+=('目录里未发现 package.json')
+  fi
+
+  if [ "${XMJ_DEP_BACKUP_DIR_OK:-0}" != '1' ]; then
+    warnings+=('备份目录当前未就绪')
+  fi
+
+  if [ "${XMJ_DEP_LOG_DIR_OK:-0}" != '1' ]; then
+    warnings+=('日志目录当前未就绪')
+  fi
+
+  if [ "${XMJ_DEP_ZIP_STATE:-missing}" != 'ok' ] || [ "${XMJ_DEP_UNZIP_STATE:-missing}" != 'ok' ]; then
+    warnings+=('zip / unzip 尚未补齐')
+  fi
+
+  if [ "${XMJ_DEP_REPO_GIT:-0}" = '1' ] && [ "${XMJ_DEP_DETACHED:-0}" = '1' ]; then
+    warnings+=('仓库当前处于 detached HEAD')
+  fi
+
+  if [ "${XMJ_DEP_PACKAGE_JSON:-0}" = '1' ] && [ "${XMJ_DEP_NODE_MODULES:-0}" != '1' ]; then
+    warnings+=('node_modules 尚未准备好')
+  fi
+
+  if [ "${XMJ_DEP_WORKTREE_DIRTY:-0}" = '1' ]; then
+    warnings+=('检测到本地改动')
+  fi
+
+  if [ "${#blockers[@]}" -gt 0 ]; then
+    XMJ_DEP_CHECK_LEVEL='failure'
+    XMJ_DEP_CHECK_SUMMARY='当前环境还不能直接执行酒馆维护。'
+    detail_text="$(xmj_dependency_join_parts "${blockers[@]}" "${warnings[@]}")"
+    recommend_text='建议先执行 11 安装依赖或 13 异常修复。'
+  elif [ "${#warnings[@]}" -gt 0 ]; then
+    XMJ_DEP_CHECK_LEVEL='warn'
+    XMJ_DEP_CHECK_SUMMARY='环境基本可用，但还有几项建议先整理。'
+    detail_text="$(xmj_dependency_join_parts "${warnings[@]}")"
+    recommend_text='如需统一整理，可进入 13 异常修复。'
+  else
+    XMJ_DEP_CHECK_LEVEL='success'
+    XMJ_DEP_CHECK_SUMMARY='环境检查通过，主要依赖已经就绪。'
+    detail_text='Git、Node.js、npm、备份目录和日志目录都已准备好。'
+    recommend_text='当前可以直接使用更新、切换版本和备份流程。'
+  fi
+
+  XMJ_DEP_CHECK_DETAIL="$detail_text"
+  XMJ_DEP_CHECK_RECOMMEND="$recommend_text"
+}
+
+xmj_dependency_collect_context() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local shell_log=''
+  local repo_flag=''
+  local worktree_state=''
+  local counts=''
+  local count_left=''
+  local count_right=''
+
+  shell_log="$(xmj_maintenance_shell_log_target "${XMJ_DEP_LOG_FILE:-}")"
+
+  XMJ_DEP_REPO_EXISTS='0'
+  XMJ_DEP_REPO_GIT='0'
+  XMJ_DEP_PACKAGE_JSON='0'
+  XMJ_DEP_NODE_MODULES='0'
+  XMJ_DEP_BACKUP_DIR_OK='0'
+  XMJ_DEP_LOG_DIR_OK='0'
+  XMJ_DEP_GIT_STATE='missing'
+  XMJ_DEP_NODE_STATE='missing'
+  XMJ_DEP_NPM_STATE='missing'
+  XMJ_DEP_PYTHON_STATE='missing'
+  XMJ_DEP_ZIP_STATE='missing'
+  XMJ_DEP_UNZIP_STATE='missing'
+  XMJ_DEP_PKG_STATE='missing'
+  XMJ_DEP_GIT_VERSION='未检测到'
+  XMJ_DEP_NODE_VERSION='未检测到'
+  XMJ_DEP_NPM_VERSION='未检测到'
+  XMJ_DEP_PYTHON_VERSION='未检测到'
+  XMJ_DEP_ZIP_VERSION='未检测到'
+  XMJ_DEP_UNZIP_VERSION='未检测到'
+  XMJ_DEP_PKG_VERSION='未检测到'
+  XMJ_DEP_PYTHON_CMD=''
+  XMJ_DEP_CURRENT_VERSION='未识别'
+  XMJ_DEP_CURRENT_BRANCH='未识别'
+  XMJ_DEP_CURRENT_COMMIT='未识别'
+  XMJ_DEP_REMOTE_URL='未配置'
+  XMJ_DEP_UPSTREAM='未配置'
+  XMJ_DEP_AHEAD='0'
+  XMJ_DEP_BEHIND='0'
+  XMJ_DEP_DETACHED='0'
+  XMJ_DEP_WORKTREE_DIRTY='0'
+  XMJ_DEP_WORKTREE_TEXT='未检测'
+  XMJ_DEP_REPAIR_BRANCH=''
+
+  if [ -n "${XMJ_BACKUP_DIR:-}" ] && [ -d "${XMJ_BACKUP_DIR:-}" ]; then
+    XMJ_DEP_BACKUP_DIR_OK='1'
+  fi
+
+  if [ -n "${XMJ_LOG_DIR:-}" ] && [ -d "${XMJ_LOG_DIR:-}" ]; then
+    XMJ_DEP_LOG_DIR_OK='1'
+  fi
+
+  if command -v git >/dev/null 2>&1; then
+    XMJ_DEP_GIT_STATE='ok'
+    XMJ_DEP_GIT_VERSION="$(xmj_dependency_capture_first_line git --version)"
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    XMJ_DEP_NODE_STATE='ok'
+    XMJ_DEP_NODE_VERSION="$(xmj_dependency_capture_first_line node -v)"
+  fi
+
+  if command -v npm >/dev/null 2>&1; then
+    XMJ_DEP_NPM_STATE='ok'
+    XMJ_DEP_NPM_VERSION="$(xmj_dependency_capture_first_line npm -v)"
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    XMJ_DEP_PYTHON_STATE='ok'
+    XMJ_DEP_PYTHON_CMD='python3'
+    XMJ_DEP_PYTHON_VERSION="$(xmj_dependency_capture_first_line python3 --version)"
+  elif command -v python >/dev/null 2>&1; then
+    XMJ_DEP_PYTHON_STATE='ok'
+    XMJ_DEP_PYTHON_CMD='python'
+    XMJ_DEP_PYTHON_VERSION="$(xmj_dependency_capture_first_line python --version)"
+  fi
+
+  if command -v zip >/dev/null 2>&1; then
+    XMJ_DEP_ZIP_STATE='ok'
+    XMJ_DEP_ZIP_VERSION="$(xmj_dependency_capture_first_line zip -v)"
+  fi
+
+  if command -v unzip >/dev/null 2>&1; then
+    XMJ_DEP_UNZIP_STATE='ok'
+    XMJ_DEP_UNZIP_VERSION="$(xmj_dependency_capture_first_line unzip -v)"
+  fi
+
+  if command -v pkg >/dev/null 2>&1; then
+    XMJ_DEP_PKG_STATE='ok'
+    XMJ_DEP_PKG_VERSION='pkg 已检测'
+  fi
+
+  if [ -n "$repo_path" ] && [ -d "$repo_path" ]; then
+    XMJ_DEP_REPO_EXISTS='1'
+
+    if [ -f "$repo_path/package.json" ]; then
+      XMJ_DEP_PACKAGE_JSON='1'
+    fi
+
+    if [ -d "$repo_path/node_modules" ]; then
+      XMJ_DEP_NODE_MODULES='1'
+    fi
+  fi
+
+  if [ "${XMJ_DEP_REPO_EXISTS:-0}" = '1' ] && [ "${XMJ_DEP_GIT_STATE:-missing}" = 'ok' ]; then
+    repo_flag="$(git -C "$repo_path" rev-parse --is-inside-work-tree 2>>"$shell_log" || true)"
+    if [ "$repo_flag" = 'true' ]; then
+      XMJ_DEP_REPO_GIT='1'
+      XMJ_DEP_CURRENT_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$shell_log")"
+      XMJ_DEP_CURRENT_COMMIT="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$shell_log" || true)"
+      if [ -z "$XMJ_DEP_CURRENT_COMMIT" ]; then
+        XMJ_DEP_CURRENT_COMMIT='未识别'
+      fi
+
+      XMJ_DEP_CURRENT_BRANCH="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$shell_log" || true)"
+      if [ -z "$XMJ_DEP_CURRENT_BRANCH" ]; then
+        XMJ_DEP_CURRENT_BRANCH='detached HEAD'
+        XMJ_DEP_DETACHED='1'
+        XMJ_DEP_REPAIR_BRANCH="$(xmj_dependency_find_repair_branch || true)"
+      fi
+
+      XMJ_DEP_REMOTE_URL="$(git -C "$repo_path" remote get-url origin 2>>"$shell_log" || true)"
+      if [ -z "$XMJ_DEP_REMOTE_URL" ]; then
+        XMJ_DEP_REMOTE_URL='未配置'
+      fi
+
+      XMJ_DEP_UPSTREAM="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>>"$shell_log" || true)"
+      if [ -z "$XMJ_DEP_UPSTREAM" ]; then
+        XMJ_DEP_UPSTREAM='未配置'
+      else
+        counts="$(git -C "$repo_path" rev-list --left-right --count "${XMJ_DEP_UPSTREAM}...HEAD" 2>>"$shell_log" || true)"
+        count_left="${counts%%[[:space:]]*}"
+        count_right="${counts##*[[:space:]]}"
+        case "$count_left" in
+          ''|*[!0-9]*)
+            count_left='0'
+            ;;
+        esac
+        case "$count_right" in
+          ''|*[!0-9]*)
+            count_right='0'
+            ;;
+        esac
+        XMJ_DEP_BEHIND="$count_left"
+        XMJ_DEP_AHEAD="$count_right"
+      fi
+
+      worktree_state="$(git -C "$repo_path" status --porcelain 2>>"$shell_log" || true)"
+      if [ -n "$worktree_state" ]; then
+        XMJ_DEP_WORKTREE_DIRTY='1'
+        XMJ_DEP_WORKTREE_TEXT='存在本地改动'
+      else
+        XMJ_DEP_WORKTREE_TEXT='工作区干净'
+      fi
+    else
+      XMJ_DEP_WORKTREE_TEXT='当前目录不是 Git 仓库'
+    fi
+  fi
+
+  xmj_dependency_collect_missing_packages
+  xmj_dependency_finalize_check
+}
+
+xmj_dependency_archive_state_text() {
+  if [ "${XMJ_DEP_ZIP_STATE:-missing}" = 'ok' ] && [ "${XMJ_DEP_UNZIP_STATE:-missing}" = 'ok' ]; then
+    printf '%s' 'zip / unzip 已检测'
+    return 0
+  fi
+
+  printf '%s' 'zip / unzip 未齐'
+}
+
+xmj_dependency_action_label() {
+  case "${1:-install}" in
+    repair)
+      printf '%s' "${XMJ_MENU_LABEL['13']}"
+      ;;
+    *)
+      printf '%s' "${XMJ_MENU_LABEL['11']}"
+      ;;
+  esac
+}
+
+xmj_dependency_action_phrase() {
+  case "${1:-install}" in
+    repair)
+      printf '%s' 'repair env'
+      ;;
+    *)
+      printf '%s' 'install deps'
+      ;;
+  esac
+}
+
+xmj_dependency_stage_order() {
+  case "${1:-prepare}" in
+    prepare) printf '%s' '1' ;;
+    env) printf '%s' '2' ;;
+    packages) printf '%s' '3' ;;
+    repo) printf '%s' '4' ;;
+    deps) printf '%s' '5' ;;
+    done) printf '%s' '6' ;;
+    *) printf '%s' '0' ;;
+  esac
+}
+
+xmj_dependency_stage_label() {
+  case "${1:-prepare}" in
+    prepare) printf '%s' '准备中' ;;
+    env) printf '%s' '扫描环境' ;;
+    packages) printf '%s' '补齐系统依赖' ;;
+    repo) printf '%s' '修复仓库状态' ;;
+    deps) printf '%s' '整理项目依赖' ;;
+    done) printf '%s' '完成' ;;
+    *) printf '%s' '处理中' ;;
+  esac
+}
+
+xmj_render_dependency_stage_line() {
+  local stage="${1:-prepare}"
+  local current_stage="${2:-prepare}"
+  local stage_mode="${3:-running}"
+  local stage_order='0'
+  local current_order='0'
+  local marker='·'
+  local state_text='等待中'
+  local color="$XMJ_MIST"
+
+  stage_order="$(xmj_dependency_stage_order "$stage")"
+  current_order="$(xmj_dependency_stage_order "$current_stage")"
+
+  if [ "$stage_order" -lt "$current_order" ]; then
+    marker='✓'
+    state_text='已完成'
+    color="$XMJ_CREAM"
+  elif [ "$stage_order" -eq "$current_order" ]; then
+    case "$stage_mode" in
+      failure)
+        marker='✕'
+        state_text='失败'
+        color="$XMJ_WARN"
+        ;;
+      success)
+        marker='✓'
+        state_text='已完成'
+        color="$XMJ_CREAM"
+        ;;
+      *)
+        marker='➜'
+        state_text='进行中'
+        color="$XMJ_PINK"
+        ;;
+    esac
+  fi
+
+  printf '  %b%s%b %b%s%b %b·%b %b%s%b\n' \
+    "$color" "$marker" "$XMJ_RESET" \
+    "$XMJ_WHITE" "$(xmj_dependency_stage_label "$stage")" "$XMJ_RESET" \
+    "$XMJ_MIST" "$XMJ_RESET" \
+    "$color" "$state_text" "$XMJ_RESET"
+}
+
+xmj_render_dependency_stage_group() {
+  local action="${1:-install}"
+  local current_stage="${2:-prepare}"
+  local stage_mode="${3:-running}"
+
+  xmj_render_dependency_stage_line 'prepare' "$current_stage" "$stage_mode"
+  xmj_render_dependency_stage_line 'env' "$current_stage" "$stage_mode"
+  xmj_render_dependency_stage_line 'packages' "$current_stage" "$stage_mode"
+
+  if [ "$action" = 'repair' ]; then
+    xmj_render_dependency_stage_line 'repo' "$current_stage" "$stage_mode"
+  fi
+
+  xmj_render_dependency_stage_line 'deps' "$current_stage" "$stage_mode"
+  xmj_render_dependency_stage_line 'done' "$current_stage" "$stage_mode"
+}
+
+xmj_render_dependency_progress() {
+  local action="${1:-install}"
+  local current_stage="${2:-prepare}"
+  local stage_mode="${3:-running}"
+  local headline="${4:-准备中}"
+  local detail_text="${5:-猫猫正在整理依赖环境。}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_dependency_action_label "$action")" "$(xmj_dependency_action_phrase "$action")" 'dependency'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ %s进度%b\n' "$XMJ_PINK" "$(xmj_dependency_action_label "$action")" "$XMJ_RESET"
+  xmj_render_dependency_stage_group "$action" "$current_stage" "$stage_mode"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+}
+
+xmj_render_dependency_result() {
+  local action="${1:-install}"
+  local result_mode="${2:-success}"
+  local current_stage="${3:-done}"
+  local summary_text="${4:-已完成。}"
+  local detail_text="${5:-}"
+  local result_title='已完成'
+  local stage_mode='success'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='执行失败'
+    stage_mode='failure'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_dependency_action_label "$action")" "$(xmj_dependency_action_phrase "$action")" 'dependency'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+  printf '\n'
+  printf '  %b♡ %s进度%b\n' "$XMJ_PINK" "$(xmj_dependency_action_label "$action")" "$XMJ_RESET"
+  xmj_render_dependency_stage_group "$action" "$current_stage" "$stage_mode"
+
+  if [ -n "${XMJ_DEP_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_DEP_LOG_FILE")"
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_dependency_render_environment_snapshot() {
+  xmj_render_fact_line '酒馆目录' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_fact_line '目录状态' "$(xmj_dependency_bool_text "${XMJ_DEP_REPO_EXISTS:-0}" '已找到' '未找到')"
+  xmj_render_fact_line 'Git' "${XMJ_DEP_GIT_VERSION:-未检测到}"
+  xmj_render_fact_line 'Node.js' "${XMJ_DEP_NODE_VERSION:-未检测到}"
+  xmj_render_fact_line 'npm' "${XMJ_DEP_NPM_VERSION:-未检测到}"
+  xmj_render_fact_line '压缩工具' "$(xmj_dependency_archive_state_text)"
+  xmj_render_fact_line 'package.json' "$(xmj_dependency_bool_text "${XMJ_DEP_PACKAGE_JSON:-0}" '已找到' '未找到')"
+  xmj_render_fact_line 'node_modules' "$(xmj_dependency_bool_text "${XMJ_DEP_NODE_MODULES:-0}" '已存在' '未安装')"
+  xmj_render_fact_line '备份目录' "$(xmj_dependency_bool_text "${XMJ_DEP_BACKUP_DIR_OK:-0}" '已就绪' '未就绪')"
+  xmj_render_fact_line '日志目录' "$(xmj_dependency_bool_text "${XMJ_DEP_LOG_DIR_OK:-0}" '已就绪' '未就绪')"
+}
+
+xmj_render_dependency_check_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['12']}" 'environment check' 'dependency'
+  printf '\n'
+  xmj_render_setting_card '检查结果' "${XMJ_DEP_CHECK_SUMMARY:-暂未检查。}" "${XMJ_DEP_CHECK_DETAIL:-}"
+  printf '\n'
+  xmj_dependency_render_environment_snapshot
+
+  if [ -n "${XMJ_DEP_CHECK_RECOMMEND:-}" ]; then
+    printf '\n'
+    xmj_render_page_intro "${XMJ_DEP_CHECK_RECOMMEND}" ''
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_dependency_status_page() {
+  local relation_text='未配置上游'
+  local recommend_text=''
+
+  if [ "${XMJ_DEP_REPO_GIT:-0}" = '1' ] && [ "${XMJ_DEP_UPSTREAM:-未配置}" != '未配置' ]; then
+    relation_text="ahead ${XMJ_DEP_AHEAD:-0} / behind ${XMJ_DEP_BEHIND:-0}"
+  fi
+
+  if [ "${XMJ_DEP_DETACHED:-0}" = '1' ] && [ -n "${XMJ_DEP_REPAIR_BRANCH:-}" ]; then
+    recommend_text="可通过 13 异常修复自动切回 ${XMJ_DEP_REPAIR_BRANCH} 分支。"
+  elif [ "${XMJ_DEP_DETACHED:-0}" = '1' ]; then
+    recommend_text='当前仓库处于 detached HEAD，建议先手动确认目标分支。'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['14']}" 'version status' 'dependency'
+  printf '\n'
+  xmj_render_setting_card '当前仓库状态' "${XMJ_DEP_CURRENT_VERSION:-未识别}" "${XMJ_DEP_WORKTREE_TEXT:-未检测}"
+  printf '\n'
+  xmj_render_fact_line '酒馆目录' "$(xmj_display_path "${XMJ_SILLYTAVERN_PATH:-}")"
+  xmj_render_fact_line '仓库状态' "$(xmj_dependency_bool_text "${XMJ_DEP_REPO_GIT:-0}" 'Git 仓库' '普通目录')"
+  xmj_render_fact_line '当前分支' "${XMJ_DEP_CURRENT_BRANCH:-未识别}"
+  xmj_render_fact_line '当前提交' "${XMJ_DEP_CURRENT_COMMIT:-未识别}"
+  xmj_render_fact_line '版本标识' "${XMJ_DEP_CURRENT_VERSION:-未识别}"
+  xmj_render_fact_line '上游分支' "${XMJ_DEP_UPSTREAM:-未配置}"
+  xmj_render_fact_line '同步关系' "$relation_text"
+  xmj_render_fact_line 'origin' "${XMJ_DEP_REMOTE_URL:-未配置}"
+  xmj_render_fact_line 'detached HEAD' "$(xmj_dependency_bool_text "${XMJ_DEP_DETACHED:-0}" '是' '否')"
+  xmj_render_fact_line 'Node.js' "${XMJ_DEP_NODE_VERSION:-未检测到}"
+  xmj_render_fact_line 'npm' "${XMJ_DEP_NPM_VERSION:-未检测到}"
+
+  if [ -n "$recommend_text" ]; then
+    printf '\n'
+    xmj_render_page_intro "$recommend_text" ''
+  fi
+
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_dependency_install_confirm_page() {
+  local system_text=''
+  local project_text=''
+
+  if [ "${#XMJ_DEP_MISSING_PACKAGES[@]}" -gt 0 ]; then
+    system_text="会补齐：$(xmj_dependency_missing_packages_text)"
+  else
+    system_text='当前 git / node / npm / zip / unzip 已检测齐。'
+  fi
+
+  if [ "${XMJ_DEP_PACKAGE_JSON:-0}" = '1' ]; then
+    project_text='确认后会进入酒馆目录执行 npm install。'
+  else
+    project_text='当前目录里未发现 package.json，本次只会整理系统依赖。'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['11']}" 'install deps' 'dependency'
+  printf '\n'
+  xmj_render_setting_card '执行前确认' "$system_text" "$project_text"
+  printf '\n'
+  xmj_dependency_render_environment_snapshot
+  xmj_dependency_render_notice
+  printf '\n'
+  xmj_render_action_item 'y' '开始安装 / 重新整理依赖'
+  xmj_render_action_item '0' '取消并返回首页'
+  xmj_render_action_footer '输入 y / 0'
+}
+
+xmj_render_dependency_repair_confirm_page() {
+  local issue_text=''
+  local repair_text=''
+
+  issue_text="${XMJ_DEP_CHECK_DETAIL:-当前没有检测到明确异常。}"
+  if [ "${XMJ_DEP_DETACHED:-0}" = '1' ] && [ -n "${XMJ_DEP_REPAIR_BRANCH:-}" ]; then
+    repair_text="会尝试切回 ${XMJ_DEP_REPAIR_BRANCH} 分支，并重新整理项目依赖。"
+  else
+    repair_text='会补齐目录与系统依赖，并在可行时重新整理项目依赖。'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['13']}" 'repair env' 'dependency'
+  printf '\n'
+  xmj_render_setting_card '执行前确认' "${XMJ_DEP_CHECK_SUMMARY:-准备开始异常修复。}" "$issue_text"
+  printf '\n'
+  xmj_render_page_intro "$repair_text" ''
+  printf '\n'
+  xmj_dependency_render_environment_snapshot
+  xmj_dependency_render_notice
+  printf '\n'
+  xmj_render_action_item 'y' '开始自动修复常见异常'
+  xmj_render_action_item '0' '取消并返回首页'
+  xmj_render_action_footer '输入 y / 0'
+}
+
+xmj_dependency_prompt_confirm_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  y 开始 / 0 返回 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_dependency_ensure_runtime_dirs() {
+  local joined=''
+  local -a created=()
+
+  if [ -n "${XMJ_BACKUP_DIR:-}" ] && [ ! -d "${XMJ_BACKUP_DIR:-}" ]; then
+    if ! mkdir -p "${XMJ_BACKUP_DIR}" 2>/dev/null; then
+      XMJ_DEP_LAST_ERROR="无法创建备份目录：${XMJ_BACKUP_DIR}"
+      return 1
+    fi
+    created+=('备份目录')
+  fi
+
+  if [ -n "${XMJ_LOG_DIR:-}" ] && [ ! -d "${XMJ_LOG_DIR:-}" ]; then
+    if ! mkdir -p "${XMJ_LOG_DIR}" 2>/dev/null; then
+      XMJ_DEP_LAST_ERROR="无法创建日志目录：${XMJ_LOG_DIR}"
+      return 1
+    fi
+    created+=('日志目录')
+  fi
+
+  if [ "${#created[@]}" -eq 0 ]; then
+    XMJ_DEP_DIRECTORY_NOTE='备份目录和日志目录都已就绪。'
+  else
+    joined="$(xmj_dependency_join_parts "${created[@]}")"
+    XMJ_DEP_DIRECTORY_NOTE="已补齐 ${joined}。"
+  fi
+
+  xmj_dependency_log_line "$XMJ_DEP_DIRECTORY_NOTE"
+  return 0
+}
+
+xmj_dependency_install_termux_packages() {
+  local shell_log=''
+  local package_text=''
+
+  shell_log="$(xmj_maintenance_shell_log_target "${XMJ_DEP_LOG_FILE:-}")"
+  xmj_dependency_collect_missing_packages
+
+  if [ "${#XMJ_DEP_MISSING_PACKAGES[@]}" -eq 0 ]; then
+    XMJ_DEP_PACKAGE_INSTALL_NOTE='系统依赖已经齐了，本次无需额外安装。'
+    xmj_dependency_log_line "$XMJ_DEP_PACKAGE_INSTALL_NOTE"
+    return 0
+  fi
+
+  package_text="$(xmj_dependency_missing_packages_text)"
+  if ! command -v pkg >/dev/null 2>&1; then
+    XMJ_DEP_LAST_ERROR="缺少 ${package_text}，且当前环境未检测到 pkg，无法自动安装。"
+    return 1
+  fi
+
+  xmj_dependency_log_line "开始安装 Termux 包：${package_text}"
+  if ! pkg install -y "${XMJ_DEP_MISSING_PACKAGES[@]}" >>"$shell_log" 2>&1; then
+    XMJ_DEP_LAST_ERROR="自动安装 ${package_text} 失败，可温和查看日志。"
+    return 1
+  fi
+
+  XMJ_DEP_PACKAGE_INSTALL_NOTE="已补齐 ${package_text}。"
+  xmj_dependency_log_line "$XMJ_DEP_PACKAGE_INSTALL_NOTE"
+  return 0
+}
+
+xmj_dependency_sync_project_dependencies() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local shell_log=''
+
+  shell_log="$(xmj_maintenance_shell_log_target "${XMJ_DEP_LOG_FILE:-}")"
+
+  if [ "${XMJ_DEP_REPO_EXISTS:-0}" != '1' ]; then
+    XMJ_DEP_PROJECT_DEP_NOTE='当前未找到酒馆目录，已跳过 npm install。'
+    xmj_dependency_log_line "$XMJ_DEP_PROJECT_DEP_NOTE"
+    return 0
+  fi
+
+  if [ "${XMJ_DEP_PACKAGE_JSON:-0}" != '1' ]; then
+    XMJ_DEP_PROJECT_DEP_NOTE='当前目录里未发现 package.json，已跳过 npm install。'
+    xmj_dependency_log_line "$XMJ_DEP_PROJECT_DEP_NOTE"
+    return 0
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    XMJ_DEP_LAST_ERROR='未检测到 npm，无法执行 npm install。'
+    return 1
+  fi
+
+  xmj_dependency_log_line '开始执行 npm install。'
+  if ! (
+    cd "$repo_path" || exit 1
+    npm install --no-audit --no-fund
+  ) >>"$shell_log" 2>&1; then
+    XMJ_DEP_LAST_ERROR='npm install 执行失败，可温和查看日志。'
+    return 1
+  fi
+
+  XMJ_DEP_PROJECT_DEP_NOTE='项目依赖已完成 npm install。'
+  xmj_dependency_log_line "$XMJ_DEP_PROJECT_DEP_NOTE"
+  return 0
+}
+
+xmj_dependency_repair_repo_state() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local shell_log=''
+  local target_branch=''
+
+  shell_log="$(xmj_maintenance_shell_log_target "${XMJ_DEP_LOG_FILE:-}")"
+
+  if [ "${XMJ_DEP_REPO_EXISTS:-0}" != '1' ]; then
+    XMJ_DEP_LAST_ERROR='未找到 SillyTavern 目录，无法执行仓库状态修复。'
+    return 1
+  fi
+
+  if [ "${XMJ_DEP_REPO_GIT:-0}" != '1' ]; then
+    XMJ_DEP_LAST_ERROR='当前目录不是 Git 仓库，暂时无法自动修复分支状态。'
+    return 1
+  fi
+
+  if [ "${XMJ_DEP_DETACHED:-0}" != '1' ]; then
+    XMJ_DEP_REPO_REPAIR_NOTE='当前分支状态正常，无需额外修复。'
+    xmj_dependency_log_line "$XMJ_DEP_REPO_REPAIR_NOTE"
+    return 0
+  fi
+
+  target_branch="${XMJ_DEP_REPAIR_BRANCH:-}"
+  if [ -z "$target_branch" ]; then
+    XMJ_DEP_LAST_ERROR='当前仓库处于 detached HEAD，且没有找到可自动切回的分支。'
+    return 1
+  fi
+
+  xmj_dependency_log_line "开始修复 detached HEAD：${target_branch}"
+  if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$target_branch" 2>>"$shell_log"; then
+    if ! git -C "$repo_path" checkout "$target_branch" >>"$shell_log" 2>&1; then
+      XMJ_DEP_LAST_ERROR="切回 ${target_branch} 分支失败，可温和查看日志。"
+      return 1
+    fi
+  elif git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$target_branch" 2>>"$shell_log"; then
+    if ! git -C "$repo_path" checkout -b "$target_branch" --track "origin/$target_branch" >>"$shell_log" 2>&1; then
+      XMJ_DEP_LAST_ERROR="创建并切回 ${target_branch} 分支失败，可温和查看日志。"
+      return 1
+    fi
+  else
+    XMJ_DEP_LAST_ERROR="没有找到 ${target_branch} 对应的本地或远程分支。"
+    return 1
+  fi
+
+  XMJ_DEP_REPO_REPAIR_NOTE="已自动切回 ${target_branch} 分支。"
+  xmj_dependency_log_line "$XMJ_DEP_REPO_REPAIR_NOTE"
+  return 0
+}
+
+xmj_dependency_install_result_summary() {
+  if [ "${XMJ_DEP_REPO_EXISTS:-0}" != '1' ]; then
+    printf '%s' '系统依赖已安装，酒馆目录仍待确认。'
+    return 0
+  fi
+
+  if [ "${XMJ_DEP_PACKAGE_JSON:-0}" != '1' ]; then
+    printf '%s' '系统依赖已安装，当前目录仍需确认是否为酒馆仓库。'
+    return 0
+  fi
+
+  if [ -n "${XMJ_DEP_PROJECT_DEP_NOTE:-}" ] && [ "${XMJ_DEP_PACKAGE_JSON:-0}" = '1' ]; then
+    printf '%s' '依赖安装已完成。'
+    return 0
+  fi
+
+  printf '%s' '系统依赖整理已完成。'
+}
+
+xmj_dependency_repair_result_summary() {
+  if [ "${XMJ_DEP_CHECK_LEVEL:-info}" = 'failure' ]; then
+    printf '%s' '异常修复执行后仍有阻塞项。'
+    return 0
+  fi
+
+  printf '%s' '常见异常已整理完成。'
+}
+
+xmj_run_dependency_check_page() {
+  xmj_dependency_reset_state
+  xmj_dependency_collect_context
+  xmj_render_dependency_check_page
+}
+
+xmj_run_dependency_status_page() {
+  xmj_dependency_reset_state
+  xmj_dependency_collect_context
+  xmj_render_dependency_status_page
+}
+
+xmj_run_dependency_install_page() {
+  local input=''
+  local detail_text=''
+
+  xmj_dependency_reset_state
+  xmj_dependency_collect_context
+
+  while true; do
+    xmj_render_dependency_install_confirm_page
+    xmj_dependency_prompt_confirm_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      y|Y|yes|YES|Yes)
+        break
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        xmj_dependency_set_notice 'warn' '这里只支持输入 y / 0。'
+        ;;
+    esac
+  done
+
+  xmj_dependency_clear_notice
+  xmj_render_dependency_progress 'install' 'prepare' 'running' '准备中' '猫猫正在整理这次依赖安装的步骤。'
+
+  if ! xmj_dependency_prepare_log_file 'dependency-install'; then
+    xmj_render_dependency_result 'install' 'failure' 'prepare' '无法创建依赖安装日志' "${XMJ_DEP_LAST_ERROR:-请检查日志目录权限。}"
+    return 0
+  fi
+
+  xmj_dependency_log_line '开始执行 11 安装依赖。'
+
+  xmj_render_dependency_progress 'install' 'env' 'running' '扫描环境' '正在确认当前仓库与依赖工具状态。'
+  xmj_dependency_collect_context
+
+  xmj_render_dependency_progress 'install' 'packages' 'running' '补齐系统依赖' '正在检查 git、node、npm 与压缩工具。'
+  if ! xmj_dependency_install_termux_packages; then
+    xmj_render_dependency_result 'install' 'failure' 'packages' '系统依赖没有顺利补齐' "${XMJ_DEP_LAST_ERROR:-请温和查看日志。}"
+    return 0
+  fi
+
+  xmj_dependency_collect_context
+
+  xmj_render_dependency_progress 'install' 'deps' 'running' '整理项目依赖' '如果目录里有 package.json，这里会执行 npm install。'
+  if ! xmj_dependency_sync_project_dependencies; then
+    xmj_render_dependency_result 'install' 'failure' 'deps' '项目依赖整理失败' "${XMJ_DEP_LAST_ERROR:-请温和查看日志。}"
+    return 0
+  fi
+
+  xmj_dependency_collect_context
+  detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_PACKAGE_INSTALL_NOTE:-}")"
+  detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_PROJECT_DEP_NOTE:-}")"
+
+  if [ "${XMJ_DEP_CHECK_LEVEL:-info}" = 'failure' ]; then
+    detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_CHECK_DETAIL:-}")"
+  fi
+
+  xmj_render_dependency_result 'install' 'success' 'done' "$(xmj_dependency_install_result_summary)" "$detail_text"
+}
+
+xmj_run_dependency_repair_page() {
+  local input=''
+  local detail_text=''
+
+  xmj_dependency_reset_state
+  xmj_dependency_collect_context
+
+  while true; do
+    xmj_render_dependency_repair_confirm_page
+    xmj_dependency_prompt_confirm_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      y|Y|yes|YES|Yes)
+        break
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        xmj_dependency_set_notice 'warn' '这里只支持输入 y / 0。'
+        ;;
+    esac
+  done
+
+  xmj_dependency_clear_notice
+  xmj_render_dependency_progress 'repair' 'prepare' 'running' '准备中' '猫猫正在整理这次异常修复的步骤。'
+
+  if ! xmj_dependency_prepare_log_file 'dependency-repair'; then
+    xmj_render_dependency_result 'repair' 'failure' 'prepare' '无法创建异常修复日志' "${XMJ_DEP_LAST_ERROR:-请检查日志目录权限。}"
+    return 0
+  fi
+
+  xmj_dependency_log_line '开始执行 13 异常修复。'
+
+  xmj_render_dependency_progress 'repair' 'env' 'running' '扫描环境' '正在确认目录、命令和仓库状态。'
+  xmj_dependency_collect_context
+
+  if ! xmj_dependency_ensure_runtime_dirs; then
+    xmj_render_dependency_result 'repair' 'failure' 'env' '目录修复失败' "${XMJ_DEP_LAST_ERROR:-请检查路径权限。}"
+    return 0
+  fi
+
+  xmj_render_dependency_progress 'repair' 'packages' 'running' '补齐系统依赖' '会按需补齐 git、node、npm 与压缩工具。'
+  if ! xmj_dependency_install_termux_packages; then
+    xmj_render_dependency_result 'repair' 'failure' 'packages' '系统依赖没有顺利补齐' "${XMJ_DEP_LAST_ERROR:-请温和查看日志。}"
+    return 0
+  fi
+
+  xmj_dependency_collect_context
+
+  xmj_render_dependency_progress 'repair' 'repo' 'running' '修复仓库状态' '如果仓库处于 detached HEAD，会尝试自动切回分支。'
+  if ! xmj_dependency_repair_repo_state; then
+    xmj_render_dependency_result 'repair' 'failure' 'repo' '仓库状态修复失败' "${XMJ_DEP_LAST_ERROR:-请温和查看日志。}"
+    return 0
+  fi
+
+  xmj_dependency_collect_context
+
+  xmj_render_dependency_progress 'repair' 'deps' 'running' '整理项目依赖' '如果目录里有 package.json，这里会重新执行 npm install。'
+  if ! xmj_dependency_sync_project_dependencies; then
+    xmj_render_dependency_result 'repair' 'failure' 'deps' '项目依赖整理失败' "${XMJ_DEP_LAST_ERROR:-请温和查看日志。}"
+    return 0
+  fi
+
+  xmj_dependency_collect_context
+  detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_DIRECTORY_NOTE:-}")"
+  detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_PACKAGE_INSTALL_NOTE:-}")"
+  detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_REPO_REPAIR_NOTE:-}")"
+  detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_PROJECT_DEP_NOTE:-}")"
+
+  if [ "${XMJ_DEP_CHECK_LEVEL:-info}" = 'failure' ]; then
+    detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_CHECK_DETAIL:-}")"
+    xmj_render_dependency_result 'repair' 'failure' 'done' "$(xmj_dependency_repair_result_summary)" "$detail_text"
+    return 0
+  fi
+
+  if [ "${XMJ_DEP_CHECK_LEVEL:-info}" = 'warn' ]; then
+    detail_text="$(xmj_dependency_append_detail "$detail_text" "${XMJ_DEP_CHECK_DETAIL:-}")"
+  fi
+
+  xmj_render_dependency_result 'repair' 'success' 'done' "$(xmj_dependency_repair_result_summary)" "$detail_text"
+}

@@ -3,7 +3,7 @@ xmj_exit_panel() {
   xmj_render_header
   printf '\n'
   printf '  %b小猫卷面板已退出。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b当前 01 - 10 已接入真实流程，依赖环境与扩展脚本仍在整理中。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
+  printf '  %b当前 01 - 14 已接入真实流程，扩展脚本仍在整理中。%b\n' "$XMJ_CREAM" "$XMJ_RESET"
   printf '\n'
 }
 
@@ -71,7 +71,23 @@ xmj_handle_route() {
       xmj_run_backup_cleanup_page
       return 0
       ;;
-    11|12|13|14|15|16|17|18)
+    11)
+      xmj_run_dependency_install_page
+      return 0
+      ;;
+    12)
+      xmj_run_dependency_check_page
+      return 0
+      ;;
+    13)
+      xmj_run_dependency_repair_page
+      return 0
+      ;;
+    14)
+      xmj_run_dependency_status_page
+      return 0
+      ;;
+    15|16|17|18)
       xmj_render_menu_page "$input"
       return 0
       ;;
