@@ -920,17 +920,20 @@ xmj_setting_view_title() {
   local view="${1:-home}"
 
   case "$view" in
-    basic)
-      printf '%s' '基础设置'
-      ;;
-    theme)
-      printf '%s' '主题 / 外观'
-      ;;
     font)
       printf '%s' '字体管理'
       ;;
-    advanced)
-      printf '%s' '高级项预留'
+    autostart)
+      printf '%s' '是否自启动'
+      ;;
+    script_update)
+      printf '%s' '脚本更新'
+      ;;
+    script_version)
+      printf '%s' '脚本版本'
+      ;;
+    logs)
+      printf '%s' '日志查看'
       ;;
     *)
       printf '%s' '设置中心'
@@ -942,17 +945,20 @@ xmj_setting_view_id() {
   local view="${1:-home}"
 
   case "$view" in
-    basic)
+    font)
       printf '%s' '19-1'
       ;;
-    theme)
+    autostart)
       printf '%s' '19-2'
       ;;
-    font)
+    script_update)
       printf '%s' '19-3'
       ;;
-    advanced)
+    script_version)
       printf '%s' '19-4'
+      ;;
+    logs)
+      printf '%s' '19-5'
       ;;
     *)
       printf '%s' '19'
@@ -1113,17 +1119,20 @@ xmj_render_setting_center_page() {
   local view="${1:-home}"
 
   case "$view" in
-    basic)
-      xmj_render_setting_basic_page
-      ;;
-    theme)
-      xmj_render_setting_theme_page
-      ;;
     font)
       xmj_render_setting_font_page
       ;;
-    advanced)
-      xmj_render_setting_advanced_page
+    autostart)
+      xmj_render_setting_autostart_page
+      ;;
+    script_update)
+      xmj_render_setting_script_update_page
+      ;;
+    script_version)
+      xmj_render_setting_script_version_page
+      ;;
+    logs)
+      xmj_render_setting_logs_page
       ;;
     *)
       xmj_render_setting_overview_page
@@ -1552,56 +1561,36 @@ xmj_render_about_status_page() {
 }
 
 xmj_render_setting_overview_page() {
+  local log_count='0'
+
+  xmj_setting_refresh_script_repo_state
+  xmj_setting_refresh_log_files
+  log_count="${#XMJ_SETTING_LOG_FILES[@]}"
+
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['19']}" 'settings hub' 'setting'
   printf '\n'
   printf '  %b想调哪里就点哪里，猫猫把说明都压短啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '\n'
-  xmj_render_setting_card '1 · 基础设置' '' '名字、作者、环境'
+  xmj_render_setting_card '1 · 字体管理' '' "当前：$(xmj_termux_font_status_text)"
   printf '\n'
-  xmj_render_setting_card '2 · 主题 / 外观' '' "当前：$(xmj_theme_label)"
+  xmj_render_setting_card '2 · 是否自启动' '' "当前：$(xmj_setting_autostart_status_text)"
   printf '\n'
-  xmj_render_setting_card '3 · 字体管理' '' "当前：$(xmj_termux_font_status_text)"
+  xmj_render_setting_card '3 · 脚本更新' '' "当前：${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
   printf '\n'
-  xmj_render_setting_card '4 · 高级预留' '' '功能预留'
+  xmj_render_setting_card '4 · 脚本版本' '' "分支：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  printf '\n'
+  xmj_render_setting_card '5 · 日志查看' '' "当前：${log_count} 份日志"
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item '1' '进入基础设置'
-  xmj_render_action_item '2' '进入主题 / 外观'
-  xmj_render_action_item '3' '进入字体管理'
-  xmj_render_action_item '4' '查看高级预留'
+  xmj_render_action_item '1' '进入字体管理'
+  xmj_render_action_item '2' '查看是否自启动'
+  xmj_render_action_item '3' '检查脚本更新'
+  xmj_render_action_item '4' '查看脚本版本'
+  xmj_render_action_item '5' '查看日志'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 0 就好喵'
-}
-
-xmj_render_setting_basic_page() {
-  xmj_clear_screen
-  xmj_render_header
-  xmj_render_page_title "$(xmj_setting_view_title 'basic')" 'basic settings' 'setting'
-  printf '\n'
-  printf '  %b这些是猫猫会一直记着的基础信息。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '\n'
-  xmj_render_fact_line '脚本名称' "${XMJ_SCRIPT_NAME:-小猫卷}"
-  xmj_render_fact_line '作者' "${XMJ_SCRIPT_AUTHOR:-meoroll}"
-  xmj_render_fact_line '目标项目' "${XMJ_TARGET_PROJECT:-SillyTavern}"
-  xmj_render_fact_line '运行环境' "${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
-  xmj_render_notice_line
-  xmj_render_action_footer '输入 0 回设置中心'
-}
-
-xmj_render_setting_theme_page() {
-  xmj_clear_screen
-  xmj_render_header
-  xmj_render_page_title "$(xmj_setting_view_title 'theme')" 'theme look' 'setting'
-  printf '\n'
-  printf '  %b猫猫现在穿的是：%s。%b\n' "$XMJ_WHITE" "$(xmj_theme_label)" "$XMJ_RESET"
-  printf '\n'
-  xmj_render_setting_card 'pastel · 粉蓝白系' '' '轻一点，软一点'
-  printf '\n'
-  xmj_render_setting_card 'moonlight · 月光蓝紫系' '' '冷一点，安静一点'
-  xmj_render_notice_line
-  xmj_render_action_footer '输入 0 回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 0 就好喵'
 }
 
 xmj_render_setting_font_page() {
@@ -1631,14 +1620,131 @@ xmj_render_setting_font_page() {
   xmj_render_action_footer '输入 1 / 2 / 3 / 0 就好喵'
 }
 
-xmj_render_setting_advanced_page() {
+xmj_render_setting_autostart_page() {
+  local boot_dir=''
+  local script_file=''
+
+  boot_dir="$(xmj_setting_autostart_boot_dir)"
+  script_file="$(xmj_setting_autostart_script_file)"
+
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title "$(xmj_setting_view_title 'advanced')" 'advanced slot' 'setting'
+  xmj_render_page_title "$(xmj_setting_view_title 'autostart')" 'auto start' 'setting'
   printf '\n'
-  xmj_render_setting_card '这里先留白喵' '猫猫还没往高级区塞东西。' ''
+  printf '  %b这里管的是开机后自动启动酒馆，不会自己弹出小猫卷面板。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b要生效的话，还得装好 Termux:Boot。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '当前状态' "$(xmj_setting_autostart_status_text)"
+  xmj_render_fact_line 'Boot 目录' "$(xmj_display_path "$boot_dir")"
+  xmj_render_fact_line '启动脚本' "$(xmj_display_path "$script_file")"
+  xmj_render_fact_line '启动目标' '开机后自动执行 01 启动酒馆'
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '开启开机自启动'
+  xmj_render_action_item '2' '关闭开机自启动'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
+}
+
+xmj_render_setting_script_update_page() {
+  xmj_setting_refresh_script_repo_state
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'script_update')" 'script update' 'setting'
+  printf '\n'
+  printf '  %b这里会在小猫卷仓库里执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b更完之后，重新打开小猫卷才会吃到新代码。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+  xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_fact_line '上游分支' "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}"
+  xmj_render_fact_line '工作区' "$(xmj_setting_script_worktree_text)"
+
+  if [ -n "${XMJ_SETTING_SCRIPT_UPDATE_LOG:-}" ]; then
+    xmj_render_fact_line '更新日志' "$(xmj_display_path "$XMJ_SETTING_SCRIPT_UPDATE_LOG")"
+  fi
+
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '立即检查并更新脚本'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 0 就好喵'
+}
+
+xmj_render_setting_script_version_page() {
+  xmj_setting_refresh_script_repo_state
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'script_version')" 'script version' 'setting'
+  printf '\n'
+  printf '  %b这里主要拿来看小猫卷自己现在是哪一版。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '脚本版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+  xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_fact_line '精确标签' "${XMJ_SETTING_SCRIPT_TAG:-未命中}"
+  xmj_render_fact_line '版本描述' "${XMJ_SETTING_SCRIPT_DESCRIBE:-未识别}"
+  xmj_render_fact_line '仓库状态' "$(xmj_setting_script_worktree_text)"
+  xmj_render_fact_line '远程仓库' "${XMJ_SETTING_SCRIPT_REMOTE:-未配置}"
+  xmj_render_fact_line '脚本目录' "$(xmj_display_path "${XMJ_ROOT_DIR:-.}")"
   xmj_render_notice_line
   xmj_render_action_footer '输入 0 回设置中心'
+}
+
+xmj_render_setting_logs_page() {
+  local display_count='0'
+  local selected_file=''
+  local selected_name=''
+  local total_lines='0'
+  local index='0'
+
+  xmj_setting_refresh_log_files
+  display_count="$(xmj_setting_log_display_count)"
+  selected_file="$(xmj_setting_selected_log_file)"
+
+  if [ -n "$selected_file" ]; then
+    selected_name="$(basename "$selected_file")"
+    total_lines="$(xmj_setting_log_line_count "$selected_file")"
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
+  printf '\n'
+  printf '  %b这里先摆最新日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b详细内容还是留在原日志文件里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
+  xmj_render_fact_line '日志数量' "${#XMJ_SETTING_LOG_FILES[@]}"
+
+  if [ "$display_count" -gt 0 ]; then
+    xmj_render_fact_line '当前查看' "$selected_name"
+    xmj_render_fact_line '总行数' "$total_lines"
+    printf '\n'
+    xmj_render_setting_card '最新日志' '' "这里只展示最新 ${display_count} 份。"
+    printf '\n'
+
+    for ((index = 0; index < display_count; index += 1)); do
+      xmj_render_action_item "$((index + 1))" "$(basename "${XMJ_SETTING_LOG_FILES[$index]}")"
+    done
+
+    printf '\n'
+    xmj_rule_line "$XMJ_BORDER" '─' 68
+    printf '  %b♡ 尾部预览%b\n' "$XMJ_PINK" "$XMJ_RESET"
+    printf '\n'
+    xmj_setting_print_log_tail "$selected_file" '18'
+  else
+    xmj_render_setting_card '还没有日志喵' '等你跑过启动、更新、版本切换这些动作后，这里就会有内容。' ''
+  fi
+
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item 'r' '刷新日志列表'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入日志序号 / r / 0 就好喵'
 }
 
 xmj_render_tavern_setting_page() {

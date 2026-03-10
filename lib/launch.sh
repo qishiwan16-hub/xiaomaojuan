@@ -714,3 +714,32 @@ xmj_run_tavern_launch() {
   xmj_launch_restore_int_trap
   return 0
 }
+
+xmj_run_tavern_launch_headless() {
+  xmj_launch_reset_state
+
+  if ! xmj_launch_prepare_log_file; then
+    return 1
+  fi
+
+  xmj_launch_log_line '开始执行开机自启动。'
+
+  if ! xmj_launch_check_environment; then
+    return 1
+  fi
+
+  if ! xmj_launch_detect_command; then
+    return 1
+  fi
+
+  if ! xmj_launch_start_process; then
+    return 1
+  fi
+
+  if ! xmj_launch_wait_for_running; then
+    return 1
+  fi
+
+  xmj_launch_log_line "开机自启动已完成：$(xmj_launch_entry_url)"
+  return 0
+}

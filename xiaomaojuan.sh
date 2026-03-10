@@ -31,16 +31,32 @@ source "$XMJ_ROOT_DIR/lib/extend.sh"
 source "$XMJ_ROOT_DIR/lib/router.sh"
 
 main() {
+  local launch_mode="${1:-panel}"
+
   xmj_bootstrap_config || true
   xmj_init_theme
   xmj_init_font_state
 
   if [ "${XMJ_CONFIG_READY:-0}" != '1' ]; then
-    xmj_render_startup_failure
+    case "$launch_mode" in
+      --autostart-launch)
+        return 1
+        ;;
+      *)
+        xmj_render_startup_failure
+        ;;
+    esac
     return 1
   fi
 
-  xmj_run_panel
+  case "$launch_mode" in
+    --autostart-launch)
+      xmj_run_tavern_launch_headless
+      ;;
+    *)
+      xmj_run_panel
+      ;;
+  esac
 }
 
 main "$@"
