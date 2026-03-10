@@ -1647,19 +1647,9 @@ xmj_render_tavern_setting_page() {
   xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
   printf '\n'
   xmj_render_setting_card \
-    '低版本兼容提醒' \
-    "如果当前版本或要切过去的版本低于 $(xmj_maintenance_compat_floor_version)，猫猫只会备份 / 恢复 data。" \
-    '这是为了尽量避开跨版本不兼容'
-  printf '\n'
-  xmj_render_setting_card \
-    '多用户插件' \
-    '部分装在多用户上的插件要重新安装。' \
-    '跨版本后别忘了回来对照这里'
-  printf '\n'
-  xmj_render_setting_card \
-    '酒馆设置' \
-    '酒馆设置也要重新改一遍，尤其是你自己动过的那些项。' \
-    '更新、切版本、恢复备份之后都可以回这页查一眼'
+    '这里先收短啦' \
+    '酒馆设置这页先不常驻跨版本提醒。' \
+    '真要切版本且会影响设置时，猫猫会在 03 版本切换里单独拎出来确认。'
   xmj_render_page_footer '按回车回首页'
 }
 
@@ -1810,7 +1800,7 @@ xmj_render_tavern_setting_page() {
   printf '\n'
   xmj_render_setting_card \
     '这页收短啦' \
-    '低版本兼容提醒已经挪到 02 一键更新 / 03 版本切换 那边。' \
-    '真要跨版本时，直接看那边上面的提示就够了。'
+    '酒馆设置这页先不常驻跨版本提醒。' \
+    '真要切版本且会影响设置时，猫猫会在 03 版本切换里单独拎出来确认。'
   xmj_render_page_footer '按回车回首页'
 }

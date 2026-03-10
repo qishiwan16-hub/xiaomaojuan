@@ -325,6 +325,8 @@ xmj_version_reset_state() {
   XMJ_VERSION_TARGET_COMMIT=''
   XMJ_VERSION_INPUT_NOTICE=''
   XMJ_VERSION_INPUT_NOTICE_KIND='info'
+  XMJ_VERSION_CONFIRM_NOTICE=''
+  XMJ_VERSION_CONFIRM_NOTICE_KIND='info'
   XMJ_VERSION_PAGE='1'
   XMJ_VERSION_PAGE_SIZE='12'
   XMJ_VERSION_TOTAL_PAGES='1'
@@ -357,6 +359,8 @@ xmj_version_clear_execution_artifacts() {
   XMJ_VERSION_TARGET_KIND=''
   XMJ_VERSION_TARGET_DATE=''
   XMJ_VERSION_TARGET_COMMIT=''
+  XMJ_VERSION_CONFIRM_NOTICE=''
+  XMJ_VERSION_CONFIRM_NOTICE_KIND='info'
 }
 
 xmj_version_log_line() {
@@ -444,6 +448,19 @@ xmj_version_set_notice() {
   XMJ_VERSION_INPUT_NOTICE="$message"
 }
 
+xmj_version_clear_confirm_notice() {
+  XMJ_VERSION_CONFIRM_NOTICE=''
+  XMJ_VERSION_CONFIRM_NOTICE_KIND='info'
+}
+
+xmj_version_set_confirm_notice() {
+  local kind="${1:-info}"
+  local message="${2:-}"
+
+  XMJ_VERSION_CONFIRM_NOTICE_KIND="$kind"
+  XMJ_VERSION_CONFIRM_NOTICE="$message"
+}
+
 xmj_version_clear_selector_notice() {
   XMJ_VERSION_SELECTOR_NOTICE=''
   XMJ_VERSION_SELECTOR_NOTICE_KIND='info'
@@ -470,6 +487,17 @@ xmj_version_notice_color() {
 
 xmj_version_selector_notice_color() {
   case "${XMJ_VERSION_SELECTOR_NOTICE_KIND:-info}" in
+    warn)
+      printf '%s' "$XMJ_WARN"
+      ;;
+    *)
+      printf '%s' "$XMJ_BLUE_SOFT"
+      ;;
+  esac
+}
+
+xmj_version_confirm_notice_color() {
+  case "${XMJ_VERSION_CONFIRM_NOTICE_KIND:-info}" in
     warn)
       printf '%s' "$XMJ_WARN"
       ;;
@@ -1461,9 +1489,80 @@ xmj_branch_prompt_input() {
   IFS= read -r XMJ_LAST_INPUT
 }
 
+xmj_version_prompt_confirm_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  y 确认切换 / 0 取消 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
 xmj_version_prompt_mode_input() {
   printf '%b%s%b' "$XMJ_PINK_SOFT" '  选择 1 / 2 / 0 > ' "$XMJ_RESET"
   IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_version_needs_compat_confirm() {
+  [ -n "$(xmj_maintenance_data_only_backup_reason "${XMJ_VERSION_CURRENT_VERSION:-}" "${XMJ_VERSION_TARGET_TAG:-}")" ]
+}
+
+xmj_render_version_compat_confirm_page() {
+  local reason_text="${1:-}"
+  local notice_color=''
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '切换版本' 'switch version' 'update'
+  printf '\n'
+  xmj_render_setting_card \
+    '切换前确认' \
+    "${reason_text}，这次只会备份 / 恢复 data。" \
+    '多用户插件可能要重装；如果你自己改过酒馆设置，切过去后也要重新确认。'
+  printf '\n'
+  xmj_render_fact_line '当前版本' "${XMJ_VERSION_CURRENT_LABEL:-未知}"
+  xmj_render_fact_line '目标版本' "${XMJ_VERSION_TARGET_TAG:-未知}"
+  xmj_render_fact_line '发行日期' "${XMJ_VERSION_TARGET_DATE:-未知}"
+
+  if [ -n "${XMJ_VERSION_CONFIRM_NOTICE:-}" ]; then
+    notice_color="$(xmj_version_confirm_notice_color)"
+    printf '\n'
+    printf '  %b%s%b\n' "$notice_color" "$XMJ_VERSION_CONFIRM_NOTICE" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  xmj_render_action_item 'y' '确认继续这次版本切换'
+  xmj_render_action_item '0' '取消并返回版本列表'
+  xmj_render_action_footer '输入 y / 0。'
+}
+
+xmj_version_confirm_compat_switch() {
+  local reason_text=''
+  local input=''
+
+  if ! xmj_version_needs_compat_confirm; then
+    return 0
+  fi
+
+  reason_text="$(xmj_maintenance_data_only_backup_reason "${XMJ_VERSION_CURRENT_VERSION:-}" "${XMJ_VERSION_TARGET_TAG:-}")"
+  xmj_version_clear_confirm_notice
+
+  while true; do
+    xmj_render_version_compat_confirm_page "$reason_text"
+    xmj_version_prompt_confirm_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      y|Y)
+        xmj_version_clear_confirm_notice
+        return 0
+        ;;
+      0)
+        xmj_version_clear_confirm_notice
+        xmj_version_set_notice 'info' '已取消这次低版本兼容切换。'
+        return 1
+        ;;
+      *)
+        xmj_version_set_confirm_notice 'warn' '这里只支持输入 y / 0。'
+        ;;
+    esac
+  done
 }
 
 xmj_version_target_detail() {
@@ -1663,6 +1762,10 @@ xmj_version_run_switch() {
       "$XMJ_VERSION_SUMMARY" \
       "$XMJ_VERSION_DETAIL"
     return 1
+  fi
+
+  if ! xmj_version_confirm_compat_switch; then
+    return 0
   fi
 
   XMJ_VERSION_BEFORE_VERSION="$XMJ_VERSION_CURRENT_VERSION"

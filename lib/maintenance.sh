@@ -195,7 +195,7 @@ xmj_maintenance_should_backup_data_only() {
 }
 
 xmj_maintenance_cross_version_notice() {
-  printf '%s' "因为跨版本兼容，部分装在多用户上的插件需要重新安装，还要重新修改酒馆设置；去 $(xmj_maintenance_tavern_setting_hint) 上面的提醒再对一眼。"
+  printf '%s' '因为跨版本兼容，部分装在多用户上的插件可能要重新安装，酒馆设置也要重新确认。'
 }
 
 xmj_maintenance_backup_scope_text() {
