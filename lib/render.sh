@@ -1692,3 +1692,125 @@ xmj_render_placeholder_page() {
   xmj_render_setting_card '这里先空着喵' '猫猫还没把这页补完，之后再慢慢长内容。' ''
   xmj_render_page_footer '按回车回首页'
 }
+
+xmj_render_compat_notice_card() {
+  local mode="${1:-switch}"
+  local summary_text=''
+
+  case "$mode" in
+    update)
+      summary_text="如果当前版本低于 $(xmj_maintenance_compat_floor_version)（不包含 $(xmj_maintenance_compat_floor_version) 本身），猫猫这次只会备份 / 恢复 data。"
+      ;;
+    *)
+      summary_text="如果当前版本或要切过去的版本低于 $(xmj_maintenance_compat_floor_version)（不包含 $(xmj_maintenance_compat_floor_version) 本身），猫猫这次只会备份 / 恢复 data。"
+      ;;
+  esac
+
+  xmj_render_setting_card \
+    '低版本兼容提醒' \
+    "$summary_text" \
+    '多用户插件可能要重装，酒馆设置也要重新改。'
+}
+
+xmj_render_update_progress() {
+  local current_stage="${1:-prepare}"
+  local stage_mode="${2:-running}"
+  local headline="${3:-准备中}"
+  local detail_text="${4:-猫猫正在安静整理更新步骤。}"
+  local stage_for_display='prepare'
+
+  stage_for_display="$(xmj_update_display_stage "$current_stage")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  printf '\n'
+  xmj_render_setting_card "$headline" "$detail_text" ''
+  printf '\n'
+  printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'backup' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'recover' "$stage_for_display" "$stage_mode"
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
+    || [ "$stage_for_display" = 'restore' ] \
+    || [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ]; then
+    xmj_render_update_stage_line 'restore' "$stage_for_display" "$stage_mode"
+  fi
+
+  xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
+  printf '\n'
+  xmj_render_compat_notice_card 'update'
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '·' 68
+}
+
+xmj_render_update_result() {
+  local result_mode="${1:-success}"
+  local current_stage="${2:-done}"
+  local summary_text="${3:-当前已经是最新版本。}"
+  local detail_text="${4:-}"
+  local before_commit="${6:-}"
+  local after_commit="${7:-}"
+  local result_title='更新完成'
+  local stage_mode='success'
+  local stage_for_display='done'
+
+  if [ "$result_mode" = 'failure' ]; then
+    result_title='更新失败'
+    stage_mode='failure'
+  fi
+
+  stage_for_display="$(xmj_update_display_stage "$current_stage")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  printf '\n'
+  xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
+
+  if [ "$result_mode" = 'success' ] \
+    && [ -n "$before_commit" ] \
+    && [ -n "$after_commit" ] \
+    && [ "$before_commit" != "$after_commit" ]; then
+    printf '  %b版本变化%b：%b%s -> %s%b\n' \
+      "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_WHITE" "$before_commit" "$after_commit" "$XMJ_RESET"
+  fi
+
+  printf '\n'
+  printf '  %b♡ 更新小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_update_stage_line 'prepare' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'env' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'backup' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'local' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'pull' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'deps' "$stage_for_display" "$stage_mode"
+  xmj_render_update_stage_line 'recover' "$stage_for_display" "$stage_mode"
+
+  if [ "${XMJ_UPDATE_HAS_LOCAL_CHANGES:-0}" = '1' ] \
+    || [ "$stage_for_display" = 'restore' ] \
+    || [ -n "${XMJ_UPDATE_RESTORE_NOTE:-}" ]; then
+    xmj_render_update_stage_line 'restore' "$stage_for_display" "$stage_mode"
+  fi
+
+  xmj_render_update_stage_line 'done' "$stage_for_display" "$stage_mode"
+  printf '\n'
+  xmj_render_compat_notice_card 'update'
+  xmj_render_page_footer '按回车返回首页'
+}
+
+xmj_render_tavern_setting_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这页收短啦' \
+    '低版本兼容提醒已经挪到 02 一键更新 / 03 版本切换 那边。' \
+    '真要跨版本时，直接看那边上面的提示就够了。'
+  xmj_render_page_footer '按回车回首页'
+}

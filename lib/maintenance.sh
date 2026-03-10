@@ -99,7 +99,7 @@ xmj_maintenance_compat_floor_version() {
 }
 
 xmj_maintenance_tavern_setting_hint() {
-  printf '%s' '设置中心 -> 酒馆设置'
+  printf '%s' '更新维护里的 02 一键更新 / 03 版本切换'
 }
 
 xmj_maintenance_extract_semver() {
@@ -195,7 +195,7 @@ xmj_maintenance_should_backup_data_only() {
 }
 
 xmj_maintenance_cross_version_notice() {
-  printf '%s' "因为跨版本兼容，部分装在多用户上的插件需要重新安装，还要重新修改酒馆设置；可以去 $(xmj_maintenance_tavern_setting_hint) 看看。"
+  printf '%s' "因为跨版本兼容，部分装在多用户上的插件需要重新安装，还要重新修改酒馆设置；去 $(xmj_maintenance_tavern_setting_hint) 上面的提醒再对一眼。"
 }
 
 xmj_maintenance_backup_scope_text() {
