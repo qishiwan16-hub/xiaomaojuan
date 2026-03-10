@@ -867,6 +867,431 @@ xmj_run_script_setting_page() {
   done
 }
 
+xmj_tavern_setting_default_user_name() {
+  printf '%s' 'default-user'
+}
+
+xmj_tavern_setting_user_name() {
+  if [ -n "${XMJ_TAVERN_SETTING_STUTTER_USER:-}" ]; then
+    printf '%s' "$XMJ_TAVERN_SETTING_STUTTER_USER"
+    return 0
+  fi
+
+  xmj_tavern_setting_default_user_name
+}
+
+xmj_tavern_setting_config_file() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local candidate=''
+
+  if [ -z "$repo_path" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  for candidate in \
+    "$repo_path/config.yaml" \
+    "$repo_path/config.yml" \
+    "$repo_path/data/config.yaml" \
+    "$repo_path/data/config.yml"
+  do
+    if [ -f "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  printf '%s' ''
+}
+
+xmj_tavern_setting_user_settings_file() {
+  local user_name="${1:-$(xmj_tavern_setting_user_name)}"
+  if [ -z "${XMJ_SILLYTAVERN_PATH:-}" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  printf '%s/data/%s/settings.json' "${XMJ_SILLYTAVERN_PATH:-}" "$user_name"
+}
+
+xmj_tavern_setting_yaml_section_value() {
+  local file_path="${1:-}"
+  local section="${2:-}"
+  local key="${3:-}"
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$section" ] || [ -z "$key" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  awk -v section="$section" -v key="$key" '
+    $0 ~ ("^" section ":[[:space:]]*($|#)") {
+      in_section=1
+      next
+    }
+    in_section && $0 ~ /^[^[:space:]#][^:]*:/ {
+      in_section=0
+    }
+    in_section && $0 ~ ("^[[:space:]]+" key ":[[:space:]]*") {
+      line=$0
+      sub("^[[:space:]]*" key ":[[:space:]]*", "", line)
+      sub("[[:space:]]+#.*$", "", line)
+      sub(/[[:space:]]+$/, "", line)
+      print line
+      exit
+    }
+  ' "$file_path" 2>/dev/null
+}
+
+xmj_tavern_setting_yaml_top_value() {
+  local file_path="${1:-}"
+  local key="${2:-}"
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  awk -v key="$key" '
+    $0 ~ ("^" key ":[[:space:]]*") {
+      line=$0
+      sub("^" key ":[[:space:]]*", "", line)
+      sub("[[:space:]]+#.*$", "", line)
+      sub(/[[:space:]]+$/, "", line)
+      print line
+      exit
+    }
+  ' "$file_path" 2>/dev/null
+}
+
+xmj_tavern_setting_json_key_value() {
+  local file_path="${1:-}"
+  local key="${2:-}"
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  awk -v key="$key" '
+    match($0, "\"" key "\"[[:space:]]*:[[:space:]]*(true|false|null|[0-9]+|\"[^\"]*\")") {
+      line=substr($0, RSTART, RLENGTH)
+      sub("^\"" key "\"[[:space:]]*:[[:space:]]*", "", line)
+      sub(/[[:space:]]*,?$/, "", line)
+      print line
+      exit
+    }
+  ' "$file_path" 2>/dev/null
+}
+
+xmj_tavern_setting_set_yaml_top_value() {
+  local file_path="${1:-}"
+  local key="${2:-}"
+  local value="${3:-}"
+  local temp_file=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
+    return 1
+  fi
+
+  temp_file="${file_path}.tmp.$$"
+  if ! awk -v key="$key" -v value="$value" '
+    BEGIN { updated=0 }
+    $0 ~ ("^" key ":[[:space:]]*") {
+      print key ": " value
+      updated=1
+      next
+    }
+    { print }
+    END {
+      if (!updated) {
+        if (NR > 0) {
+          print ""
+        }
+        print key ": " value
+      }
+    }
+  ' "$file_path" >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! mv "$temp_file" "$file_path" 2>/dev/null; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_tavern_setting_set_yaml_section_value() {
+  local file_path="${1:-}"
+  local section="${2:-}"
+  local key="${3:-}"
+  local value="${4:-}"
+  local temp_file=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$section" ] || [ -z "$key" ]; then
+    return 1
+  fi
+
+  temp_file="${file_path}.tmp.$$"
+  if ! awk -v section="$section" -v key="$key" -v value="$value" '
+    function write_missing_key() {
+      if (in_section && !key_written) {
+        print "  " key ": " value
+        key_written=1
+      }
+    }
+    {
+      line=$0
+
+      if (in_section && line ~ /^[^[:space:]#][^:]*:/) {
+        write_missing_key()
+        in_section=0
+      }
+
+      if (line ~ ("^" section ":[[:space:]]*($|#)")) {
+        section_found=1
+        in_section=1
+        key_written=0
+        print line
+        next
+      }
+
+      if (in_section && line ~ ("^[[:space:]]+" key ":[[:space:]]*")) {
+        print "  " key ": " value
+        key_written=1
+        next
+      }
+
+      print line
+    }
+    END {
+      write_missing_key()
+      if (!section_found) {
+        if (NR > 0) {
+          print ""
+        }
+        print section ":"
+        print "  " key ": " value
+      }
+    }
+  ' "$file_path" >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! mv "$temp_file" "$file_path" 2>/dev/null; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_tavern_setting_set_json_bool_value() {
+  local file_path="${1:-}"
+  local key="${2:-}"
+  local value="${3:-false}"
+  local temp_file=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
+    return 1
+  fi
+
+  temp_file="${file_path}.tmp.$$"
+  if ! awk -v key="$key" -v value="$value" '
+    {
+      line=$0
+      if (line ~ "\"" key "\"[[:space:]]*:") {
+        gsub("\"" key "\"[[:space:]]*:[[:space:]]*(true|false|null|[0-9]+|\"[^\"]*\")", "\"" key "\": " value, line)
+        found=1
+      }
+      print line
+    }
+    END {
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "$file_path" >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! mv "$temp_file" "$file_path" 2>/dev/null; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_tavern_setting_browser_redirect_status_text() {
+  local config_file=''
+  local current_value=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到配置文件'
+    return 0
+  fi
+
+  current_value="$(xmj_tavern_setting_yaml_section_value "$config_file" 'browserLaunch' 'enabled')"
+  case "$current_value" in
+    false)
+      printf '%s' '当前：已关闭自动跳浏览器'
+      ;;
+    true)
+      printf '%s' '当前：仍会自动跳浏览器'
+      ;;
+    *)
+      printf '%s' '当前：待执行修复'
+      ;;
+  esac
+}
+
+xmj_tavern_setting_avatar_hd_status_text() {
+  local config_file=''
+  local current_value=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到配置文件'
+    return 0
+  fi
+
+  current_value="$(xmj_tavern_setting_yaml_section_value "$config_file" 'thumbnails' 'enabled')"
+  case "$current_value" in
+    false)
+      printf '%s' '当前：已关闭缩略头像'
+      ;;
+    true)
+      printf '%s' '当前：仍在走缩略头像'
+      ;;
+    *)
+      printf '%s' '当前：待执行修复'
+      ;;
+  esac
+}
+
+xmj_tavern_setting_stutter_fix_status_text() {
+  local config_file=''
+  local settings_file=''
+  local lazy_value=''
+  local auto_load_value=''
+  local user_name=''
+
+  user_name="$(xmj_tavern_setting_user_name)"
+  config_file="$(xmj_tavern_setting_config_file)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  if [ -z "$config_file" ] || [ ! -f "$settings_file" ]; then
+    printf '当前：用户名 %s' "$user_name"
+    return 0
+  fi
+
+  lazy_value="$(xmj_tavern_setting_yaml_top_value "$config_file" 'lazyLoadCharacters')"
+  auto_load_value="$(xmj_tavern_setting_json_key_value "$settings_file" 'auto_load_chat')"
+
+  if [ "$lazy_value" = 'true' ] && [ "$auto_load_value" = 'false' ]; then
+    printf '当前：%s 已套用修复' "$user_name"
+    return 0
+  fi
+
+  printf '当前：用户名 %s' "$user_name"
+}
+
+xmj_tavern_setting_update_stutter_user() {
+  local user_name="${1:-}"
+
+  if [ -z "$user_name" ]; then
+    xmj_font_set_notice 'warn' '用户名不能为空。'
+    return 1
+  fi
+
+  case "$user_name" in
+    *[[:space:]]*|*/*|*\\*)
+      xmj_font_set_notice 'warn' '用户名里别放空格或斜杠喵。'
+      return 1
+      ;;
+  esac
+
+  XMJ_TAVERN_SETTING_STUTTER_USER="$user_name"
+  xmj_font_set_notice 'success' "已把用户名改成 ${user_name}。"
+  return 0
+}
+
+xmj_tavern_setting_apply_browser_redirect_fix() {
+  local config_file=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_yaml_section_value "$config_file" 'browserLaunch' 'enabled' 'false'; then
+    xmj_font_set_notice 'warn' "浏览器跳转修复没写进去：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已关闭自动跳浏览器，重开酒馆后生效：$(xmj_display_path "$config_file")"
+  return 0
+}
+
+xmj_tavern_setting_apply_avatar_hd_fix() {
+  local config_file=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_yaml_section_value "$config_file" 'thumbnails' 'enabled' 'false'; then
+    xmj_font_set_notice 'warn' "头像高清修复没写进去：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已关闭缩略头像，重开酒馆后会直接用原图：$(xmj_display_path "$config_file")"
+  return 0
+}
+
+xmj_tavern_setting_apply_stutter_fix() {
+  local config_file=''
+  local settings_file=''
+  local user_name=''
+
+  user_name="$(xmj_tavern_setting_user_name)"
+  config_file="$(xmj_tavern_setting_config_file)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  if [ ! -f "$settings_file" ]; then
+    xmj_font_set_notice 'warn' "没找到这个用户的 settings.json：$(xmj_display_path "$settings_file")；没开多用户通常就是 default-user。"
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_yaml_top_value "$config_file" 'lazyLoadCharacters' 'true'; then
+    xmj_font_set_notice 'warn' "卡顿修复的第 1 步写入失败：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_json_bool_value "$settings_file" 'auto_load_chat' 'false'; then
+    xmj_font_set_notice 'warn' "卡顿修复的第 2 步写入失败：$(xmj_display_path "$settings_file")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已完成卡顿修复，当前用户名：${user_name}；重开酒馆后再看效果。"
+  return 0
+}
+
 xmj_tavern_setting_update_backup_keep_count() {
   local keep_count="${1:-}"
 
@@ -945,6 +1370,68 @@ xmj_handle_tavern_setting_action() {
           ;;
       esac
       ;;
+    browser_redirect)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_tavern_setting_apply_browser_redirect_fix
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 0。'
+          ;;
+      esac
+      ;;
+    avatar_hd)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_tavern_setting_apply_avatar_hd_fix
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 0。'
+          ;;
+      esac
+      ;;
+    stutter_fix)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_tavern_setting_apply_stutter_fix
+          ;;
+        2)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix_user'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
+          ;;
+      esac
+      ;;
+    stutter_fix_user)
+      case "$input" in
+        0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix'
+          ;;
+        '')
+          xmj_font_set_notice 'warn' '用户名不能为空。'
+          ;;
+        *)
+          if xmj_tavern_setting_update_stutter_user "$input"; then
+            XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix'
+          fi
+          ;;
+      esac
+      ;;
     backup_keep_count)
       case "$input" in
         ''|0)
@@ -959,7 +1446,7 @@ xmj_handle_tavern_setting_action() {
           ;;
       esac
       ;;
-    browser_redirect|avatar_hd|stutter_fix|file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
+    file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
       case "$input" in
         ''|0)
           xmj_font_clear_notice

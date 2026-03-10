@@ -1908,7 +1908,19 @@ xmj_render_tavern_setting_page() {
   local view="${1:-home}"
 
   case "$view" in
-    browser_redirect|avatar_hd|stutter_fix|file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
+    browser_redirect)
+      xmj_render_tavern_setting_browser_redirect_page
+      ;;
+    avatar_hd)
+      xmj_render_tavern_setting_avatar_hd_page
+      ;;
+    stutter_fix)
+      xmj_render_tavern_setting_stutter_fix_page
+      ;;
+    stutter_fix_user)
+      xmj_render_tavern_setting_stutter_fix_user_page
+      ;;
+    file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
       xmj_render_tavern_setting_placeholder_detail_page "$view"
       ;;
     backup_keep_count)
@@ -1998,6 +2010,15 @@ xmj_tavern_setting_status_text() {
   local view="${1:-home}"
 
   case "$view" in
+    browser_redirect)
+      xmj_tavern_setting_browser_redirect_status_text
+      ;;
+    avatar_hd)
+      xmj_tavern_setting_avatar_hd_status_text
+      ;;
+    stutter_fix)
+      xmj_tavern_setting_stutter_fix_status_text
+      ;;
     backup_keep_count)
       printf '当前：保留最新 %s 个' "$(xmj_backup_cleanup_keep_count)"
       ;;
@@ -2045,6 +2066,109 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_action_item '9' '修改备份数量'
   xmj_render_action_item '0' '返回首页'
   xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 0 就好喵'
+}
+
+xmj_render_tavern_setting_browser_redirect_page() {
+  local config_file=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'browser_redirect')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会关掉浏览器自动跳转' \
+    '猫猫会去酒馆配置文件里找到 browserLaunch 这一段，把 enabled 改成 false。' \
+    '改完后重开酒馆，就不会再自己弹去系统浏览器。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'browser_redirect')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'browser_redirect')"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_avatar_hd_page() {
+  local config_file=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'avatar_hd')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会把头像切回原图显示' \
+    '猫猫会去酒馆配置文件里找到 thumbnails 这一段，把 enabled 改成 false。' \
+    '这样酒馆就不会再优先走缩略头像，Echo / Whisper 之类模式下也更容易保持清晰。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'avatar_hd')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'avatar_hd')"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_stutter_fix_page() {
+  local config_file=''
+  local user_name=''
+  local settings_file=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  user_name="$(xmj_tavern_setting_user_name)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'stutter_fix')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会一起改两处卡顿相关设置' \
+    '第 1 步会把 config.yaml 里的 lazyLoadCharacters 改成 true；第 2 步会把对应用户 settings.json 里的 auto_load_chat 改成 false。' \
+    '如果你没开多用户，用户名通常就是 default-user。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'stutter_fix')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'stutter_fix')"
+  xmj_render_fact_line '当前用户名' "$user_name"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_fact_line '设置文件' "$(xmj_display_path "$settings_file")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '2' '修改用户名'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 2 改用户名 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_stutter_fix_user_page() {
+  local current_user=''
+  local default_user=''
+
+  current_user="$(xmj_tavern_setting_user_name)"
+  default_user="$(xmj_tavern_setting_default_user_name)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '修改用户名' 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里填的是酒馆 data 目录下的用户名文件夹' \
+    '猫猫会按这个名字去找对应的 settings.json。' \
+    "如果没有开启多用户，直接用 ${default_user} 就好。"
+  printf '\n'
+  xmj_render_fact_line '当前用户名' "$current_user"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '直接输入用户名' '输入后会保存并回到上一页'
+  xmj_render_action_item '0' '返回卡顿修复'
+  xmj_render_action_footer '直接输入用户名 / 0 返回卡顿修复'
 }
 
 xmj_render_tavern_setting_placeholder_detail_page() {
