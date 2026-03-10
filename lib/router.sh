@@ -224,78 +224,194 @@ xmj_require_script_password() {
   done
 }
 
-xmj_setting_autostart_boot_dir() {
+xmj_setting_autostart_shell_file() {
+  printf '%s/.bashrc' "${HOME:-}"
+}
+
+xmj_setting_autostart_hook_begin() {
+  printf '%s' '# >>> xiaomaojuan termux autostart >>>'
+}
+
+xmj_setting_autostart_hook_end() {
+  printf '%s' '# <<< xiaomaojuan termux autostart <<<'
+}
+
+xmj_setting_autostart_legacy_boot_dir() {
   printf '%s' "${HOME:-}/.termux/boot"
 }
 
-xmj_setting_autostart_script_file() {
-  printf '%s/xiaomaojuan-autostart.sh' "$(xmj_setting_autostart_boot_dir)"
+xmj_setting_autostart_legacy_script_file() {
+  printf '%s/xiaomaojuan-autostart.sh' "$(xmj_setting_autostart_legacy_boot_dir)"
+}
+
+xmj_setting_autostart_hook_enabled() {
+  local shell_file=''
+  local begin_marker=''
+  local end_marker=''
+
+  shell_file="$(xmj_setting_autostart_shell_file)"
+  begin_marker="$(xmj_setting_autostart_hook_begin)"
+  end_marker="$(xmj_setting_autostart_hook_end)"
+
+  if [ ! -f "$shell_file" ]; then
+    return 1
+  fi
+
+  if ! grep -Fq "$begin_marker" "$shell_file" 2>/dev/null; then
+    return 1
+  fi
+
+  if ! grep -Fq "$end_marker" "$shell_file" 2>/dev/null; then
+    return 1
+  fi
+
+  return 0
 }
 
 xmj_setting_autostart_status_text() {
-  if [ -f "$(xmj_setting_autostart_script_file)" ]; then
+  if xmj_setting_autostart_hook_enabled; then
     printf '%s' '已开启'
+    return 0
+  fi
+
+  if [ -f "$(xmj_setting_autostart_legacy_script_file)" ]; then
+    printf '%s' '旧版开机自启残留'
     return 0
   fi
 
   printf '%s' '已关闭'
 }
 
+xmj_setting_autostart_remove_hook() {
+  local shell_file=''
+  local temp_file=''
+  local line=''
+  local begin_marker=''
+  local end_marker=''
+  local skipping='0'
+
+  shell_file="$(xmj_setting_autostart_shell_file)"
+  begin_marker="$(xmj_setting_autostart_hook_begin)"
+  end_marker="$(xmj_setting_autostart_hook_end)"
+
+  if [ ! -f "$shell_file" ]; then
+    return 0
+  fi
+
+  temp_file="${shell_file}.tmp.$$"
+  if ! : >"$temp_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$skipping" = '0' ] && [ "$line" = "$begin_marker" ]; then
+      skipping='1'
+      continue
+    fi
+
+    if [ "$skipping" = '1' ]; then
+      if [ "$line" = "$end_marker" ]; then
+        skipping='0'
+      fi
+      continue
+    fi
+
+    if ! printf '%s\n' "$line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  done <"$shell_file"
+
+  if ! mv "$temp_file" "$shell_file" 2>/dev/null; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_setting_autostart_remove_legacy_boot_script() {
+  local legacy_script=''
+
+  legacy_script="$(xmj_setting_autostart_legacy_script_file)"
+  if [ -f "$legacy_script" ]; then
+    rm -f "$legacy_script" 2>/dev/null || true
+  fi
+}
+
 xmj_setting_enable_autostart() {
   local home_dir="${HOME:-}"
-  local boot_dir=''
-  local script_file=''
-  local wrapper_log=''
+  local shell_file=''
+  local shell_dir=''
+  local script_path=''
+  local escaped_script_path=''
 
   if [ -z "$home_dir" ]; then
-    xmj_font_set_notice 'warn' 'HOME 未设置，猫猫没法写入 Termux:Boot 目录。'
+    xmj_font_set_notice 'warn' 'HOME 未设置，猫猫没法写入 Termux 的启动配置。'
     return 1
   fi
 
-  boot_dir="$(xmj_setting_autostart_boot_dir)"
-  script_file="$(xmj_setting_autostart_script_file)"
-  wrapper_log="${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}/autostart-wrapper.log"
+  shell_file="$(xmj_setting_autostart_shell_file)"
+  shell_dir="$(dirname "$shell_file")"
+  script_path="${XMJ_ROOT_DIR:-.}/xiaomaojuan.sh"
+  printf -v escaped_script_path '%q' "$script_path"
 
-  if ! mkdir -p "$boot_dir" 2>/dev/null; then
-    xmj_font_set_notice 'warn' "无法创建自启动目录：$boot_dir"
+  if [ -n "$shell_dir" ] && [ ! -d "$shell_dir" ]; then
+    if ! mkdir -p "$shell_dir" 2>/dev/null; then
+      xmj_font_set_notice 'warn' "无法准备启动配置目录：$shell_dir"
+      return 1
+    fi
+  fi
+
+  if ! : >>"$shell_file" 2>/dev/null; then
+    xmj_font_set_notice 'warn' "无法写入 Termux 启动配置：$shell_file"
     return 1
   fi
 
-  if ! cat >"$script_file" <<EOF
-#!/data/data/com.termux/files/usr/bin/bash
-mkdir -p "$(dirname "$wrapper_log")" 2>/dev/null || true
-cd "${XMJ_ROOT_DIR:-.}" || exit 1
-exec bash "${XMJ_ROOT_DIR:-.}/xiaomaojuan.sh" >>"$wrapper_log" 2>&1
-EOF
-  then
-    xmj_font_set_notice 'warn' "自启动脚本写入失败：$script_file"
+  if xmj_setting_autostart_hook_enabled; then
+    xmj_setting_autostart_remove_legacy_boot_script
+    xmj_font_set_notice 'info' '当前本来就是打开 Termux 自动运行小猫卷。'
+    return 0
+  fi
+
+  if ! {
+    printf '\n%s\n' "$(xmj_setting_autostart_hook_begin)"
+    printf '%s\n' 'if [ -n "${TERMUX_VERSION:-}" ] && [[ $- == *i* ]] && [ -z "${XMJ_TERMUX_AUTOSTART_RAN:-}" ]; then'
+    printf '%s\n' '  export XMJ_TERMUX_AUTOSTART_RAN=1'
+    printf '%s\n' "  if [ -z \"\${XMJ_SKIP_TERMUX_AUTOSTART:-}\" ] && [ -f ${escaped_script_path} ]; then"
+    printf '%s\n' "    bash ${escaped_script_path}"
+    printf '%s\n' '  fi'
+    printf '%s\n' 'fi'
+    printf '%s\n' "$(xmj_setting_autostart_hook_end)"
+  } >>"$shell_file"; then
+    xmj_font_set_notice 'warn' "写入 Termux 自启动钩子失败：$shell_file"
     return 1
   fi
 
-  if ! chmod +x "$script_file" 2>/dev/null; then
-    xmj_font_set_notice 'warn' "自启动脚本已写入，但没法补执行权限：$script_file"
-    return 1
-  fi
-
-  xmj_font_set_notice 'success' '已开启开机自启动；装好 Termux:Boot 后，重启设备会自动运行小猫卷脚本。'
+  xmj_setting_autostart_remove_legacy_boot_script
+  xmj_font_set_notice 'success' '已开启打开 Termux 自启动；下次打开 Termux 就会自动运行小猫卷脚本。'
   return 0
 }
 
 xmj_setting_disable_autostart() {
-  local script_file=''
+  local shell_file=''
+  local legacy_script=''
 
-  script_file="$(xmj_setting_autostart_script_file)"
-  if [ ! -f "$script_file" ]; then
+  shell_file="$(xmj_setting_autostart_shell_file)"
+  legacy_script="$(xmj_setting_autostart_legacy_script_file)"
+
+  if ! xmj_setting_autostart_hook_enabled && [ ! -f "$legacy_script" ]; then
     xmj_font_set_notice 'info' '当前本来就是关闭状态。'
     return 0
   fi
 
-  if ! rm -f "$script_file" 2>/dev/null; then
-    xmj_font_set_notice 'warn' "无法移除自启动脚本：$script_file"
+  if ! xmj_setting_autostart_remove_hook; then
+    xmj_font_set_notice 'warn' "无法移除 Termux 自启动钩子：$shell_file"
     return 1
   fi
 
-  xmj_font_set_notice 'success' '已关闭开机自启动。'
+  xmj_setting_autostart_remove_legacy_boot_script
+  xmj_font_set_notice 'success' '已关闭打开 Termux 自启动。'
   return 0
 }
 

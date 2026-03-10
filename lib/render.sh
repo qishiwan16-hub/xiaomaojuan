@@ -1621,27 +1621,32 @@ xmj_render_setting_font_page() {
 }
 
 xmj_render_setting_autostart_page() {
-  local boot_dir=''
-  local script_file=''
+  local shell_file=''
+  local legacy_script=''
+  local legacy_state='未发现'
 
-  boot_dir="$(xmj_setting_autostart_boot_dir)"
-  script_file="$(xmj_setting_autostart_script_file)"
+  shell_file="$(xmj_setting_autostart_shell_file)"
+  legacy_script="$(xmj_setting_autostart_legacy_script_file)"
+  if [ -f "$legacy_script" ]; then
+    legacy_state='已发现'
+  fi
 
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'autostart')" 'auto start' 'setting'
   printf '\n'
-  printf '  %b这里管的是开机后自动运行小猫卷脚本本体。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b要生效的话，还得装好 Termux:Boot。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里管的是打开 Termux 后自动运行小猫卷脚本。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b不是设备开机自启，也不再依赖 Termux:Boot。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '当前状态' "$(xmj_setting_autostart_status_text)"
-  xmj_render_fact_line 'Boot 目录' "$(xmj_display_path "$boot_dir")"
-  xmj_render_fact_line '启动脚本' "$(xmj_display_path "$script_file")"
-  xmj_render_fact_line '启动目标' '开机后自动执行 xiaomaojuan.sh'
+  xmj_render_fact_line '启动配置' "$(xmj_display_path "$shell_file")"
+  xmj_render_fact_line '启动方式' '打开 Termux 时自动执行'
+  xmj_render_fact_line '启动目标' '打开 Termux 后自动执行 xiaomaojuan.sh'
+  xmj_render_fact_line '旧版开机自启残留' "$legacy_state"
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item '1' '开启开机自启动'
-  xmj_render_action_item '2' '关闭开机自启动'
+  xmj_render_action_item '1' '开启打开 Termux 自启动'
+  xmj_render_action_item '2' '关闭打开 Termux 自启动'
   xmj_render_action_item '0' '返回设置中心'
   xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
 }

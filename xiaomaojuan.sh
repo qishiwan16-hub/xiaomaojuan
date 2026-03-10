@@ -34,6 +34,7 @@ main() {
   xmj_bootstrap_config || true
   xmj_init_theme
   xmj_init_font_state
+  xmj_load_menu_data
 
   if [ "${XMJ_CONFIG_READY:-0}" != '1' ]; then
     xmj_render_startup_failure
