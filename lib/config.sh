@@ -416,12 +416,38 @@ xmj_config_upsert_value() {
     fi
   fi
 
-  if ! mv "$temp_file" "$config_file" 2>/dev/null; then
+  if ! xmj_replace_file_with_temp "$temp_file" "$config_file"; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
   fi
 
   printf -v "$var_name" '%s' "$raw_value"
+  return 0
+}
+
+xmj_replace_file_with_temp() {
+  local temp_file="${1:-}"
+  local target_file="${2:-}"
+
+  if [ -z "$temp_file" ] || [ -z "$target_file" ] || [ ! -f "$temp_file" ]; then
+    return 1
+  fi
+
+  if mv "$temp_file" "$target_file" 2>/dev/null; then
+    return 0
+  fi
+
+  if [ -e "$target_file" ] && [ ! -w "$target_file" ]; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! cat "$temp_file" >"$target_file" 2>/dev/null; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  rm -f "$temp_file" 2>/dev/null || true
   return 0
 }
 

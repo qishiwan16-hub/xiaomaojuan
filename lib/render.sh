@@ -1659,7 +1659,7 @@ xmj_render_setting_script_update_page() {
   xmj_render_page_title "$(xmj_setting_view_title 'script_update')" 'script update' 'setting'
   printf '\n'
   printf '  %b这里会在小猫卷仓库里执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b更完之后，重新打开小猫卷才会吃到新代码。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b如果这次真的拉到了新代码，猫猫会自动帮你重开小猫卷。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '当前版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
   xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"

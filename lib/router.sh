@@ -322,7 +322,7 @@ xmj_setting_autostart_remove_hook() {
     fi
   done <"$shell_file"
 
-  if ! mv "$temp_file" "$shell_file" 2>/dev/null; then
+  if ! xmj_replace_file_with_temp "$temp_file" "$shell_file"; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
   fi
@@ -576,12 +576,43 @@ xmj_setting_run_script_update() {
   after_commit="${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
 
   if [ -n "$before_commit" ] && [ "$before_commit" != "$after_commit" ]; then
-    xmj_font_set_notice 'success' "脚本已更新到 ${XMJ_SETTING_SCRIPT_VERSION:-$after_commit}，建议重新打开小猫卷。"
+    xmj_font_set_notice 'success' "脚本已更新到 ${XMJ_SETTING_SCRIPT_VERSION:-$after_commit}，猫猫马上帮你自动重开小猫卷。"
+    xmj_restart_script_process 'script_update'
     return 0
   fi
 
   xmj_font_set_notice 'info' '当前脚本已经是最新版本。'
   return 0
+}
+
+xmj_restart_script_process() {
+  local mode="${1:-manual}"
+  local script_path="${XMJ_ROOT_DIR:-.}/xiaomaojuan.sh"
+  local summary_text='新代码已经到位，猫猫现在直接帮你重开小猫卷。'
+
+  case "$mode" in
+    script_update)
+      summary_text='脚本更新已经完成，猫猫现在直接帮你重开小猫卷。'
+      ;;
+  esac
+
+  if [ ! -f "$script_path" ]; then
+    xmj_font_set_notice 'warn' "脚本已经更新，但没找到重启入口：$(xmj_display_path "$script_path")"
+    return 1
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '脚本重启' 'restart script' 'setting'
+  printf '\n'
+  xmj_render_setting_card '马上自动重开' "$summary_text" "$(xmj_display_path "$script_path")"
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  sleep 1 2>/dev/null || true
+
+  exec env XMJ_SKIP_TERMUX_AUTOSTART=1 bash "$script_path"
+  xmj_font_set_notice 'warn' '自动重启没有跑起来，请手动重新打开一次小猫卷。'
+  return 1
 }
 
 xmj_setting_log_display_limit() {
@@ -1016,7 +1047,7 @@ xmj_tavern_setting_set_yaml_top_value() {
     return 1
   fi
 
-  if ! mv "$temp_file" "$file_path" 2>/dev/null; then
+  if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
   fi
@@ -1082,7 +1113,7 @@ xmj_tavern_setting_set_yaml_section_value() {
     return 1
   fi
 
-  if ! mv "$temp_file" "$file_path" 2>/dev/null; then
+  if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
   fi
@@ -1120,7 +1151,7 @@ xmj_tavern_setting_set_json_bool_value() {
     return 1
   fi
 
-  if ! mv "$temp_file" "$file_path" 2>/dev/null; then
+  if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
   fi
