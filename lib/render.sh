@@ -1631,13 +1631,13 @@ xmj_render_setting_autostart_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'autostart')" 'auto start' 'setting'
   printf '\n'
-  printf '  %b这里管的是开机后自动启动酒馆，不会自己弹出小猫卷面板。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b这里管的是开机后自动运行小猫卷脚本本体。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '  %b要生效的话，还得装好 Termux:Boot。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '当前状态' "$(xmj_setting_autostart_status_text)"
   xmj_render_fact_line 'Boot 目录' "$(xmj_display_path "$boot_dir")"
   xmj_render_fact_line '启动脚本' "$(xmj_display_path "$script_file")"
-  xmj_render_fact_line '启动目标' '开机后自动执行 01 启动酒馆'
+  xmj_render_fact_line '启动目标' '开机后自动执行 xiaomaojuan.sh'
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '开启开机自启动'

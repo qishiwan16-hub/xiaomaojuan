@@ -168,7 +168,8 @@ xmj_setting_enable_autostart() {
   if ! cat >"$script_file" <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 mkdir -p "$(dirname "$wrapper_log")" 2>/dev/null || true
-exec bash "${XMJ_ROOT_DIR:-.}/xiaomaojuan.sh" --autostart-launch >>"$wrapper_log" 2>&1
+cd "${XMJ_ROOT_DIR:-.}" || exit 1
+exec bash "${XMJ_ROOT_DIR:-.}/xiaomaojuan.sh" >>"$wrapper_log" 2>&1
 EOF
   then
     xmj_font_set_notice 'warn' "自启动脚本写入失败：$script_file"
@@ -180,7 +181,7 @@ EOF
     return 1
   fi
 
-  xmj_font_set_notice 'success' '已开启开机自启动；装好 Termux:Boot 后，重启设备会直接启动酒馆。'
+  xmj_font_set_notice 'success' '已开启开机自启动；装好 Termux:Boot 后，重启设备会自动运行小猫卷脚本。'
   return 0
 }
 
