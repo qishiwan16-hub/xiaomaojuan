@@ -1026,7 +1026,7 @@ xmj_tavern_setting_json_key_value() {
     if [[ "$line" =~ $pattern ]]; then
       printf '%s' "${BASH_REMATCH[1]}"
       return 0
-    }
+    fi
   done <"$file_path"
 
   printf '%s' ''
@@ -1057,7 +1057,7 @@ xmj_tavern_setting_set_yaml_top_value() {
       if ! printf '%s: %s\n' "$key" "$value" >>"$temp_file"; then
         rm -f "$temp_file" 2>/dev/null || true
         return 1
-      }
+      fi
       updated='1'
       continue
     fi
@@ -1121,7 +1121,7 @@ xmj_tavern_setting_set_yaml_section_value() {
         key_written='1'
       fi
       in_section='0'
-    }
+    fi
 
     if [[ "$line" =~ ^${section}:[[:space:]]*($|#) ]]; then
       section_found='1'
@@ -1130,7 +1130,7 @@ xmj_tavern_setting_set_yaml_section_value() {
       if ! printf '%s\n' "$line" >>"$temp_file"; then
         rm -f "$temp_file" 2>/dev/null || true
         return 1
-      }
+      fi
       continue
     fi
 
@@ -1138,7 +1138,7 @@ xmj_tavern_setting_set_yaml_section_value() {
       if ! printf '  %s: %s\n' "$key" "$value" >>"$temp_file"; then
         rm -f "$temp_file" 2>/dev/null || true
         return 1
-      }
+      fi
       key_written='1'
       continue
     fi
@@ -1153,7 +1153,7 @@ xmj_tavern_setting_set_yaml_section_value() {
     if ! printf '  %s: %s\n' "$key" "$value" >>"$temp_file"; then
       rm -f "$temp_file" 2>/dev/null || true
       return 1
-    }
+    fi
     key_written='1'
   fi
 
@@ -1169,7 +1169,7 @@ xmj_tavern_setting_set_yaml_section_value() {
     } >>"$temp_file"; then
       rm -f "$temp_file" 2>/dev/null || true
       return 1
-    }
+    fi
   fi
 
   if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
@@ -1205,7 +1205,7 @@ xmj_tavern_setting_set_json_bool_value() {
       comma=''
       if [[ "$line" =~ ,[[:space:]]*$ ]]; then
         comma=','
-      }
+      fi
       if ! printf '%s"%s": %s%s\n' "$indent" "$key" "$value" "$comma" >>"$temp_file"; then
         rm -f "$temp_file" 2>/dev/null || true
         return 1
