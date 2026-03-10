@@ -149,6 +149,10 @@ XMJ_BACKUP_DIR="backups"
 # 启动 / 更新日志等详细输出会写到这里，避免直接刷满前台。
 XMJ_LOG_DIR="logs"
 
+# 自动清理备份时保留的数量。
+# 设为正整数；值越小，自动清理时删掉的旧备份越多。
+XMJ_BACKUP_KEEP_COUNT="5"
+
 # 酒馆前台访问地址。
 # 用于启动成功判定，以及运行中页面里的进入链接。
 # 如果服务监听的是 0.0.0.0，这里仍建议填写 127.0.0.1。
@@ -220,6 +224,7 @@ xmj_apply_config_defaults() {
   : "${XMJ_TARGET_PROJECT:=SillyTavern}"
   : "${XMJ_SILLYTAVERN_PATH:=$HOME/SillyTavern}"
   : "${XMJ_BACKUP_DIR:=backups}"
+  : "${XMJ_BACKUP_KEEP_COUNT:=5}"
   : "${XMJ_LOG_DIR:=logs}"
   : "${XMJ_TAVERN_HOST:=127.0.0.1}"
   : "${XMJ_TAVERN_PORT:=8000}"
@@ -248,6 +253,27 @@ xmj_validate_port_value() {
   if [ "$current_value" -lt 1 ] || [ "$current_value" -gt 65535 ]; then
     printf -v "$var_name" '%s' "$fallback"
     xmj_add_boot_warning "${label}超出范围，已自动回退为默认值：$fallback"
+  fi
+}
+
+xmj_validate_positive_int_value() {
+  local var_name="${1:-}"
+  local label="${2:-数值}"
+  local fallback="${3:-1}"
+  local min_value="${4:-1}"
+  local current_value="${!var_name-}"
+
+  case "$current_value" in
+    ''|*[!0-9]*)
+      printf -v "$var_name" '%s' "$fallback"
+      xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
+      return 0
+      ;;
+  esac
+
+  if [ "$current_value" -lt "$min_value" ]; then
+    printf -v "$var_name" '%s' "$fallback"
+    xmj_add_boot_warning "${label}不能小于 ${min_value}，已自动回退为默认值：$fallback"
   fi
 }
 
@@ -308,6 +334,7 @@ xmj_validate_config() {
   xmj_validate_required_text 'XMJ_TARGET_PROJECT' '目标项目' 'SillyTavern'
   xmj_validate_required_text 'XMJ_SILLYTAVERN_PATH' 'SillyTavern 路径' "$HOME/SillyTavern"
   xmj_validate_required_text 'XMJ_BACKUP_DIR' '备份目录' 'backups'
+  xmj_validate_positive_int_value 'XMJ_BACKUP_KEEP_COUNT' '自动清理备份保留数量' '5' '1'
   xmj_validate_required_text 'XMJ_LOG_DIR' '日志目录' 'logs'
   xmj_validate_required_text 'XMJ_TAVERN_HOST' '酒馆访问主机' '127.0.0.1'
   xmj_validate_port_value 'XMJ_TAVERN_PORT' '酒馆访问端口' '8000'
@@ -331,6 +358,70 @@ xmj_validate_config() {
     xmj_add_boot_warning "未找到 SillyTavern 目录：$XMJ_SILLYTAVERN_PATH，可先进入面板，稍后再修改配置。"
   fi
 
+  return 0
+}
+
+xmj_config_upsert_value() {
+  local var_name="${1:-}"
+  local raw_value="${2:-}"
+  local config_file="${XMJ_CONFIG_FILE:-}"
+  local temp_file=''
+  local line=''
+  local escaped_value=''
+  local found='0'
+  local write_ok='1'
+
+  if [ -z "$var_name" ] || [ -z "$config_file" ]; then
+    return 1
+  fi
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  escaped_value="$(printf '%q' "$raw_value")"
+  temp_file="${config_file}.tmp.$$"
+
+  if ! : >"$temp_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "${var_name}"=*)
+        if ! printf '%s=%s\n' "$var_name" "$escaped_value" >>"$temp_file"; then
+          write_ok='0'
+          break
+        fi
+        found='1'
+        ;;
+      *)
+        if ! printf '%s\n' "$line" >>"$temp_file"; then
+          write_ok='0'
+          break
+        fi
+        ;;
+    esac
+  done <"$config_file"
+
+  if [ "$write_ok" != '1' ]; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if [ "$found" != '1' ]; then
+    if ! printf '\n%s=%s\n' "$var_name" "$escaped_value" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  fi
+
+  if ! mv "$temp_file" "$config_file" 2>/dev/null; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  printf -v "$var_name" '%s' "$raw_value"
   return 0
 }
 

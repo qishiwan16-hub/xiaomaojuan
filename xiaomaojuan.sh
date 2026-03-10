@@ -40,6 +40,13 @@ main() {
     return 1
   fi
 
+  if xmj_script_password_first_open_required; then
+    if ! xmj_require_script_password 'first_open'; then
+      xmj_exit_panel
+      return 1
+    fi
+  fi
+
   xmj_run_panel
 }
 

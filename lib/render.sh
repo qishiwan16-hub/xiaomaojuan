@@ -1900,13 +1900,215 @@ xmj_render_update_result() {
 }
 
 xmj_render_tavern_setting_page() {
+  local view="${1:-home}"
+
+  case "$view" in
+    browser_redirect|avatar_hd|stutter_fix|file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
+      xmj_render_tavern_setting_placeholder_detail_page "$view"
+      ;;
+    backup_keep_count)
+      xmj_render_tavern_setting_backup_keep_count_page
+      ;;
+    *)
+      xmj_render_tavern_setting_overview_page
+      ;;
+  esac
+}
+
+xmj_tavern_setting_view_title() {
+  local view="${1:-home}"
+
+  case "$view" in
+    browser_redirect)
+      printf '%s' '浏览器跳转'
+      ;;
+    avatar_hd)
+      printf '%s' '头像高清'
+      ;;
+    stutter_fix)
+      printf '%s' '卡顿修复'
+      ;;
+    file_chat_limit)
+      printf '%s' '文件聊天上限修改'
+      ;;
+    memory_limit)
+      printf '%s' '运行内存修改'
+      ;;
+    port_conflict)
+      printf '%s' '修复端口冲突'
+      ;;
+    chat_freeze_fix)
+      printf '%s' '聊天加载卡死修复'
+      ;;
+    beautify_freeze_fix)
+      printf '%s' '美化卡死修复'
+      ;;
+    backup_keep_count)
+      printf '%s' '修改备份数量'
+      ;;
+    *)
+      printf '%s' "${XMJ_MENU_LABEL['20']}"
+      ;;
+  esac
+}
+
+xmj_tavern_setting_view_id() {
+  local view="${1:-home}"
+
+  case "$view" in
+    browser_redirect)
+      printf '%s' '20-1'
+      ;;
+    avatar_hd)
+      printf '%s' '20-2'
+      ;;
+    stutter_fix)
+      printf '%s' '20-3'
+      ;;
+    file_chat_limit)
+      printf '%s' '20-4'
+      ;;
+    memory_limit)
+      printf '%s' '20-5'
+      ;;
+    port_conflict)
+      printf '%s' '20-6'
+      ;;
+    chat_freeze_fix)
+      printf '%s' '20-7'
+      ;;
+    beautify_freeze_fix)
+      printf '%s' '20-8'
+      ;;
+    backup_keep_count)
+      printf '%s' '20-9'
+      ;;
+    *)
+      printf '%s' '20'
+      ;;
+  esac
+}
+
+xmj_tavern_setting_status_text() {
+  local view="${1:-home}"
+
+  case "$view" in
+    backup_keep_count)
+      printf '当前：保留最新 %s 个' "$(xmj_backup_cleanup_keep_count)"
+      ;;
+    *)
+      printf '%s' '当前：等你继续给规则'
+      ;;
+  esac
+}
+
+xmj_render_tavern_setting_overview_page() {
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
   printf '\n'
+  printf '  %b酒馆设置一共先收这 9 项，猫猫按你给的名字排好了。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b真要切版本且会影响设置时，确认提示还是会放在 03 版本切换里单独弹。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_setting_card '1 · 浏览器跳转' '' "$(xmj_tavern_setting_status_text 'browser_redirect')"
+  printf '\n'
+  xmj_render_setting_card '2 · 头像高清' '' "$(xmj_tavern_setting_status_text 'avatar_hd')"
+  printf '\n'
+  xmj_render_setting_card '3 · 卡顿修复' '' "$(xmj_tavern_setting_status_text 'stutter_fix')"
+  printf '\n'
+  xmj_render_setting_card '4 · 文件聊天上限修改' '' "$(xmj_tavern_setting_status_text 'file_chat_limit')"
+  printf '\n'
+  xmj_render_setting_card '5 · 运行内存修改' '' "$(xmj_tavern_setting_status_text 'memory_limit')"
+  printf '\n'
+  xmj_render_setting_card '6 · 修复端口冲突' '' "$(xmj_tavern_setting_status_text 'port_conflict')"
+  printf '\n'
+  xmj_render_setting_card '7 · 聊天加载卡死修复' '' "$(xmj_tavern_setting_status_text 'chat_freeze_fix')"
+  printf '\n'
+  xmj_render_setting_card '8 · 美化卡死修复' '' "$(xmj_tavern_setting_status_text 'beautify_freeze_fix')"
+  printf '\n'
+  xmj_render_setting_card '9 · 修改备份数量' '' "$(xmj_tavern_setting_status_text 'backup_keep_count')"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '浏览器跳转'
+  xmj_render_action_item '2' '头像高清'
+  xmj_render_action_item '3' '卡顿修复'
+  xmj_render_action_item '4' '文件聊天上限修改'
+  xmj_render_action_item '5' '运行内存修改'
+  xmj_render_action_item '6' '修复端口冲突'
+  xmj_render_action_item '7' '聊天加载卡死修复'
+  xmj_render_action_item '8' '美化卡死修复'
+  xmj_render_action_item '9' '修改备份数量'
+  xmj_render_action_item '0' '返回首页'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 0 就好喵'
+}
+
+xmj_render_tavern_setting_placeholder_detail_page() {
+  local view="${1:-home}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title "$view")" 'tavern setting' 'setting'
+  printf '\n'
   xmj_render_setting_card \
-    '这页收短啦' \
-    '酒馆设置这页先不常驻跨版本提醒。' \
-    '真要切版本且会影响设置时，猫猫会在 03 版本切换里单独拎出来确认。'
-  xmj_render_page_footer '按回车回首页'
+    '入口已经留好啦' \
+    '这一项已经单独放进酒馆设置里了。' \
+    '你后面继续把具体规则告诉猫猫，猫猫再把它接成真正可用的修改动作。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id "$view")"
+  xmj_render_fact_line '当前状态' '暂时还是占位页'
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_backup_keep_count_page() {
+  local keep_count=''
+
+  keep_count="$(xmj_backup_cleanup_keep_count)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'backup_keep_count')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里改的是自动清理备份的留存数量' \
+    '影响的是 10 清理旧档 里的自动清理动作。' \
+    '输入新的正整数就会直接写进配置文件；比如输入 3，就表示只保留最新 3 个备份。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'backup_keep_count')"
+  xmj_render_fact_line '当前数量' "$keep_count"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成对应的保留数量'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入新的保留数量 / 0 返回酒馆设置'
+}
+
+xmj_render_script_password_page() {
+  local mode="${1:-first_open}"
+  local title='安装密码'
+  local summary='首次打开小猫卷前，要先过一下安装密码。'
+
+  case "$mode" in
+    script_update)
+      title='脚本更新验证'
+      summary='更新小猫卷脚本前，要先输入安装密码。'
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$title" 'password check' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    "$title" \
+    "$summary" \
+    '提示：本喵的名字。'
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '直接输入密码' '输入正确就继续'
+  xmj_render_action_item '0' '取消这次操作'
+  xmj_render_action_footer '直接输入密码 / 0 取消'
 }

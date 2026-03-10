@@ -1773,7 +1773,19 @@ xmj_run_backup_restore_page() {
 }
 
 xmj_backup_cleanup_keep_count() {
-  printf '%s' '5'
+  local keep_count="${XMJ_BACKUP_KEEP_COUNT:-5}"
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      keep_count='5'
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    keep_count='5'
+  fi
+
+  printf '%s' "$keep_count"
 }
 
 xmj_backup_delete_archive() {
@@ -1796,7 +1808,7 @@ xmj_backup_delete_archive() {
 }
 
 xmj_backup_cleanup_old_archives() {
-  local keep_count="${1:-5}"
+  local keep_count="${1:-$(xmj_backup_cleanup_keep_count)}"
   local total='0'
   local i='0'
   local archive_file=''
@@ -1806,12 +1818,12 @@ xmj_backup_cleanup_old_archives() {
 
   case "$keep_count" in
     ''|*[!0-9]*)
-      keep_count='5'
+      keep_count="$(xmj_backup_cleanup_keep_count)"
       ;;
   esac
 
   if [ "$keep_count" -lt 1 ]; then
-    keep_count='1'
+    keep_count="$(xmj_backup_cleanup_keep_count)"
   fi
 
   xmj_backup_refresh_archives

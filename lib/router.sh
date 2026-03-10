@@ -39,7 +39,11 @@ xmj_handle_route() {
       xmj_run_script_setting_page 'home'
       return 0
       ;;
-    20|23|24|25)
+    20)
+      xmj_run_tavern_setting_page 'home'
+      return 0
+      ;;
+    23|24|25)
       xmj_render_menu_page "$input"
       return 0
       ;;
@@ -126,6 +130,98 @@ xmj_prompt_input() {
 xmj_prompt_script_setting_input() {
   printf '%b%s%b' "$XMJ_PINK_SOFT" '  设置中心 > ' "$XMJ_RESET"
   IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_prompt_tavern_setting_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  酒馆设置 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_script_password_value() {
+  printf '%s' 'meoroll'
+}
+
+xmj_script_password_marker_dir() {
+  if [ -n "${HOME:-}" ]; then
+    printf '%s/.xiaomaojuan' "$HOME"
+    return 0
+  fi
+
+  printf '%s' "${XMJ_CONFIG_DIR:-${XMJ_ROOT_DIR:-.}/config}"
+}
+
+xmj_script_password_marker_file() {
+  printf '%s/install-password.ok' "$(xmj_script_password_marker_dir)"
+}
+
+xmj_script_password_first_open_required() {
+  if [ -f "$(xmj_script_password_marker_file)" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_script_password_mark_first_open_done() {
+  local marker_dir=''
+  local marker_file=''
+
+  marker_dir="$(xmj_script_password_marker_dir)"
+  marker_file="$(xmj_script_password_marker_file)"
+
+  if ! mkdir -p "$marker_dir" 2>/dev/null; then
+    return 1
+  fi
+
+  if ! : >"$marker_file" 2>/dev/null; then
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_prompt_script_password_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  安装密码 > ' "$XMJ_RESET"
+  IFS= read -r -s XMJ_LAST_INPUT
+  printf '\n'
+}
+
+xmj_require_script_password() {
+  local mode="${1:-first_open}"
+  local input=''
+  local failed_count='0'
+
+  xmj_font_clear_notice
+
+  while true; do
+    xmj_render_script_password_page "$mode"
+    xmj_prompt_script_password_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    case "$input" in
+      0)
+        xmj_font_clear_notice
+        return 1
+        ;;
+    esac
+
+    if [ "$input" = "$(xmj_script_password_value)" ]; then
+      xmj_font_clear_notice
+
+      if [ "$mode" = 'first_open' ] && ! xmj_script_password_mark_first_open_done; then
+        xmj_add_boot_warning '安装密码已经通过，但验证标记没写好，下次打开可能还会再问一次。'
+      fi
+
+      return 0
+    fi
+
+    failed_count=$((failed_count + 1))
+    if [ "$failed_count" -ge 2 ]; then
+      xmj_font_set_notice 'warn' '骗你的喵其实是作者名啦你不可能不知道本喵的妈咪是谁吧？'
+    else
+      xmj_font_set_notice 'warn' '大笨蛋铲屎官，连本喵的名字都记不住，再给你一次机会喵。'
+    fi
+  done
 }
 
 xmj_setting_autostart_boot_dir() {
@@ -300,6 +396,11 @@ xmj_setting_run_script_update() {
   local after_commit=''
   local stamp=''
   local log_file=''
+
+  if ! xmj_require_script_password 'script_update'; then
+    xmj_font_set_notice 'info' '这次脚本更新先取消啦。'
+    return 1
+  fi
 
   xmj_setting_refresh_script_repo_state
 
@@ -643,6 +744,138 @@ xmj_run_script_setting_page() {
 
     xmj_handle_script_setting_action "$view" "$input"
     view="${XMJ_SETTING_NEXT_VIEW:-$view}"
+
+    if [ "$view" = 'exit' ]; then
+      return 0
+    fi
+  done
+}
+
+xmj_tavern_setting_update_backup_keep_count() {
+  local keep_count="${1:-}"
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      xmj_font_set_notice 'warn' '这里只支持输入正整数。'
+      return 1
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    xmj_font_set_notice 'warn' '备份保留数量至少要是 1。'
+    return 1
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_BACKUP_KEEP_COUNT' "$keep_count"; then
+    xmj_font_set_notice 'warn' "写入配置失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已把自动清理备份保留数量改成 ${keep_count}。"
+  return 0
+}
+
+xmj_handle_tavern_setting_action() {
+  local view="${1:-home}"
+  local input="${2:-}"
+
+  XMJ_TAVERN_SETTING_NEXT_VIEW="$view"
+
+  case "$view" in
+    home)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='exit'
+          ;;
+        1)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='browser_redirect'
+          ;;
+        2)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='avatar_hd'
+          ;;
+        3)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix'
+          ;;
+        4)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='file_chat_limit'
+          ;;
+        5)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='memory_limit'
+          ;;
+        6)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='port_conflict'
+          ;;
+        7)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='chat_freeze_fix'
+          ;;
+        8)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='beautify_freeze_fix'
+          ;;
+        9)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='backup_keep_count'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 0。'
+          ;;
+      esac
+      ;;
+    backup_keep_count)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        *[!0-9]*)
+          xmj_font_set_notice 'warn' '这里只支持输入正整数或 0。'
+          ;;
+        *)
+          xmj_tavern_setting_update_backup_keep_count "$input"
+          ;;
+      esac
+      ;;
+    browser_redirect|avatar_hd|stutter_fix|file_chat_limit|memory_limit|port_conflict|chat_freeze_fix|beautify_freeze_fix)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页当前只支持输入 0 返回酒馆设置。'
+          ;;
+      esac
+      ;;
+    *)
+      xmj_font_clear_notice
+      XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+      ;;
+  esac
+
+  return 0
+}
+
+xmj_run_tavern_setting_page() {
+  local view="${1:-home}"
+  local input=''
+
+  xmj_font_clear_notice
+
+  while true; do
+    xmj_render_tavern_setting_page "$view"
+    xmj_prompt_tavern_setting_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    xmj_handle_tavern_setting_action "$view" "$input"
+    view="${XMJ_TAVERN_SETTING_NEXT_VIEW:-$view}"
 
     if [ "$view" = 'exit' ]; then
       return 0
