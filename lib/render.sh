@@ -2500,12 +2500,12 @@ xmj_render_tavern_setting_memory_limit_page() {
   xmj_render_setting_card \
     '这项改的是小猫卷启动酒馆时附加的 Node 内存上限' \
     '猫猫会把数值写进 xiaomaojuan.conf 里的 XMJ_TAVERN_NODE_MEMORY_MB，01 启动酒馆时自动拼进 NODE_OPTIONS；这一项不直接去魔改 ST 核心源码。' \
-    '常用值可以先试 2048 / 4096 / 6144；输入 0 恢复默认启动内存，回车可以直接返回酒馆设置。'
+    '常用值可以先试 2048 / 4096 / 6144 / 8192；输入 0 恢复默认启动内存，回车可以直接返回酒馆设置。'
   printf '\n'
   xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'memory_limit')"
   xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'memory_limit')"
   xmj_render_fact_line '当前数值' "${memory_limit_mb} MB"
-  xmj_render_fact_line '推荐起点' '2048 / 4096 / 6144 MB'
+  xmj_render_fact_line '推荐起点' '2048 / 4096 / 6144 / 8192 MB'
   xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
   xmj_render_notice_line
   printf '\n'

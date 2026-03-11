@@ -2189,7 +2189,7 @@ xmj_tavern_setting_memory_limit_status_text() {
   local memory_limit_mb="${XMJ_TAVERN_NODE_MEMORY_MB:-0}"
 
   if ! xmj_tavern_setting_is_integer "$memory_limit_mb" || [ "$memory_limit_mb" -lt 1 ]; then
-    printf '%s' '当前：走默认启动内存（推荐先试 4096 MB）'
+    printf '%s' '当前：走默认启动内存（推荐先试 4096 / 8192 MB）'
     return 0
   fi
 
@@ -2394,7 +2394,7 @@ xmj_tavern_setting_update_memory_limit() {
   esac
 
   if [ "$memory_limit_mb" -gt 65536 ]; then
-    xmj_font_set_notice 'warn' '先别一次把启动内存拉得太离谱；建议从 2048 / 4096 / 6144 这几个值开始试。'
+    xmj_font_set_notice 'warn' '先别一次把启动内存拉得太离谱；建议从 2048 / 4096 / 6144 / 8192 这几个值开始试。'
     return 1
   fi
 
@@ -2409,7 +2409,7 @@ xmj_tavern_setting_update_memory_limit() {
   fi
 
   if [ "$memory_limit_mb" -lt 512 ]; then
-    xmj_font_set_notice 'warn' '低于 512 MB 基本帮不上忙；建议至少从 1024 MB 开始，常用值是 2048 或 4096。'
+    xmj_font_set_notice 'warn' '低于 512 MB 基本帮不上忙；建议至少从 1024 MB 开始，常用值是 2048 / 4096 / 8192。'
     return 1
   fi
 
