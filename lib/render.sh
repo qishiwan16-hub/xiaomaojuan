@@ -128,7 +128,7 @@ xmj_render_char_width() {
     $'\t')
       printf '%s' '4'
       ;;
-    [ -~])
+    ' '|[!-~])
       printf '%s' '1'
       ;;
     *)
