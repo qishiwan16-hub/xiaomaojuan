@@ -1094,13 +1094,13 @@ xmj_render_menu_block() {
 
 xmj_render_input_hint() {
   local panel_width
-  local hint='  请输入编号，00 退出。'
+  local hint='  请输入编号，1 和 01 都可以，00 退出。'
 
   panel_width="$(xmj_panel_width)"
   if [ "$panel_width" -lt 30 ]; then
     hint='  编号 / 00退出'
   elif [ "$panel_width" -lt 42 ]; then
-    hint='  输入编号，00 退出。'
+    hint='  输入编号，1 / 01 都可以。'
   fi
 
   printf '%b%s%b\n' "$XMJ_BLUE" "$hint" "$XMJ_RESET"
