@@ -121,6 +121,260 @@ xmj_render_notice_line() {
   printf '  %b%s%b\n' "$notice_color" "$XMJ_FONT_ACTION_MESSAGE" "$XMJ_RESET"
 }
 
+xmj_render_char_width() {
+  local ch="${1:-}"
+
+  case "$ch" in
+    $'\t')
+      printf '%s' '4'
+      ;;
+    [ -~])
+      printf '%s' '1'
+      ;;
+    *)
+      printf '%s' '2'
+      ;;
+  esac
+}
+
+xmj_render_text_width() {
+  local text="${1:-}"
+  local width='0'
+  local i='0'
+  local ch=''
+  local ch_width='0'
+
+  for ((i = 0; i < ${#text}; i++)); do
+    ch="${text:i:1}"
+    ch_width="$(xmj_render_char_width "$ch")"
+    width=$((width + ch_width))
+  done
+
+  printf '%s' "$width"
+}
+
+xmj_render_trim_leading_spaces() {
+  local text="${1:-}"
+
+  text="${text#"${text%%[![:space:]]*}"}"
+  printf '%s' "$text"
+}
+
+xmj_render_find_last_break_index() {
+  local text="${1:-}"
+  local break_index='-1'
+  local i='0'
+  local ch=''
+
+  for ((i = 0; i < ${#text}; i++)); do
+    ch="${text:i:1}"
+    case "$ch" in
+      ' '|/|\\|:|,|.|-|_|'|'|')'|'('|']'|'[')
+        break_index="$i"
+        ;;
+    esac
+  done
+
+  printf '%s' "$break_index"
+}
+
+xmj_render_wrap_text() {
+  local text="${1:-}"
+  local max_width="${2:-40}"
+  local current=''
+  local current_width='0'
+  local last_break_index='-1'
+  local line=''
+  local remainder=''
+  local break_char=''
+  local i='0'
+  local ch=''
+  local ch_width='0'
+
+  if [ "$max_width" -lt 8 ]; then
+    max_width='8'
+  fi
+
+  text="${text//$'\r'/}"
+  if [ -z "$text" ]; then
+    printf '\n'
+    return 0
+  fi
+
+  for ((i = 0; i < ${#text}; i++)); do
+    ch="${text:i:1}"
+
+    if [ "$ch" = $'\n' ]; then
+      printf '%s\n' "$current"
+      current=''
+      current_width='0'
+      last_break_index='-1'
+      continue
+    fi
+
+    current+="$ch"
+    ch_width="$(xmj_render_char_width "$ch")"
+    current_width=$((current_width + ch_width))
+
+    case "$ch" in
+      ' '|/|\\|:|,|.|-|_|'|'|')'|'('|']'|'[')
+        last_break_index="$(( ${#current} - 1 ))"
+        ;;
+    esac
+
+    if [ "$current_width" -le "$max_width" ]; then
+      continue
+    fi
+
+    if [ "$last_break_index" -ge 0 ]; then
+      break_char="${current:$last_break_index:1}"
+      if [ "$break_char" = ' ' ]; then
+        line="${current:0:$last_break_index}"
+        remainder="${current:$((last_break_index + 1))}"
+      else
+        line="${current:0:$((last_break_index + 1))}"
+        remainder="${current:$((last_break_index + 1))}"
+      fi
+      remainder="$(xmj_render_trim_leading_spaces "$remainder")"
+    else
+      line="${current:0:$(( ${#current} - 1 ))}"
+      remainder="${current:$(( ${#current} - 1 ))}"
+    fi
+
+    if [ -z "$line" ]; then
+      line="$current"
+      remainder=''
+    fi
+
+    printf '%s\n' "$line"
+    current="$remainder"
+    current_width="$(xmj_render_text_width "$current")"
+    last_break_index="$(xmj_render_find_last_break_index "$current")"
+  done
+
+  printf '%s\n' "$current"
+}
+
+xmj_render_print_wrapped_text() {
+  local indent="${1:-  }"
+  local color="${2:-$XMJ_WHITE}"
+  local text="${3:-}"
+  local panel_width='0'
+  local indent_width='0'
+  local content_width='0'
+  local line=''
+
+  if [ -z "$text" ]; then
+    return 0
+  fi
+
+  panel_width="$(xmj_panel_width)"
+  indent_width="$(xmj_render_text_width "$indent")"
+  content_width=$((panel_width - indent_width))
+  if [ "$content_width" -lt 8 ]; then
+    content_width='8'
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s%b%s%b\n' "$indent" "$color" "$line" "$XMJ_RESET"
+  done < <(xmj_render_wrap_text "$text" "$content_width")
+}
+
+xmj_render_print_prefixed_text() {
+  local prefix="${1:-}"
+  local prefix_color="${2:-$XMJ_WHITE}"
+  local text_color="${3:-$XMJ_WHITE}"
+  local text="${4:-}"
+  local panel_width='0'
+  local prefix_width='0'
+  local content_width='0'
+  local continuation_indent=''
+  local line=''
+  local first_line='1'
+
+  panel_width="$(xmj_panel_width)"
+  prefix_width="$(xmj_render_text_width "$prefix")"
+  content_width=$((panel_width - prefix_width))
+  if [ "$content_width" -lt 8 ]; then
+    content_width='8'
+  fi
+
+  continuation_indent="$(xmj_repeat_char ' ' "$prefix_width")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$first_line" = '1' ]; then
+      printf '%b%s%b%b%s%b\n' "$prefix_color" "$prefix" "$XMJ_RESET" "$text_color" "$line" "$XMJ_RESET"
+      first_line='0'
+    else
+      printf '%s%b%s%b\n' "$continuation_indent" "$text_color" "$line" "$XMJ_RESET"
+    fi
+  done < <(xmj_render_wrap_text "$text" "$content_width")
+}
+
+xmj_render_fact_line() {
+  local label="${1:-}"
+  local value="${2:-}"
+
+  xmj_render_print_prefixed_text "  ${label}: " "$XMJ_BLUE_SOFT" "$XMJ_WHITE" "$value"
+}
+
+xmj_render_path_block() {
+  local label="${1:-}"
+  local path_value="${2:-}"
+  local state_value="${3:-}"
+
+  xmj_render_print_wrapped_text '  ' "$XMJ_BLUE_SOFT" "$label"
+  xmj_render_print_prefixed_text '    path: ' "$XMJ_MIST" "$XMJ_WHITE" "$path_value"
+  xmj_render_print_prefixed_text '    state: ' "$XMJ_MIST" "$XMJ_CREAM" "$state_value"
+}
+
+xmj_render_page_intro() {
+  local primary_text="${1:-}"
+  local secondary_text="${2:-}"
+
+  if [ -n "$primary_text" ]; then
+    xmj_render_print_wrapped_text '  ' "$XMJ_WHITE" "$primary_text"
+  fi
+
+  if [ -n "$secondary_text" ]; then
+    xmj_render_print_wrapped_text '  ' "$XMJ_MIST" "$secondary_text"
+  fi
+}
+
+xmj_render_action_item() {
+  local key="${1:-}"
+  local label="${2:-}"
+
+  xmj_render_print_prefixed_text "  [${key}] | " "$XMJ_PINK" "$XMJ_WHITE" "$label"
+}
+
+xmj_render_setting_card() {
+  local title="${1:-}"
+  local description="${2:-}"
+  local status_text="${3:-}"
+
+  xmj_render_print_prefixed_text '  ♡ ' "$XMJ_PINK" "$XMJ_PINK" "$title"
+
+  if [ -n "$description" ]; then
+    xmj_render_print_wrapped_text '    ' "$XMJ_WHITE" "$description"
+  fi
+
+  if [ -n "$status_text" ]; then
+    xmj_render_print_wrapped_text '    ' "$XMJ_MIST" "$status_text"
+  fi
+}
+
+xmj_render_notice_line() {
+  local notice_color=''
+
+  if [ -z "${XMJ_FONT_ACTION_MESSAGE:-}" ]; then
+    return 0
+  fi
+
+  notice_color="$(xmj_font_notice_color)"
+  printf '\n'
+  xmj_render_print_wrapped_text '  ' "$notice_color" "$XMJ_FONT_ACTION_MESSAGE"
+}
+
 xmj_update_stage_order() {
   case "${1:-}" in
     prepare) printf '%s' '1' ;;
@@ -2443,44 +2697,23 @@ xmj_render_tavern_setting_stutter_fix_user_page() {
 }
 
 xmj_render_tavern_setting_file_chat_limit_page() {
-  local config_file=''
   local server_main_file=''
   local body_parser_limit=''
-  local target=''
-  local scope=''
-  local section=''
-  local key=''
-  local unit_hint=''
-  local current_value=''
-  local resolved_unit=''
-  local matched_key='当前版本没匹配到 config 键'
 
-  config_file="$(xmj_tavern_setting_config_file)"
   server_main_file="$(xmj_tavern_setting_server_main_file)"
   body_parser_limit="$(xmj_tavern_setting_body_parser_limit_text "$server_main_file")"
-  target="$(xmj_tavern_setting_file_chat_limit_target)"
-
-  if [ -n "$target" ]; then
-    IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
-$target
-EOF
-    resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
-    matched_key="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key") = $(xmj_tavern_setting_size_display_text "$current_value" "$resolved_unit")"
-  fi
 
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_tavern_setting_view_title 'file_chat_limit')" 'tavern setting' 'setting'
   printf '\n'
   xmj_render_setting_card \
-    '这项会同时检查 config 里的上传上限键和 bodyParser 硬限制' \
-    '猫猫会先在当前 config.yaml 里找已经存在的那一项来改；如果 server-main.js 里的 bodyParser limit 比你想要的更低，也会顺手补上。' \
-    '这里输入的是 MB 数字；如果 config 键本身记的是 bytes，猫猫会自动帮你换算。'
+    '这项改的是 SillyTavern 服务端请求体上限，不是 config.yaml' \
+    '聊天记录保存会走 /api/chats/save，所以真正卡住 .jsonl 上传或保存的，通常是 server-main.js 里的 bodyParser.json 和 bodyParser.urlencoded。' \
+    '这里输入的是 MB 数字；猫猫会把同一份代码文件里的 json / urlencoded 上传限制一起补到你给的值。'
   printf '\n'
   xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'file_chat_limit')"
   xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'file_chat_limit')"
-  xmj_render_fact_line '匹配到的 config 键' "$matched_key"
-  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
   xmj_render_fact_line 'bodyParser limit' "$body_parser_limit"
   xmj_render_fact_line '代码文件' "$(xmj_display_path "${server_main_file:-未找到}")"
   xmj_render_notice_line

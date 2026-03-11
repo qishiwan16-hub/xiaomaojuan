@@ -1759,14 +1759,171 @@ xmj_tavern_setting_size_value_for_write() {
 
 xmj_tavern_setting_server_main_file() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local candidate=''
 
   if [ -z "$repo_path" ]; then
     printf '%s' ''
     return 0
   fi
 
-  if [ -f "$repo_path/src/server-main.js" ]; then
-    printf '%s' "$repo_path/src/server-main.js"
+  for candidate in \
+    "$repo_path/src/server-main.js" \
+    "$repo_path/server-main.js" \
+    "$repo_path/src/server.js" \
+    "$repo_path/server.js" \
+    "$repo_path/dist/server-main.js"
+  do
+    [ -f "$candidate" ] || continue
+    if xmj_tavern_setting_body_parser_has_calls "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  for candidate in \
+    "$repo_path/src/server-main.js" \
+    "$repo_path/server-main.js" \
+    "$repo_path/src/server.js" \
+    "$repo_path/server.js" \
+    "$repo_path/dist/server-main.js"
+  do
+    if [ -f "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  printf '%s' ''
+}
+
+xmj_tavern_setting_body_parser_call_matches() {
+  local text="${1:-}"
+  local parser_kind="${2:-any}"
+
+  case "$parser_kind" in
+    json)
+      if [[ "$text" == *"bodyParser.json("* || "$text" == *"express.json("* ]]; then
+        return 0
+      fi
+      ;;
+    urlencoded)
+      if [[ "$text" == *"bodyParser.urlencoded("* || "$text" == *"express.urlencoded("* ]]; then
+        return 0
+      fi
+      ;;
+    any)
+      if [[ "$text" == *"bodyParser.json("* || "$text" == *"bodyParser.urlencoded("* || "$text" == *"express.json("* || "$text" == *"express.urlencoded("* ]]; then
+        return 0
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
+xmj_tavern_setting_body_parser_has_calls() {
+  local file_path="${1:-}"
+  local line=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if xmj_tavern_setting_body_parser_call_matches "$line" 'any'; then
+      return 0
+    fi
+  done <"$file_path"
+
+  return 1
+}
+
+xmj_tavern_setting_js_limit_text_to_mb() {
+  local value_text="${1:-}"
+  local normalized=''
+  local digits=''
+  local unit=''
+
+  normalized="$(printf '%s' "$value_text" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if ! [[ "$normalized" =~ ^([0-9]+)([kmg]?b?|)$ ]]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  digits="${BASH_REMATCH[1]}"
+  unit="${BASH_REMATCH[2]}"
+  case "$unit" in
+    g|gb)
+      printf '%s' "$((digits * 1024))"
+      ;;
+    m|mb|'')
+      printf '%s' "$digits"
+      ;;
+    k|kb)
+      printf '%s' "$(((digits + 1023) / 1024))"
+      ;;
+    b)
+      printf '%s' "$(((digits + 1048575) / 1048576))"
+      ;;
+    *)
+      printf '%s' ''
+      ;;
+  esac
+}
+
+xmj_tavern_setting_js_named_limit_mb() {
+  local file_path="${1:-}"
+  local var_name="${2:-}"
+  local line=''
+  local parsed_mb=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$var_name" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ (^|[^A-Za-z0-9_])${var_name}[[:space:]]*=[[:space:]]*['\"\`]([0-9]+[[:space:]]*[kKmMgG]?[bB]?)['\"\`] ]]; then
+      parsed_mb="$(xmj_tavern_setting_js_limit_text_to_mb "${BASH_REMATCH[2]}")"
+      if [ -n "$parsed_mb" ]; then
+        printf '%s' "$parsed_mb"
+        return 0
+      fi
+    fi
+
+    if [[ "$line" =~ (^|[^A-Za-z0-9_])${var_name}[[:space:]]*=[[:space:]]*([0-9]{4,}) ]]; then
+      parsed_mb="$(xmj_tavern_setting_js_limit_text_to_mb "${BASH_REMATCH[2]}b")"
+      if [ -n "$parsed_mb" ]; then
+        printf '%s' "$parsed_mb"
+        return 0
+      fi
+    fi
+  done <"$file_path"
+
+  printf '%s' ''
+}
+
+xmj_tavern_setting_body_parser_limit_from_block() {
+  local file_path="${1:-}"
+  local block_text="${2:-}"
+  local normalized=''
+  local parsed_mb=''
+
+  normalized="${block_text//$'\r'/}"
+  normalized="${normalized//$'\n'/ }"
+  if [[ "$normalized" =~ limit[[:space:]]*:[[:space:]]*['\"\`]([0-9]+[[:space:]]*[kKmMgG]?[bB]?)['\"\`] ]]; then
+    xmj_tavern_setting_js_limit_text_to_mb "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  if [[ "$normalized" =~ limit[[:space:]]*:[[:space:]]*([0-9]{4,}) ]]; then
+    xmj_tavern_setting_js_limit_text_to_mb "${BASH_REMATCH[1]}b"
+    return 0
+  fi
+
+  if [[ "$normalized" =~ limit[[:space:]]*:[[:space:]]*([A-Za-z_][A-Za-z0-9_]*) ]]; then
+    parsed_mb="$(xmj_tavern_setting_js_named_limit_mb "$file_path" "${BASH_REMATCH[1]}")"
+    printf '%s' "$parsed_mb"
     return 0
   fi
 
@@ -1777,9 +1934,9 @@ xmj_tavern_setting_body_parser_limit_mb() {
   local file_path="${1:-}"
   local parser_kind="${2:-json}"
   local line=''
-  local value_text=''
-  local digits=''
-  local unit=''
+  local block_text=''
+  local block_lines='0'
+  local parsed_mb=''
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
     printf '%s' ''
@@ -1787,29 +1944,26 @@ xmj_tavern_setting_body_parser_limit_mb() {
   fi
 
   while IFS= read -r line || [ -n "$line" ]; do
-    case "$parser_kind" in
-      json)
-        [[ "$line" == *"bodyParser.json("* ]] || continue
-        ;;
-      urlencoded)
-        [[ "$line" == *"bodyParser.urlencoded("* ]] || continue
-        ;;
-      *)
+    if [ -z "$block_text" ]; then
+      if ! xmj_tavern_setting_body_parser_call_matches "$line" "$parser_kind"; then
         continue
-        ;;
-    esac
-
-    if [[ "$line" =~ limit:[[:space:]]*['\"]([0-9]+[[:space:]]*[mMgG][bB])['\"] ]]; then
-      value_text="${BASH_REMATCH[1]}"
-      digits="$(printf '%s' "$value_text" | tr -cd '0-9')"
-      unit="$(printf '%s' "$value_text" | tr '[:upper:]' '[:lower:]' | tr -cd 'mg')"
-      [ -n "$digits" ] || continue
-      if [ "$unit" = 'g' ]; then
-        printf '%s' "$((digits * 1024))"
-      else
-        printf '%s' "$digits"
       fi
+      block_text="$line"
+      block_lines='1'
+    else
+      block_text="${block_text}"$'\n'"$line"
+      block_lines="$((block_lines + 1))"
+    fi
+
+    parsed_mb="$(xmj_tavern_setting_body_parser_limit_from_block "$file_path" "$block_text")"
+    if [ -n "$parsed_mb" ]; then
+      printf '%s' "$parsed_mb"
       return 0
+    fi
+
+    if [ "$block_lines" -ge 8 ] || [[ "$line" == *"));"* ]] || [[ "$line" == *"});"* ]] || [[ "$line" == *"})"* ]]; then
+      block_text=''
+      block_lines='0'
     fi
   done <"$file_path"
 
@@ -1822,7 +1976,7 @@ xmj_tavern_setting_body_parser_limit_text() {
   local urlencoded_limit=''
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
-    printf '%s' '没找到 server-main.js'
+    printf '%s' '没找到可读的 server-main.js / server.js'
     return 0
   fi
 
@@ -1830,7 +1984,11 @@ xmj_tavern_setting_body_parser_limit_text() {
   urlencoded_limit="$(xmj_tavern_setting_body_parser_limit_mb "$file_path" 'urlencoded')"
 
   if [ -z "$json_limit" ] && [ -z "$urlencoded_limit" ]; then
-    printf '%s' '当前版本没读到 bodyParser limit'
+    if xmj_tavern_setting_body_parser_has_calls "$file_path"; then
+      printf '%s' '已找到 bodyParser / express 入口，但 limit 不是固定字面量'
+    else
+      printf '%s' '当前版本没读到 bodyParser / express 入口'
+    fi
     return 0
   fi
 
@@ -1842,6 +2000,34 @@ xmj_tavern_setting_body_parser_limit_text() {
   printf 'json %s MB / urlencoded %s MB' "${json_limit:-未读到}" "${urlencoded_limit:-未读到}"
 }
 
+xmj_tavern_setting_inject_body_parser_limit_inline() {
+  local line="${1:-}"
+  local target_mb="${2:-0}"
+  local new_line="$line"
+
+  if [[ "$new_line" == *"bodyParser.json({"* ]]; then
+    printf '%s' "${new_line/bodyParser.json({/bodyParser.json({ limit: '${target_mb}mb', }"
+    return 0
+  fi
+
+  if [[ "$new_line" == *"bodyParser.urlencoded({"* ]]; then
+    printf '%s' "${new_line/bodyParser.urlencoded({/bodyParser.urlencoded({ limit: '${target_mb}mb', }"
+    return 0
+  fi
+
+  if [[ "$new_line" == *"express.json({"* ]]; then
+    printf '%s' "${new_line/express.json({/express.json({ limit: '${target_mb}mb', }"
+    return 0
+  fi
+
+  if [[ "$new_line" == *"express.urlencoded({"* ]]; then
+    printf '%s' "${new_line/express.urlencoded({/express.urlencoded({ limit: '${target_mb}mb', }"
+    return 0
+  fi
+
+  printf '%s' "$new_line"
+}
+
 xmj_tavern_setting_raise_body_parser_limits_if_needed() {
   local file_path="${1:-}"
   local target_mb="${2:-0}"
@@ -1849,10 +2035,10 @@ xmj_tavern_setting_raise_body_parser_limits_if_needed() {
   local line=''
   local new_line=''
   local value_text=''
-  local digits=''
-  local unit=''
   local current_mb='0'
   local updated_count='0'
+  local in_block='0'
+  local block_lines='0'
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || ! xmj_tavern_setting_is_integer "$target_mb" || [ "$target_mb" -lt 1 ]; then
     return 1
@@ -1866,18 +2052,32 @@ xmj_tavern_setting_raise_body_parser_limits_if_needed() {
   while IFS= read -r line || [ -n "$line" ]; do
     new_line="$line"
 
-    if { [[ "$line" == *"bodyParser.json("* ]] || [[ "$line" == *"bodyParser.urlencoded("* ]]; } \
-      && [[ "$line" =~ limit:[[:space:]]*['\"]([0-9]+[[:space:]]*[mMgG][bB])['\"] ]]; then
-      value_text="${BASH_REMATCH[1]}"
-      digits="$(printf '%s' "$value_text" | tr -cd '0-9')"
-      unit="$(printf '%s' "$value_text" | tr '[:upper:]' '[:lower:]' | tr -cd 'mg')"
-      current_mb="$digits"
-      if [ "$unit" = 'g' ]; then
-        current_mb="$((digits * 1024))"
+    if [ "$in_block" = '0' ]; then
+      if xmj_tavern_setting_body_parser_call_matches "$line" 'any'; then
+        in_block='1'
+        block_lines='1'
       fi
+    else
+      block_lines="$((block_lines + 1))"
+    fi
 
-      if [ -n "$digits" ] && [ "$current_mb" -lt "$target_mb" ]; then
+    if [ "$in_block" = '1' ] && [[ "$line" =~ limit:[[:space:]]*['\"\`]([0-9]+[[:space:]]*[kKmMgG]?[bB]?)['\"\`] ]]; then
+      value_text="${BASH_REMATCH[1]}"
+      current_mb="$(xmj_tavern_setting_js_limit_text_to_mb "$value_text")"
+      if [ -n "$current_mb" ] && [ "$current_mb" -lt "$target_mb" ]; then
         new_line="${line/$value_text/${target_mb}mb}"
+        updated_count="$((updated_count + 1))"
+      fi
+    elif [ "$in_block" = '1' ] && [[ "$line" =~ limit:[[:space:]]*([0-9]{4,}) ]]; then
+      value_text="${BASH_REMATCH[1]}"
+      current_mb="$(xmj_tavern_setting_js_limit_text_to_mb "${value_text}b")"
+      if [ -n "$current_mb" ] && [ "$current_mb" -lt "$target_mb" ]; then
+        new_line="${line/$value_text/$((target_mb * 1048576))}"
+        updated_count="$((updated_count + 1))"
+      fi
+    elif [ "$in_block" = '1' ] && [ "$block_lines" -eq 1 ] && [[ "$line" == *"({"* ]] && [[ "$line" == *"})"* ]]; then
+      new_line="$(xmj_tavern_setting_inject_body_parser_limit_inline "$line" "$target_mb")"
+      if [ "$new_line" != "$line" ]; then
         updated_count="$((updated_count + 1))"
       fi
     fi
@@ -1885,6 +2085,11 @@ xmj_tavern_setting_raise_body_parser_limits_if_needed() {
     if ! printf '%s\n' "$new_line" >>"$temp_file"; then
       rm -f "$temp_file" 2>/dev/null || true
       return 1
+    fi
+
+    if [ "$in_block" = '1' ] && { [ "$block_lines" -ge 8 ] || [[ "$line" == *"));"* ]] || [[ "$line" == *"});"* ]] || [[ "$line" == *"})"* ]]; }; then
+      in_block='0'
+      block_lines='0'
     fi
   done <"$file_path"
 
@@ -2147,42 +2352,17 @@ xmj_tavern_setting_chat_freeze_fix_status_text() {
 }
 
 xmj_tavern_setting_file_chat_limit_status_text() {
-  local target=''
-  local scope=''
-  local config_file=''
-  local section=''
-  local key=''
-  local unit_hint=''
-  local current_value=''
-  local resolved_unit=''
-  local key_label=''
   local server_main_file=''
   local parser_text=''
 
-  config_file="$(xmj_tavern_setting_config_file)"
   server_main_file="$(xmj_tavern_setting_server_main_file)"
-  if [ -z "$config_file" ] && [ -z "$server_main_file" ]; then
-    printf '%s' '当前：没找到配置文件'
+  if [ -z "$server_main_file" ]; then
+    printf '%s' '当前：没找到 server-main.js / server.js'
     return 0
   fi
 
-  target="$(xmj_tavern_setting_file_chat_limit_target)"
-  if [ -z "$target" ]; then
-    if [ -n "$server_main_file" ]; then
-      parser_text="$(xmj_tavern_setting_body_parser_limit_text "$server_main_file")"
-      printf '当前：%s' "$parser_text"
-    else
-      printf '%s' '当前：没匹配到已知上限键'
-    fi
-    return 0
-  fi
-
-  IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
-$target
-EOF
-  resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
-  key_label="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key")"
-  printf '当前：%s = %s' "$key_label" "$(xmj_tavern_setting_size_display_text "$current_value" "$resolved_unit")"
+  parser_text="$(xmj_tavern_setting_body_parser_limit_text "$server_main_file")"
+  printf '当前：%s' "$parser_text"
 }
 
 xmj_tavern_setting_memory_limit_status_text() {
@@ -2285,21 +2465,13 @@ xmj_tavern_setting_update_stutter_user() {
 
 xmj_tavern_setting_update_file_chat_limit() {
   local input_mb="${1:-}"
-  local target=''
-  local scope=''
-  local config_file=''
-  local section=''
-  local key=''
-  local unit_hint=''
-  local current_value=''
-  local resolved_unit=''
-  local stored_value=''
-  local key_label=''
   local server_main_file=''
   local parser_json_limit=''
   local parser_urlencoded_limit=''
   local parser_updates='0'
-  local updated_config='0'
+  local parser_has_calls='0'
+  local parser_can_verify='0'
+  local parser_too_low='0'
 
   case "$input_mb" in
     ''|*[!0-9]*)
@@ -2313,73 +2485,48 @@ xmj_tavern_setting_update_file_chat_limit() {
       return 1
   fi
 
-  target="$(xmj_tavern_setting_file_chat_limit_target)"
   server_main_file="$(xmj_tavern_setting_server_main_file)"
+  if xmj_tavern_setting_body_parser_has_calls "$server_main_file"; then
+    parser_has_calls='1'
+  fi
   parser_json_limit="$(xmj_tavern_setting_body_parser_limit_mb "$server_main_file" 'json')"
   parser_urlencoded_limit="$(xmj_tavern_setting_body_parser_limit_mb "$server_main_file" 'urlencoded')"
 
-  if [ -z "$target" ] && [ -z "$parser_json_limit" ] && [ -z "$parser_urlencoded_limit" ]; then
-    xmj_font_set_notice 'warn' '没在当前版本里找到可写的文件聊天上限位置；config 键和 bodyParser limit 都没匹配到。'
+  if [ "$parser_has_calls" != '1' ]; then
+    xmj_font_set_notice 'warn' '没在当前版本里找到可改的 bodyParser / express 上传限制入口。'
     return 1
   fi
 
-  if [ -n "$target" ]; then
-    IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
-$target
-EOF
-    resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
-    stored_value="$(xmj_tavern_setting_size_value_for_write "$input_mb" "$resolved_unit")"
-    key_label="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key")"
-
-    case "$scope" in
-      yaml_section)
-        if ! xmj_tavern_setting_set_yaml_section_value "$config_file" "$section" "$key" "$stored_value"; then
-          xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
-          return 1
-        fi
-        ;;
-      yaml_top)
-        if ! xmj_tavern_setting_set_yaml_top_value "$config_file" "$key" "$stored_value"; then
-          xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
-          return 1
-        fi
-        ;;
-      *)
-        xmj_font_set_notice 'warn' '文件聊天上限这次没匹配到可写入位置。'
-        return 1
-        ;;
-    esac
-
-    updated_config='1'
-  fi
-
-  if [ -n "$parser_json_limit" ] || [ -n "$parser_urlencoded_limit" ]; then
-    if ! parser_updates="$(xmj_tavern_setting_raise_body_parser_limits_if_needed "$server_main_file" "$input_mb")"; then
-      if [ "$updated_config" = '1' ]; then
-        xmj_font_set_notice 'warn' "配置键已经改了，但 bodyParser 没补成功：$(xmj_display_path "$server_main_file")"
-      else
-        xmj_font_set_notice 'warn' "bodyParser limit 没补成功：$(xmj_display_path "$server_main_file")"
-      fi
-      return 1
+  if [ -n "$parser_json_limit" ]; then
+    parser_can_verify='1'
+    if [ "$parser_json_limit" -lt "$input_mb" ]; then
+      parser_too_low='1'
     fi
   fi
 
-  if [ "$updated_config" = '1' ] && [ "${parser_updates:-0}" -gt 0 ]; then
-    xmj_font_set_notice 'success' "已把 ${key_label} 改成 $(xmj_tavern_setting_size_display_text "$stored_value" "$resolved_unit")，bodyParser 也补到了 ${input_mb} MB。"
-    return 0
+  if [ -n "$parser_urlencoded_limit" ]; then
+    parser_can_verify='1'
+    if [ "$parser_urlencoded_limit" -lt "$input_mb" ]; then
+      parser_too_low='1'
+    fi
   fi
 
-  if [ "$updated_config" = '1' ]; then
-    xmj_font_set_notice 'success' "已把 ${key_label} 改成 $(xmj_tavern_setting_size_display_text "$stored_value" "$resolved_unit")：$(xmj_display_path "$config_file")"
-    return 0
+  if ! parser_updates="$(xmj_tavern_setting_raise_body_parser_limits_if_needed "$server_main_file" "$input_mb")"; then
+    xmj_font_set_notice 'warn' "bodyParser / express 上传限制没改成功：$(xmj_display_path "$server_main_file")"
+    return 1
   fi
 
   if [ "${parser_updates:-0}" -gt 0 ]; then
-    xmj_font_set_notice 'success' "当前版本没匹配到上传上限键，已先把 bodyParser 补到 ${input_mb} MB：$(xmj_display_path "$server_main_file")"
+    xmj_font_set_notice 'success' "已把 bodyParser / express 上传限制补到 ${input_mb} MB：$(xmj_display_path "$server_main_file")"
     return 0
   fi
 
-  xmj_font_set_notice 'success' "当前版本没匹配到上传上限键，但 bodyParser 已经不低于 ${input_mb} MB。"
+  if [ "$parser_can_verify" = '1' ] && [ "$parser_too_low" != '1' ]; then
+    xmj_font_set_notice 'success' "bodyParser / express 上传限制已经不低于 ${input_mb} MB。"
+    return 0
+  fi
+
+  xmj_font_set_notice 'warn' "已找到 bodyParser / express 入口，但当前写法不是固定字面量，暂时没法自动确认是否改成功：$(xmj_display_path "$server_main_file")"
   return 0
 }
 
