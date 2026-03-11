@@ -774,6 +774,8 @@ xmj_setting_refresh_script_update_status() {
   local upstream_ref=''
   local remote_name='origin'
   local remote_branch=''
+  local remote_ref=''
+  local fetch_refspec=''
   local counts=''
   local left_count='0'
   local right_count='0'
@@ -823,20 +825,34 @@ xmj_setting_refresh_script_update_status() {
     return 1
   fi
 
+  if ! git -C "$repo_path" remote get-url "$remote_name" >/dev/null 2>&1; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="当前仓库没配置远端 ${remote_name}，暂时不能检查更新"
+    return 1
+  fi
+
+  remote_ref="refs/remotes/$remote_name/$remote_branch"
+  fetch_refspec="+refs/heads/$remote_branch:${remote_ref}"
   XMJ_SETTING_SCRIPT_UPDATE_REMOTE_BRANCH="${remote_name}/${remote_branch}"
 
-  if ! git -C "$repo_path" fetch --quiet "$remote_name" "$remote_branch" >/dev/null 2>&1; then
+  if ! git -C "$repo_path" fetch --quiet --prune "$remote_name" "$fetch_refspec" >/dev/null 2>&1; then
     XMJ_SETTING_SCRIPT_UPDATE_STATE='check_failed'
     XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='远端版本检查失败，请先确认网络或仓库权限'
     XMJ_SETTING_SCRIPT_UPDATE_CAN_APPLY='1'
     return 1
   fi
 
-  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT="$(git -C "$repo_path" rev-parse --short FETCH_HEAD 2>/dev/null || true)"
-  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION="$(xmj_setting_script_version_for_ref "$repo_path" 'FETCH_HEAD')"
-  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE="$(xmj_setting_script_changelog_for_ref "$repo_path" 'FETCH_HEAD')"
+  if ! xmj_setting_script_branch_exists_remote_on "$repo_path" "$remote_name" "$remote_branch"; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="远端分支 ${remote_name}/${remote_branch} 不存在，暂时不能检查更新"
+    return 1
+  fi
 
-  counts="$(git -C "$repo_path" rev-list --left-right --count "HEAD...FETCH_HEAD" 2>/dev/null || true)"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT="$(git -C "$repo_path" rev-parse --short "$remote_ref" 2>/dev/null || true)"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION="$(xmj_setting_script_version_for_ref "$repo_path" "$remote_ref")"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE="$(xmj_setting_script_changelog_for_ref "$repo_path" "$remote_ref")"
+
+  counts="$(git -C "$repo_path" rev-list --left-right --count "HEAD...$remote_ref" 2>/dev/null || true)"
   left_count="${counts%%[[:space:]]*}"
   right_count="${counts##*[[:space:]]}"
 
@@ -1030,7 +1046,19 @@ xmj_setting_script_branch_exists_remote() {
     return 1
   fi
 
-  git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$branch_name"
+  xmj_setting_script_branch_exists_remote_on "$repo_path" 'origin' "$branch_name"
+}
+
+xmj_setting_script_branch_exists_remote_on() {
+  local repo_path="${1:-}"
+  local remote_name="${2:-origin}"
+  local branch_name="${3:-}"
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ] || [ -z "$branch_name" ] || [ -z "$remote_name" ]; then
+    return 1
+  fi
+
+  git -C "$repo_path" show-ref --verify --quiet "refs/remotes/$remote_name/$branch_name"
 }
 
 xmj_setting_script_update_release_protected_config() {

@@ -1699,24 +1699,27 @@ xmj_launch_wait_for_running() {
       xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
       return 1
     fi
+
     detected_url="$(xmj_launch_detect_ready_entry_url || true)"
     if [ -n "$detected_url" ]; then
       if [ "$detected_url" != "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
-        xmj_launch_log_line "宸蹭粠鍚庡彴鏃ュ織璇嗗埆鍒板叆鍙ｏ細${detected_url}"
+        xmj_launch_log_line "已从后台日志识别到入口：${detected_url}"
       fi
       XMJ_LAUNCH_ENTRY_URL="$detected_url"
       if ! xmj_launch_confirm_ready_state "$XMJ_LAUNCH_ENTRY_URL"; then
         if ! xmj_launch_process_alive; then
           xmj_launch_wait_process >/dev/null
-          xmj_launch_fail 'boot' '鍚姩澶辫触' '閰掗鍦ㄦ樉绀?Go to 鍚庡張寰堝揩閫€鍑轰簡锛屽彲浠ユ俯鍜屾煡鐪嬫棩蹇椼€?'
+          xmj_launch_fail 'boot' '启动失败' '酒馆在显示 Go to 后又很快退出了，可以温和查看日志。'
           return 1
         fi
         continue
       fi
-      xmj_launch_log_line '鍚庡彴鏃ュ織宸叉樉绀洪厭棣嗗叆鍙ｏ紝鎸夋棩蹇楀垽瀹氳繘鍏ヨ繍琛岄樁娈点€?'
+      xmj_launch_log_line '后台日志已显示酒馆入口，按日志判定进入运行阶段。'
       xmj_launch_mark_runtime_log_start
       return 0
     fi
+
+    if [ "$should_probe" = '1' ] && [ "$step" -ge "$probe_fallback_at" ]; then
       while IFS= read -r candidate_url || [ -n "$candidate_url" ]; do
         if [ -z "$candidate_url" ]; then
           continue
@@ -1764,7 +1767,6 @@ xmj_launch_wait_for_running() {
   xmj_launch_mark_runtime_log_start
   return 0
 }
-
 xmj_launch_handle_interrupt() {
   local summary='已停止酒馆'
   local detail='₍˄·͈༝·͈˄₎◞ 猫猫已经把这次启动的酒馆收好了，正在回到首页喵~'

@@ -1790,6 +1790,7 @@ xmj_render_launch_running_screen() {
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
   printf '  %b♡ 酒馆后台%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '  %b这里只直显当前这次运行的新输出，不会保留到日志或 06。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
 }
 
@@ -2155,10 +2156,10 @@ xmj_render_setting_logs_page() {
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
-  printf '\n'
-  printf '  %b01 启动酒馆后就算退出了前台，也可以回到 06 继续看酒馆后台输出。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
-  printf '  %b这里现在只显示 launch 后台日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b更新日志和脚本更新日志不会在这页出现；删单个和按保留数量清理也只处理后台日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b01 进入运行中后，运行期后台只会在当前页面实时直显，不会继续保留到 06。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '  %b这里现在只看 launch 启动日志和最近记录，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b更新日志和脚本更新日志不会在这里出现；这里只看启动期与最近后台记录。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b删单个和按保留数量清理也只处理后台日志，不会碰更新日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
   xmj_render_fact_line '后台数量' "${#XMJ_SETTING_LOG_FILES[@]}"
