@@ -944,6 +944,60 @@ xmj_render_launch_result() {
   xmj_render_page_footer '按回车返回首页'
 }
 
+xmj_render_backend_display_screen() {
+  local mode="${1:-running}"
+  local primary_text='这里只实时显示当前酒馆后台输出。'
+  local secondary_text='按 Ctrl+C 会结束这次运行的酒馆，并回到首页。'
+  local card_title='实时后台'
+  local card_detail='当前已经接到最新的 launch 后台日志，会持续刷新输出。'
+  local card_note='这个页面不提供其他操作。'
+
+  case "$mode" in
+    empty)
+      primary_text='还没有可显示的酒馆后台。'
+      secondary_text='先跑一次 01 启动酒馆，生成 launch 日志后再来看。'
+      card_title='暂无后台'
+      card_detail='当前日志目录里还没有 launch 后台日志。'
+      card_note='这个页面不提供其他操作。'
+      ;;
+    stopped)
+      primary_text='当前没有正在运行的酒馆，这里展示最近一次后台记录。'
+      secondary_text='这个页面不提供其他操作，按回车返回首页。'
+      card_title='最近后台'
+      card_detail='下面是最新一份 launch 后台日志的尾部内容。'
+      card_note='如果要继续启动新的酒馆，请回到 01。'
+      ;;
+    *)
+      ;;
+  esac
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['06']}" 'backend display' 'setting'
+  printf '\n'
+  xmj_render_page_intro "$primary_text" "$secondary_text"
+  printf '\n'
+  xmj_render_setting_card "$card_title" "$card_detail" "$card_note"
+  printf '\n'
+
+  if [ -n "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
+    xmj_render_fact_line '进入链接' "${XMJ_LAUNCH_ENTRY_URL}"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_PID:-}" ]; then
+    xmj_render_fact_line 'PID' "${XMJ_LAUNCH_PID}"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  printf '  %b♡ 酒馆后台%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+}
+
 xmj_render_page_footer() {
   local prompt="${1:-按回车返回首页}"
 
@@ -1107,7 +1161,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在可以直接查看最新日志，扩展脚本入口仍保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在可以直接查看酒馆后台，扩展脚本入口仍保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -1187,7 +1241,7 @@ xmj_setting_view_title() {
       printf '%s' '脚本版本'
       ;;
     logs)
-      printf '%s' '日志查看'
+      printf '%s' '后台显示'
       ;;
     logs_keep_count)
       printf '%s' '日志保留数量'
@@ -1886,14 +1940,14 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_setting_card '4 · 脚本版本' '' "分支：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   printf '\n'
-  xmj_render_setting_card '5 · 日志查看' '' "当前：${log_count} 份日志"
+  xmj_render_setting_card '5 · 后台显示' '' "当前：${log_count} 份后台日志"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入字体管理'
   xmj_render_action_item '2' '查看是否自启动'
   xmj_render_action_item '3' '检查脚本更新'
   xmj_render_action_item '4' '查看脚本版本'
-  xmj_render_action_item '5' '查看日志'
+  xmj_render_action_item '5' '查看后台'
   xmj_render_action_item '0' '返回首页'
   xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 0 就好喵'
 }
@@ -2025,19 +2079,19 @@ xmj_render_setting_logs_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
   printf '\n'
-  printf '  %b01 启动酒馆后就算退出了前台，也可以回到 06 继续看最新的 launch 日志。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
-  printf '  %b这里先摆最新日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b详细内容还是留在原日志文件里；删单个和按保留数量清理也都放这页了。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b01 启动酒馆后就算退出了前台，也可以回到 06 继续看酒馆后台输出。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '  %b这里现在只显示 launch 后台日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b更新日志和脚本更新日志不会在这页出现；删单个和按保留数量清理也只处理后台日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
-  xmj_render_fact_line '日志数量' "${#XMJ_SETTING_LOG_FILES[@]}"
+  xmj_render_fact_line '后台数量' "${#XMJ_SETTING_LOG_FILES[@]}"
   xmj_render_fact_line '保留策略' "保留最新 $(xmj_setting_log_keep_count) 份"
 
   if [ "$display_count" -gt 0 ]; then
     xmj_render_fact_line '当前查看' "$selected_name"
     xmj_render_fact_line '总行数' "$total_lines"
     printf '\n'
-    xmj_render_setting_card '最新日志' '' "这里只展示最新 ${display_count} 份。"
+    xmj_render_setting_card '最新后台' '' "这里只展示最新 ${display_count} 份。"
     printf '\n'
 
     for ((index = 0; index < display_count; index += 1)); do
@@ -2050,20 +2104,20 @@ xmj_render_setting_logs_page() {
     printf '\n'
     xmj_setting_print_log_tail "$selected_file" '18'
   else
-    xmj_render_setting_card '还没有日志喵' '等你跑过启动、更新、版本切换这些动作后，这里就会有内容。' ''
+    xmj_render_setting_card '还没有后台喵' '先跑一次 01 启动酒馆，生成 launch 日志后，这里就会有内容。' ''
   fi
 
   xmj_render_notice_line
   printf '\n'
   if [ "$display_count" -gt 0 ]; then
-    xmj_render_action_item 'd' '删除当前查看日志'
-    xmj_render_action_item 'a' '按保留数量清理旧日志'
+    xmj_render_action_item 'd' '删除当前后台日志'
+    xmj_render_action_item 'a' '按保留数量清理旧后台'
   fi
-  xmj_render_action_item 'k' '修改日志保留数量'
-  xmj_render_action_item 'r' '刷新日志列表'
+  xmj_render_action_item 'k' '修改后台保留数量'
+  xmj_render_action_item 'r' '刷新后台列表'
   xmj_render_action_item '0' '返回设置中心'
   if [ "$display_count" -gt 0 ]; then
-    xmj_render_action_footer '输入日志序号 / d / a / k / r / 0 就好喵'
+    xmj_render_action_footer '输入后台序号 / d / a / k / r / 0 就好喵'
   else
     xmj_render_action_footer '输入 k / r / 0 就好喵'
   fi
@@ -2075,18 +2129,18 @@ xmj_render_setting_logs_keep_count_page() {
   xmj_render_page_title "$(xmj_setting_view_title 'logs_keep_count')" 'log viewer' 'setting'
   printf '\n'
   xmj_render_setting_card \
-    '这里改的是日志页自动清理时要保留的数量' \
+    '这里改的是后台页自动清理时要保留的数量' \
     '输入新的正整数后，会直接写进 xiaomaojuan.conf。' \
-    '改完不会立刻删日志；要真正清理旧日志，回日志页按 a 再执行一次。'
+    '改完不会立刻删后台；要真正清理旧后台，回后台页按 a 再执行一次。'
   printf '\n'
   xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_keep_count')"
   xmj_render_fact_line '当前数量' "$(xmj_setting_log_keep_count)"
   xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item '正整数' '直接改成新的日志保留数量'
-  xmj_render_action_item '0' '返回日志查看'
-  xmj_render_action_footer '输入新的保留数量 / 0 返回日志查看'
+  xmj_render_action_item '正整数' '直接改成新的后台保留数量'
+  xmj_render_action_item '0' '返回后台显示'
+  xmj_render_action_footer '输入新的保留数量 / 0 返回后台显示'
 }
 
 xmj_render_setting_logs_delete_confirm_page() {
@@ -2097,7 +2151,7 @@ xmj_render_setting_logs_delete_confirm_page() {
   xmj_render_page_title "$(xmj_setting_view_title 'logs_delete_confirm')" 'log viewer' 'setting'
   printf '\n'
   xmj_render_setting_card \
-    '这次会删掉当前选中的那一份日志' \
+    '这次会删掉当前选中的那一份后台日志' \
     "${target_file##*/}" \
     '删除后不会自动恢复。'
   printf '\n'
@@ -2105,8 +2159,8 @@ xmj_render_setting_logs_delete_confirm_page() {
   xmj_render_fact_line '目标文件' "$(xmj_display_path "$target_file")"
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item 'y' '确认删除这份日志'
-  xmj_render_action_item '0' '取消并返回日志查看'
+  xmj_render_action_item 'y' '确认删除这份后台日志'
+  xmj_render_action_item '0' '取消并返回后台显示'
   xmj_render_action_footer '输入 y / 0 就好喵'
 }
 
@@ -2120,9 +2174,9 @@ xmj_render_setting_logs_cleanup_confirm_page() {
   xmj_render_page_title "$(xmj_setting_view_title 'logs_cleanup_confirm')" 'log viewer' 'setting'
   printf '\n'
   xmj_render_setting_card \
-    '这次会按当前保留策略整理旧日志' \
-    "只保留最新 ${keep_count} 份日志。" \
-    '更旧的日志会被直接删除，删除后不会自动恢复。'
+    '这次会按当前保留策略整理旧后台日志' \
+    "只保留最新 ${keep_count} 份后台日志。" \
+    '更旧的后台日志会被直接删除，删除后不会自动恢复。'
   printf '\n'
   xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_cleanup_confirm')"
   xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
@@ -2130,7 +2184,7 @@ xmj_render_setting_logs_cleanup_confirm_page() {
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item 'y' '确认执行这次清理'
-  xmj_render_action_item '0' '取消并返回日志查看'
+  xmj_render_action_item '0' '取消并返回后台显示'
   xmj_render_action_footer '输入 y / 0 就好喵'
 }
 

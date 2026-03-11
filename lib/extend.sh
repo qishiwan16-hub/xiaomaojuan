@@ -70,6 +70,10 @@ xmj_extend_display_script_path() {
   printf '%s' "$(xmj_display_path "$(xmj_extend_relative_path "${1:-}")")"
 }
 
+xmj_extend_termux_home_dir() {
+  printf '%s' "${HOME:-/data/data/com.termux/files/home}"
+}
+
 xmj_extend_ensure_registry_file() {
   local registry_file=''
   local registry_dir=''
@@ -167,6 +171,7 @@ xmj_extend_find_index_by_path() {
 xmj_extend_normalize_script_path() {
   local raw_path=''
   local candidate=''
+  local termux_home=''
   local resolved_dir=''
   local file_name=''
 
@@ -177,12 +182,14 @@ xmj_extend_normalize_script_path() {
   fi
 
   candidate="$(xmj_expand_path "$raw_path")"
+  termux_home="$(xmj_extend_termux_home_dir)"
 
   case "$candidate" in
     /*)
       ;;
     *)
-      candidate="${XMJ_ROOT_DIR:-.}/$candidate"
+      candidate="${candidate#./}"
+      candidate="${termux_home}/${candidate#./}"
       ;;
   esac
 
@@ -387,13 +394,13 @@ xmj_render_extend_add_page() {
   if [ "$count" -eq 0 ]; then
     xmj_render_setting_card \
       '还没有登记好的工具喵' \
-      '按 1 开始新增，名字和脚本路径都告诉猫猫就行。' \
-      '目前只支持 bash 启动脚本。'
+      '路径示范：/data/data/com.termux/files/home/SillyTavern/start.sh' \
+      '也可以直接填 SillyTavern/start.sh，猫猫会自动补上前缀。'
   else
     xmj_render_setting_card \
       '猫猫已经记住这些工具啦' \
-      '要继续加新的，按 1 就好。' \
-      '目前只支持 bash 启动脚本。'
+      '路径示范：/data/data/com.termux/files/home/SillyTavern/start.sh' \
+      '也可以直接填 SillyTavern/start.sh，猫猫会自动补上前缀。'
     printf '\n'
 
     for ((index = 0; index < count; index += 1)); do
@@ -406,6 +413,8 @@ xmj_render_extend_add_page() {
   printf '\n'
   xmj_render_action_item '1' '新增一条脚本登记'
   xmj_render_action_item '0' '返回首页'
+  printf '\n'
+  printf '  %b目前只支持 bash 启动脚本，路径要写到 .sh 文件结尾。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   xmj_render_action_footer '输入 1 开始新增，输入 0 回首页'
 }
 
@@ -435,7 +444,7 @@ xmj_extend_add_entry() {
   fi
 
   if [ ! -f "$normalized_path" ]; then
-    xmj_extend_set_notice 'warn' '这个路径下没有脚本文件喵。'
+    xmj_extend_set_notice 'warn' '这个路径下没有脚本文件喵，示范：SillyTavern/start.sh 或 /data/data/com.termux/files/home/SillyTavern/start.sh'
     return 1
   fi
 

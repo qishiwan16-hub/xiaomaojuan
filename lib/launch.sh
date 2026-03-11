@@ -32,6 +32,8 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_USE_PGID='0'
   XMJ_LAUNCH_IMPORT_ASSERT_RETRY='0'
   XMJ_LAUNCH_LOG_VIEW_STARTED='0'
+  XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='0'
+  XMJ_LAUNCH_ATTACHED_MODE='0'
   XMJ_LAUNCH_PREVIOUS_INT_TRAP=''
 }
 
@@ -115,6 +117,79 @@ xmj_launch_entry_url() {
   esac
 
   printf 'http://%s:%s%s' "$host" "$port" "$path"
+}
+
+xmj_launch_latest_log_file() {
+  local log_dir="${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+  local file=''
+
+  if [ -d "$log_dir" ]; then
+    file="$(ls -1t "$log_dir"/launch-*.log 2>/dev/null | head -n 1)"
+  fi
+
+  printf '%s' "$file"
+}
+
+xmj_launch_extract_pid_from_log() {
+  local log_file="${1:-}"
+  local pid=''
+
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  pid="$(sed -n 's/.*后台进程 PID：\([0-9][0-9]*\).*/\1/p' "$log_file" 2>/dev/null | tail -n 1)"
+  printf '%s' "$pid"
+}
+
+xmj_launch_extract_entry_url_from_log() {
+  local log_file="${1:-}"
+  local url=''
+
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  url="$(sed -n \
+    -e 's/.*酒馆入口已可访问：\(http[^[:space:]]*\).*/\1/p' \
+    -e 's/.*准备检测酒馆入口：\(http[^[:space:]]*\).*/\1/p' \
+    -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
+    "$log_file" 2>/dev/null | tail -n 1)"
+  printf '%s' "$url"
+}
+
+xmj_launch_extract_use_pgid_from_log() {
+  local log_file="${1:-}"
+
+  if [ -n "$log_file" ] && [ -f "$log_file" ] && grep -q '已使用 setsid 创建独立进程组。' "$log_file" 2>/dev/null; then
+    printf '%s' '1'
+    return 0
+  fi
+
+  printf '%s' '0'
+}
+
+xmj_launch_attach_latest_session() {
+  local log_file=''
+
+  log_file="$(xmj_launch_latest_log_file)"
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_LOG_FILE="$log_file"
+  XMJ_LAUNCH_PID="$(xmj_launch_extract_pid_from_log "$log_file")"
+  XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_extract_entry_url_from_log "$log_file")"
+  XMJ_LAUNCH_USE_PGID="$(xmj_launch_extract_use_pgid_from_log "$log_file")"
+  XMJ_LAUNCH_ATTACHED_MODE='1'
+
+  if [ -z "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
+    XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
+  fi
+
+  return 0
 }
 
 xmj_launch_can_probe_url() {
@@ -742,6 +817,17 @@ xmj_launch_wait_process() {
     return 0
   fi
 
+  if [ "${XMJ_LAUNCH_ATTACHED_MODE:-0}" = '1' ]; then
+    case "${XMJ_LAUNCH_EXIT_CODE:-}" in
+      ''|*[!0-9-]*)
+        XMJ_LAUNCH_EXIT_CODE='0'
+        ;;
+    esac
+    XMJ_LAUNCH_WAITED='1'
+    printf '%s' "${XMJ_LAUNCH_EXIT_CODE:-0}"
+    return 0
+  fi
+
   wait "$pid" 2>/dev/null
   exit_code=$?
   XMJ_LAUNCH_EXIT_CODE="$exit_code"
@@ -943,6 +1029,34 @@ xmj_launch_open_live_log_view() {
   return 0
 }
 
+xmj_launch_show_running_notice() {
+  if [ "${XMJ_LAUNCH_RUNNING_NOTICE_SHOWN:-0}" = '1' ]; then
+    return 0
+  fi
+
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '─' 68
+  printf '  %b♡ 启动完成%b\n' "$XMJ_PINK" "$XMJ_RESET"
+
+  if [ -n "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
+    xmj_render_fact_line '进入链接' "${XMJ_LAUNCH_ENTRY_URL}"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_PID:-}" ]; then
+    xmj_render_fact_line 'PID' "${XMJ_LAUNCH_PID}"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
+  fi
+
+  printf '  %b下面继续显示酒馆后台输出，按 Ctrl+C 可以结束这次启动。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+
+  XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='1'
+  return 0
+}
+
 xmj_launch_print_new_log_lines() {
   local total_lines='0'
   local start_line='1'
@@ -993,12 +1107,14 @@ xmj_launch_wait_for_running() {
         xmj_launch_log_line "酒馆入口已可访问：${XMJ_LAUNCH_ENTRY_URL}"
         xmj_launch_log_line '酒馆进程已进入运行阶段。'
         xmj_launch_print_new_log_lines
+        xmj_launch_show_running_notice
         return 0
       fi
     elif [ "$step" -ge 2 ]; then
       xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
       xmj_launch_log_line "进入链接：${XMJ_LAUNCH_ENTRY_URL}"
       xmj_launch_print_new_log_lines
+      xmj_launch_show_running_notice
       return 0
     fi
 
@@ -1019,6 +1135,8 @@ xmj_launch_wait_for_running() {
   fi
 
   xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
+  xmj_launch_print_new_log_lines
+  xmj_launch_show_running_notice
   return 0
 }
 
@@ -1096,6 +1214,60 @@ xmj_launch_monitor_running() {
   return 0
 }
 
+xmj_launch_monitor_attached_session() {
+  while true; do
+    if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
+      xmj_launch_handle_interrupt
+      return 0
+    fi
+
+    if ! xmj_launch_process_alive; then
+      xmj_launch_print_new_log_lines
+      XMJ_LAUNCH_EXIT_CODE='0'
+      XMJ_LAUNCH_WAITED='1'
+      xmj_render_backend_display_screen 'stopped'
+      xmj_launch_render_log_snapshot '18'
+      xmj_render_page_footer '按回车返回首页'
+      return 0
+    fi
+
+    sleep 1 || true
+
+    if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
+      xmj_launch_handle_interrupt
+      return 0
+    fi
+
+    xmj_launch_print_new_log_lines
+  done
+}
+
+xmj_run_backend_display_page() {
+  xmj_launch_reset_state
+
+  if ! xmj_launch_attach_latest_session; then
+    xmj_render_backend_display_screen 'empty'
+    xmj_render_page_footer '按回车返回首页'
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_PID:-}" ] && xmj_launch_process_alive; then
+    xmj_launch_install_int_trap
+    xmj_render_backend_display_screen 'running'
+    xmj_launch_render_log_snapshot '18'
+    XMJ_LAUNCH_LOG_VIEW_STARTED='1'
+    XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='1'
+    xmj_launch_monitor_attached_session
+    xmj_launch_restore_int_trap
+    return 0
+  fi
+
+  xmj_render_backend_display_screen 'stopped'
+  xmj_launch_render_log_snapshot '18'
+  xmj_render_page_footer '按回车返回首页'
+  return 0
+}
+
 xmj_run_tavern_launch() {
   local boot_detail='(,,>ヮ<,,)! 小猫正在把酒馆悄悄放到后台运行喵~'
 
@@ -1153,6 +1325,7 @@ xmj_run_tavern_launch() {
       '启动中' \
       "$boot_detail"
     XMJ_LAUNCH_LOG_VIEW_STARTED='0'
+    XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='0'
 
     if ! xmj_launch_start_process; then
       xmj_launch_restore_int_trap

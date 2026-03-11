@@ -105,7 +105,7 @@ xmj_load_menu_data() {
   XMJ_MENU_LABEL['03']='切换版本'
   XMJ_MENU_LABEL['04']='卸载重装'
   XMJ_MENU_LABEL['05']='更新记录'
-  XMJ_MENU_LABEL['06']='日志显示'
+  XMJ_MENU_LABEL['06']='后台显示'
   XMJ_MENU_LABEL['07']='创建备份'
   XMJ_MENU_LABEL['08']='备份列表'
   XMJ_MENU_LABEL['09']='恢复数据'

@@ -67,29 +67,13 @@ xmj_setting_select_latest_launch_log() {
 }
 
 xmj_prompt_log_display_input() {
-  printf '%b%s%b' "$XMJ_PINK_SOFT" '  日志显示 > ' "$XMJ_RESET"
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  后台显示 > ' "$XMJ_RESET"
   IFS= read -r XMJ_LAST_INPUT
 }
 
 xmj_run_log_display_page() {
-  local view='logs'
-  local input=''
-
-  xmj_font_clear_notice
-  xmj_setting_select_latest_launch_log
-
-  while true; do
-    xmj_render_setting_center_page "$view"
-    xmj_prompt_log_display_input
-    input="${XMJ_LAST_INPUT:-}"
-
-    xmj_handle_script_setting_action "$view" "$input"
-    view="${XMJ_SETTING_NEXT_VIEW:-$view}"
-
-    if [ "$view" = 'home' ] || [ "$view" = 'exit' ]; then
-      return 0
-    fi
-  done
+  xmj_run_backend_display_page
+  return 0
 }
 
 xmj_handle_route() {
@@ -915,7 +899,7 @@ xmj_setting_refresh_log_files() {
     while IFS= read -r file; do
       [ -n "$file" ] || continue
       XMJ_SETTING_LOG_FILES+=("$file")
-    done < <(ls -1t "$log_dir"/*.log 2>/dev/null || true)
+    done < <(ls -1t "$log_dir"/launch-*.log 2>/dev/null || true)
   fi
 
   total="${#XMJ_SETTING_LOG_FILES[@]}"
@@ -977,17 +961,17 @@ xmj_setting_delete_log_file() {
   local file_path="${1:-}"
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
-    xmj_font_set_notice 'warn' '没找到要删除的日志文件。'
+    xmj_font_set_notice 'warn' '没找到要删除的后台日志文件。'
     return 1
   fi
 
   if ! rm -f "$file_path" 2>/dev/null; then
-    xmj_font_set_notice 'warn' "删除日志失败：$(xmj_display_path "$file_path")"
+    xmj_font_set_notice 'warn' "删除后台日志失败：$(xmj_display_path "$file_path")"
     return 1
   fi
 
   xmj_setting_refresh_log_files
-  xmj_font_set_notice 'success' "已删除日志：$(basename "$file_path")"
+  xmj_font_set_notice 'success' "已删除后台日志：$(basename "$file_path")"
   return 0
 }
 
@@ -1011,21 +995,21 @@ xmj_setting_cleanup_old_logs() {
   xmj_setting_refresh_log_files
   total="${#XMJ_SETTING_LOG_FILES[@]}"
   if [ "$total" -le "$keep_count" ]; then
-    xmj_font_set_notice 'info' "当前只有 ${total} 份日志，少于或等于保留数量，无需清理。"
+    xmj_font_set_notice 'info' "当前只有 ${total} 份后台日志，少于或等于保留数量，无需清理。"
     return 0
   fi
 
   for ((index = keep_count; index < total; index += 1)); do
     file_path="${XMJ_SETTING_LOG_FILES[$index]}"
     if ! rm -f "$file_path" 2>/dev/null; then
-      xmj_font_set_notice 'warn' "清理日志失败：$(xmj_display_path "$file_path")"
+      xmj_font_set_notice 'warn' "清理后台日志失败：$(xmj_display_path "$file_path")"
       return 1
     fi
     removed=$((removed + 1))
   done
 
   xmj_setting_refresh_log_files
-  xmj_font_set_notice 'success' "已清理 ${removed} 份旧日志，保留最新 ${keep_count} 份。"
+  xmj_font_set_notice 'success' "已清理 ${removed} 份旧后台日志，保留最新 ${keep_count} 份。"
   return 0
 }
 
@@ -1137,8 +1121,8 @@ xmj_handle_script_setting_action() {
           ;;
         5)
           xmj_font_clear_notice
-          XMJ_SETTING_LOG_SELECTED_INDEX='1'
-          XMJ_SETTING_NEXT_VIEW='logs'
+          xmj_run_backend_display_page
+          XMJ_SETTING_NEXT_VIEW='exit'
           ;;
         *)
           xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 0。'
@@ -1217,7 +1201,7 @@ xmj_handle_script_setting_action() {
           xmj_setting_refresh_log_files
           XMJ_SETTING_LOG_DELETE_TARGET="$(xmj_setting_selected_log_file)"
           if [ -z "${XMJ_SETTING_LOG_DELETE_TARGET:-}" ]; then
-            xmj_font_set_notice 'warn' '当前还没有可删除的日志。'
+            xmj_font_set_notice 'warn' '当前还没有可删除的后台日志。'
           else
             xmj_font_clear_notice
             XMJ_SETTING_NEXT_VIEW='logs_delete_confirm'
@@ -1226,7 +1210,7 @@ xmj_handle_script_setting_action() {
         a|A)
           xmj_setting_refresh_log_files
           if [ "${#XMJ_SETTING_LOG_FILES[@]}" -eq 0 ]; then
-            xmj_font_set_notice 'warn' '当前还没有可清理的日志。'
+            xmj_font_set_notice 'warn' '当前还没有可清理的后台日志。'
           else
             xmj_font_clear_notice
             XMJ_SETTING_NEXT_VIEW='logs_cleanup_confirm'
@@ -1241,15 +1225,15 @@ xmj_handle_script_setting_action() {
           xmj_setting_refresh_log_files
           ;;
         *[!0-9]*)
-          xmj_font_set_notice 'warn' '仅支持输入日志序号、d、a、k、r 或 0。'
+          xmj_font_set_notice 'warn' '仅支持输入后台序号、d、a、k、r 或 0。'
           ;;
         *)
           xmj_setting_refresh_log_files
           display_count="$(xmj_setting_log_display_count)"
           if [ "$display_count" -eq 0 ]; then
-            xmj_font_set_notice 'warn' '当前还没有可查看的日志。'
+            xmj_font_set_notice 'warn' '当前还没有可查看的后台日志。'
           elif [ "$input" -lt 1 ] || [ "$input" -gt "$display_count" ]; then
-            xmj_font_set_notice 'warn' "这里只展示最新 1 - ${display_count} 号日志。"
+            xmj_font_set_notice 'warn' "这里只展示最新 1 - ${display_count} 号后台日志。"
           else
             xmj_font_clear_notice
             XMJ_SETTING_LOG_SELECTED_INDEX="$input"
