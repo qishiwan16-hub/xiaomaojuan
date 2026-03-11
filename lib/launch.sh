@@ -1201,8 +1201,7 @@ xmj_launch_wait_for_running() {
 
   if [ "$slow_notice_at" -ge "$wait_limit" ]; then
     slow_notice_at='0'
-      ;;
-  esac
+  fi
 
   XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
   if xmj_launch_can_probe_url; then
