@@ -39,13 +39,13 @@ xmj_maintenance_create_archive() {
       cd "$repo_path" || exit 1
       printf '%s\n' "${items[@]}" \
         | LC_ALL=C sort \
-        | zip -1rq "$archive_file" -@
+        | zip -0rq "$archive_file" -@
     ) >>"$shell_log" 2>&1
     if [ $? -ne 0 ]; then
       return 1
     fi
 
-    zip -1qj "$archive_file" "$meta_file" >>"$shell_log" 2>&1
+    zip -0qj "$archive_file" "$meta_file" >>"$shell_log" 2>&1
     return $?
   fi
 
@@ -63,7 +63,7 @@ repo_path, archive_file, meta_file, *items = sys.argv[1:]
 if not os.path.isdir(repo_path) or not os.path.isfile(meta_file):
     raise SystemExit(1)
 
-with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_STORED) as zf:
     zf.write(meta_file, os.path.basename(meta_file))
     for item in items:
         item_path = os.path.join(repo_path, item)
@@ -122,6 +122,8 @@ xmj_maintenance_create_backup() {
   local temp_root=''
   local item=''
   local meta_file=''
+  local archive_total_bytes='0'
+  local archive_pid=''
   local joined_items=''
   local joined_missing=''
   local current_version=''
@@ -223,12 +225,15 @@ xmj_maintenance_create_backup() {
     return 1
   fi
 
-  xmj_maintenance_log "$logger_name" "开始为${op_name}自动打包备份。"
-  xmj_backup_start_busy '生成备份中'
-
   meta_file="$temp_root/$(xmj_maintenance_backup_meta_name)"
+  archive_total_bytes="$(xmj_backup_estimate_input_bytes "$meta_file" "$repo_path" "${items[@]}")"
 
-  if ! xmj_maintenance_create_archive "$repo_path" "$archive_file" "$shell_log" "$meta_file" "${items[@]}"; then
+  xmj_maintenance_log "$logger_name" "开始为${op_name}自动打包备份。"
+  xmj_backup_start_busy '生成备份中' "$archive_file" "$archive_total_bytes" "$joined_items"
+
+  xmj_maintenance_create_archive "$repo_path" "$archive_file" "$shell_log" "$meta_file" "${items[@]}" &
+  archive_pid="$!"
+  if ! xmj_backup_wait_archive_job "$archive_pid" '生成备份中'; then
     xmj_backup_stop_busy
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='生成备份压缩包失败，可温和查看日志。'
@@ -254,7 +259,6 @@ xmj_maintenance_create_backup() {
   fi
   return 0
 }
-
 xmj_maintenance_restore_backup() {
   local repo_path="${1:-}"
   local logger_name="${2:-}"
@@ -987,6 +991,11 @@ xmj_maintenance_backup_dir() {
 
 declare -ga XMJ_BACKUP_ARCHIVE_FILES=()
 declare -ga XMJ_BACKUP_ARCHIVE_SCOPES=()
+XMJ_BACKUP_BUSY_ARCHIVE_FILE=''
+XMJ_BACKUP_BUSY_TOTAL_BYTES='0'
+XMJ_BACKUP_BUSY_CURRENT_BYTES='0'
+XMJ_BACKUP_BUSY_PERCENT='0'
+XMJ_BACKUP_BUSY_DETAIL=''
 
 xmj_backup_busy_tip() {
   case "${1:-备份处理中}" in
@@ -1008,11 +1017,201 @@ xmj_backup_busy_tip() {
   esac
 }
 
+xmj_backup_normalize_bytes() {
+  local bytes="${1:-0}"
+
+  bytes="${bytes//[[:space:]]/}"
+  case "$bytes" in
+    ''|*[!0-9]*)
+      bytes='0'
+      ;;
+  esac
+
+  printf '%s' "$bytes"
+}
+
+xmj_backup_bytes_text() {
+  local bytes='0'
+
+  bytes="$(xmj_backup_normalize_bytes "${1:-0}")"
+  if [ "$bytes" -ge 1073741824 ]; then
+    printf '%s GB' "$(((bytes + 1073741823) / 1073741824))"
+    return 0
+  fi
+
+  if [ "$bytes" -ge 1048576 ]; then
+    printf '%s MB' "$(((bytes + 1048575) / 1048576))"
+    return 0
+  fi
+
+  if [ "$bytes" -ge 1024 ]; then
+    printf '%s KB' "$(((bytes + 1023) / 1024))"
+    return 0
+  fi
+
+  printf '%s B' "$bytes"
+}
+
+xmj_backup_file_size_bytes() {
+  local file_path="${1:-}"
+  local bytes='0'
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  bytes="$(wc -c <"$file_path" 2>/dev/null || true)"
+  printf '%s' "$(xmj_backup_normalize_bytes "$bytes")"
+}
+
+xmj_backup_path_size_bytes() {
+  local path_value="${1:-}"
+  local blocks='0'
+
+  if [ -z "$path_value" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  if [ -f "$path_value" ]; then
+    xmj_backup_file_size_bytes "$path_value"
+    return 0
+  fi
+
+  if [ ! -d "$path_value" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  blocks="$(du -sk "$path_value" 2>/dev/null | awk 'NR==1 {print $1}')"
+  blocks="$(xmj_backup_normalize_bytes "$blocks")"
+  printf '%s' "$((blocks * 1024))"
+}
+
+xmj_backup_estimate_input_bytes() {
+  local meta_file="${1:-}"
+  local repo_path="${2:-}"
+  local total_bytes='0'
+  local item=''
+  local item_bytes='0'
+
+  shift 2
+  total_bytes="$(xmj_backup_file_size_bytes "$meta_file")"
+
+  for item in "$@"; do
+    item_bytes="$(xmj_backup_path_size_bytes "$repo_path/$item")"
+    total_bytes=$((total_bytes + item_bytes))
+  done
+
+  if [ "$total_bytes" -lt 1024 ]; then
+    total_bytes='1024'
+  fi
+
+  total_bytes=$((total_bytes + (total_bytes / 20) + 65536))
+  printf '%s' "$total_bytes"
+}
+
+xmj_backup_progress_bar_text() {
+  local percent='0'
+  local width="${2:-24}"
+  local filled='0'
+  local index='0'
+  local bar=''
+
+  percent="$(xmj_backup_normalize_bytes "${1:-0}")"
+  if [ "$percent" -gt 100 ]; then
+    percent='100'
+  fi
+
+  if [ "$width" -le 0 ]; then
+    width='24'
+  fi
+
+  filled=$((percent * width / 100))
+  for ((index = 0; index < width; index += 1)); do
+    if [ "$index" -lt "$filled" ]; then
+      bar="${bar}#"
+    else
+      bar="${bar}-"
+    fi
+  done
+
+  printf '%s' "$bar"
+}
+
+xmj_backup_refresh_busy_progress() {
+  local mode="${1:-running}"
+  local total_bytes='0'
+  local current_bytes='0'
+  local percent='0'
+
+  total_bytes="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_TOTAL_BYTES:-0}")"
+  current_bytes="$(xmj_backup_file_size_bytes "${XMJ_BACKUP_BUSY_ARCHIVE_FILE:-}")"
+
+  if [ "$total_bytes" -le 0 ]; then
+    total_bytes='0'
+    percent='0'
+  else
+    if [ "$current_bytes" -gt "$total_bytes" ]; then
+      current_bytes="$total_bytes"
+    fi
+    percent=$((current_bytes * 100 / total_bytes))
+  fi
+
+  if [ "$mode" = 'done' ] && [ "$total_bytes" -gt 0 ]; then
+    current_bytes="$total_bytes"
+    percent='100'
+  elif [ "$percent" -ge 100 ]; then
+    percent='99'
+  fi
+
+  XMJ_BACKUP_BUSY_CURRENT_BYTES="$current_bytes"
+  XMJ_BACKUP_BUSY_PERCENT="$percent"
+}
+
+xmj_backup_wait_archive_job() {
+  local job_pid="${1:-}"
+  local action_text="${2:-备份处理中}"
+  local status='0'
+  local last_percent='-1'
+
+  if [ -z "$job_pid" ]; then
+    return 1
+  fi
+
+  while kill -0 "$job_pid" 2>/dev/null; do
+    xmj_backup_refresh_busy_progress 'running'
+    if [ "${XMJ_BACKUP_BUSY_PERCENT:-0}" != "$last_percent" ]; then
+      xmj_render_backup_busy_frame "$action_text"
+      last_percent="${XMJ_BACKUP_BUSY_PERCENT:-0}"
+    fi
+    sleep 1 || true
+  done
+
+  wait "$job_pid"
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    xmj_backup_refresh_busy_progress 'done'
+    xmj_render_backup_busy_frame "$action_text"
+  fi
+
+  return "$status"
+}
+
 xmj_render_backup_busy_frame() {
   local action_text="${1:-备份处理中}"
   local detail_text=''
+  local total_bytes='0'
+  local current_bytes='0'
+  local percent='0'
+  local progress_bar=''
 
   detail_text="$(xmj_backup_busy_tip "$action_text")"
+  total_bytes="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_TOTAL_BYTES:-0}")"
+  current_bytes="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_CURRENT_BYTES:-0}")"
+  percent="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_PERCENT:-0}")"
+  progress_bar="$(xmj_backup_progress_bar_text "$percent" '28')"
 
   xmj_clear_screen
   xmj_render_header
@@ -1020,21 +1219,38 @@ xmj_render_backup_busy_frame() {
   printf '\n'
   xmj_render_setting_card "$action_text" '命令细节已隐藏，猫猫正在安静处理。' "$detail_text"
   printf '\n'
-  printf '  %b(ฅ́˘ฅ̀)♡ %s%b\n' "$XMJ_PINK" "$action_text" "$XMJ_RESET"
+  printf '  %b(archive)%b %b%s%b\n' "$XMJ_PINK" "$XMJ_RESET" "$XMJ_WHITE" "$action_text" "$XMJ_RESET"
+  if [ "$total_bytes" -gt 0 ]; then
+    printf '  %b[%s]%b %b%s%%%b\n' "$XMJ_BLUE_SOFT" "$progress_bar" "$XMJ_RESET" "$XMJ_WHITE" "$percent" "$XMJ_RESET"
+    xmj_render_fact_line '当前进度' "$(xmj_backup_bytes_text "$current_bytes") / $(xmj_backup_bytes_text "$total_bytes")"
+  fi
+  if [ -n "${XMJ_BACKUP_BUSY_DETAIL:-}" ]; then
+    xmj_render_fact_line '处理范围' "${XMJ_BACKUP_BUSY_DETAIL}"
+  fi
   printf '\n'
-  xmj_rule_line "$XMJ_BORDER" '─' 68
+  xmj_rule_line "$XMJ_BORDER" '-' 68
 }
 
 xmj_backup_start_busy() {
   local action_text="${1:-备份处理中}"
 
+  XMJ_BACKUP_BUSY_ARCHIVE_FILE="${2:-}"
+  XMJ_BACKUP_BUSY_TOTAL_BYTES="$(xmj_backup_normalize_bytes "${3:-0}")"
+  XMJ_BACKUP_BUSY_CURRENT_BYTES='0'
+  XMJ_BACKUP_BUSY_PERCENT='0'
+  XMJ_BACKUP_BUSY_DETAIL="${4:-}"
+
   xmj_render_backup_busy_frame "$action_text"
 }
 
 xmj_backup_stop_busy() {
+  XMJ_BACKUP_BUSY_ARCHIVE_FILE=''
+  XMJ_BACKUP_BUSY_TOTAL_BYTES='0'
+  XMJ_BACKUP_BUSY_CURRENT_BYTES='0'
+  XMJ_BACKUP_BUSY_PERCENT='0'
+  XMJ_BACKUP_BUSY_DETAIL=''
   return 0
 }
-
 xmj_backup_notice_color() {
   case "${1:-info}" in
     warn)

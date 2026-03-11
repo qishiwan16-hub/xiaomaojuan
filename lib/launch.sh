@@ -11,6 +11,7 @@ xmj_launch_timestamp() {
 
 xmj_launch_reset_state() {
   XMJ_LAUNCH_LOG_FILE=''
+  XMJ_LAUNCH_RUNTIME_FILE=''
   XMJ_LAUNCH_LOG_CURSOR='0'
   XMJ_LAUNCH_RUNTIME_LOG_START='0'
   XMJ_LAUNCH_READY_SCAN_LINE='1'
@@ -71,8 +72,14 @@ xmj_launch_prepare_log_file() {
     return 1
   fi
 
+  XMJ_LAUNCH_RUNTIME_FILE="$XMJ_LOG_DIR/runtime-$stamp.log"
+  if ! : >"$XMJ_LAUNCH_RUNTIME_FILE" 2>/dev/null; then
+    return 1
+  fi
+
   xmj_launch_log_line '小猫卷启动日志已创建。'
   xmj_launch_log_line "目标目录：${XMJ_SILLYTAVERN_PATH:-未设置}"
+  xmj_launch_log_line "运行输出文件：${XMJ_LAUNCH_RUNTIME_FILE}"
   return 0
 }
 
@@ -183,6 +190,19 @@ xmj_launch_extract_entry_url_from_log() {
   printf '%s' "$url"
 }
 
+xmj_launch_extract_runtime_file_from_log() {
+  local log_file="${1:-}"
+  local runtime_file=''
+
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  runtime_file="$(sed -n 's/.*运行输出文件：\(.*\)$/\1/p' "$log_file" 2>/dev/null | tail -n 1)"
+  printf '%s' "$runtime_file"
+}
+
 xmj_launch_runtime_marker_text() {
   printf '%s' '__XMJ_RUNTIME_LOG_START__'
 }
@@ -192,6 +212,7 @@ xmj_launch_extract_runtime_log_start() {
   local marker_line=''
   local marker_text=''
   local success_line=''
+  local runtime_start=''
 
   if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
     printf '%s' '0'
@@ -201,6 +222,16 @@ xmj_launch_extract_runtime_log_start() {
   marker_text="$(xmj_launch_runtime_marker_text)"
   marker_line="$(grep -nF "$marker_text" "$log_file" 2>/dev/null | tail -n 1)"
   marker_line="${marker_line%%:*}"
+  runtime_start="$(sed -n 's/.*运行输出起始行：\([0-9][0-9]*\)$/\1/p' "$log_file" 2>/dev/null | tail -n 1)"
+
+  case "$runtime_start" in
+    ''|*[!0-9]*)
+      ;;
+    *)
+      printf '%s' "$runtime_start"
+      return 0
+      ;;
+  esac
 
   case "$marker_line" in
     ''|*[!0-9]*)
@@ -245,7 +276,7 @@ xmj_launch_normalize_runtime_url() {
 }
 
 xmj_launch_detect_runtime_entry_url_from_log() {
-  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local file="${XMJ_LAUNCH_RUNTIME_FILE:-${XMJ_LAUNCH_LOG_FILE:-}}"
   local start_line="${XMJ_LAUNCH_READY_SCAN_LINE:-1}"
   local total_lines='0'
   local url=''
@@ -255,7 +286,7 @@ xmj_launch_detect_runtime_entry_url_from_log() {
     return 1
   fi
 
-  total_lines="$(xmj_launch_log_line_count)"
+  total_lines="$(xmj_launch_log_line_count "$file")"
   case "$start_line" in
     ''|*[!0-9]*)
       start_line='1'
@@ -351,11 +382,16 @@ xmj_launch_attach_latest_session() {
   fi
 
   XMJ_LAUNCH_LOG_FILE="$log_file"
+  XMJ_LAUNCH_RUNTIME_FILE="$(xmj_launch_extract_runtime_file_from_log "$log_file")"
   XMJ_LAUNCH_PID="$(xmj_launch_extract_pid_from_log "$log_file")"
   XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_extract_entry_url_from_log "$log_file")"
   XMJ_LAUNCH_RUNTIME_LOG_START="$(xmj_launch_extract_runtime_log_start "$log_file")"
   XMJ_LAUNCH_USE_PGID="$(xmj_launch_extract_use_pgid_from_log "$log_file")"
   XMJ_LAUNCH_ATTACHED_MODE='1'
+
+  if [ -z "${XMJ_LAUNCH_ENTRY_URL:-}" ] && [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
+    XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_extract_entry_url_from_log "$XMJ_LAUNCH_RUNTIME_FILE")"
+  fi
 
   if [ -z "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
     XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
@@ -367,10 +403,11 @@ xmj_launch_attach_latest_session() {
 xmj_launch_mark_runtime_log_start() {
   local total_lines='0'
 
-  xmj_launch_log_line "$(xmj_launch_runtime_marker_text)"
-  total_lines="$(xmj_launch_log_line_count)"
+  total_lines="$(xmj_launch_log_line_count "${XMJ_LAUNCH_RUNTIME_FILE:-}")"
   XMJ_LAUNCH_RUNTIME_LOG_START=$((total_lines + 1))
-  XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+  XMJ_LAUNCH_LOG_CURSOR='0'
+  xmj_launch_log_line "运行输出起始行：${XMJ_LAUNCH_RUNTIME_LOG_START}"
+  xmj_launch_log_line '运行输出已切换到前台直显，不再继续写入启动日志。'
 }
 
 xmj_launch_can_probe_url() {
@@ -437,7 +474,7 @@ xmj_launch_update_tavern_state() {
   commit_name="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
   branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
   describe_name="$(git -C "$repo_path" describe --tags --always --dirty 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
-  exact_tag="$(git -C "$repo_path" describe --tags --exact-match 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+  exact_tag="$(git -C "$repo_path" tag --points-at HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" | head -n 1 || true)"
 
   XMJ_LAUNCH_TAVERN_COMMIT="${commit_name:-unknown}"
   XMJ_LAUNCH_TAVERN_TAG="$exact_tag"
@@ -760,6 +797,7 @@ xmj_launch_try_recover_dependency_import_assertion_failure() {
   local node_version=''
   local node_major=''
   local legacy_file=''
+  local scope=''
 
   if [ "${XMJ_LAUNCH_IMPORT_ASSERT_RETRY:-0}" = '1' ]; then
     return 1
@@ -783,25 +821,48 @@ xmj_launch_try_recover_dependency_import_assertion_failure() {
     return 1
   fi
 
-  legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
-  if [ -z "$legacy_file" ]; then
-    return 1
-  fi
+  for scope in repo dependencies; do
+    case "$scope" in
+      repo)
+        legacy_file="$(xmj_launch_find_legacy_import_assertion_file)"
+        if [ -z "$legacy_file" ]; then
+          continue
+        fi
+        xmj_launch_log_line "启动失败后在仓库目录检测到旧 import assert 语法：${legacy_file}"
+        if ! xmj_launch_auto_fix_import_assertions; then
+          return 1
+        fi
+        legacy_file="$(xmj_launch_find_legacy_import_assertion_file)"
+        if [ -n "$legacy_file" ]; then
+          xmj_launch_log_line "仓库目录里仍残留旧 import assert 语法：${legacy_file}"
+          return 1
+        fi
+        XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
+        xmj_launch_log_line '已完成仓库目录旧 import assert 自动修复，准备重新启动酒馆。'
+        return 0
+        ;;
+      *)
+        legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
+        if [ -z "$legacy_file" ]; then
+          continue
+        fi
+        xmj_launch_log_line "启动失败后在依赖目录检测到旧 import assert 语法：${legacy_file}"
+        if ! xmj_launch_auto_fix_dependency_import_assertions; then
+          return 1
+        fi
+        legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
+        if [ -n "$legacy_file" ]; then
+          xmj_launch_log_line "依赖目录里仍残留旧 import assert 语法：${legacy_file}"
+          return 1
+        fi
+        XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
+        xmj_launch_log_line '已完成依赖目录旧 import assert 自动修复，准备重新启动酒馆。'
+        return 0
+        ;;
+    esac
+  done
 
-  xmj_launch_log_line "启动失败后在依赖目录检测到旧 import assert 语法：${legacy_file}"
-  if ! xmj_launch_auto_fix_dependency_import_assertions; then
-    return 1
-  fi
-
-  legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
-  if [ -n "$legacy_file" ]; then
-    xmj_launch_log_line "依赖目录里仍残留旧 import assert 语法：${legacy_file}"
-    return 1
-  fi
-
-  XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
-  xmj_launch_log_line '已完成依赖目录旧 import assert 自动修复，准备重新启动酒馆。'
-  return 0
+  return 1
 }
 
 xmj_launch_check_node_runtime() {
@@ -858,9 +919,6 @@ xmj_launch_check_environment() {
   if ! xmj_launch_check_node_runtime; then
     return 1
   fi
-  if ! xmj_launch_check_import_assertion_compat; then
-    return 1
-  fi
   xmj_launch_log_line '酒馆目录检查通过。'
   return 0
 }
@@ -898,19 +956,13 @@ xmj_launch_detect_command() {
   local node_entry_file=''
 
   package_json="$repo_path/package.json"
-  node_entry_file="$(xmj_launch_detect_node_entry_file || true)"
 
-  if [ -n "$node_entry_file" ]; then
-    if ! command -v node >/dev/null 2>&1; then
-      xmj_launch_fail 'env' '未检测到 Node.js' "检测到 ${node_entry_file}，但当前环境无法执行 node。"
-      return 1
-    fi
-
-    XMJ_LAUNCH_METHOD='node_entry'
-    XMJ_LAUNCH_METHOD_TEXT="node ./${node_entry_file}"
-    XMJ_LAUNCH_COMMAND="node ./${node_entry_file}"
-    XMJ_LAUNCH_ENTRY_FILE="$node_entry_file"
-    xmj_launch_log_line "检测到 ${node_entry_file}，本次优先直启 Node 主入口，减少额外启动壳层。"
+  if [ -f "$repo_path/start.sh" ]; then
+    XMJ_LAUNCH_METHOD='start_sh'
+    XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
+    XMJ_LAUNCH_COMMAND='bash ./start.sh'
+    XMJ_LAUNCH_ENTRY_FILE='start.sh'
+    xmj_launch_log_line '检测到 start.sh，本次按酒馆原生启动方式执行。'
     return 0
   fi
 
@@ -924,16 +976,22 @@ xmj_launch_detect_command() {
     XMJ_LAUNCH_METHOD_TEXT='npm run start'
     XMJ_LAUNCH_COMMAND='npm run start'
     XMJ_LAUNCH_ENTRY_FILE='package.json'
-    xmj_launch_log_line '检测到 package.json 的 start 脚本，准备使用 npm run start 启动喵~'
+    xmj_launch_log_line '检测到 package.json 的 start 脚本，本次按酒馆原生启动方式执行。'
     return 0
   fi
 
-  if [ -f "$repo_path/start.sh" ]; then
-    XMJ_LAUNCH_METHOD='start_sh'
-    XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
-    XMJ_LAUNCH_COMMAND='bash ./start.sh'
-    XMJ_LAUNCH_ENTRY_FILE='start.sh'
-    xmj_launch_log_line '未找到可直启的 Node 主入口，回退使用 bash ./start.sh 启动。'
+  node_entry_file="$(xmj_launch_detect_node_entry_file || true)"
+  if [ -n "$node_entry_file" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      xmj_launch_fail 'env' '未检测到 Node.js' "检测到 ${node_entry_file}，但当前环境无法执行 node。"
+      return 1
+    fi
+
+    XMJ_LAUNCH_METHOD='node_entry'
+    XMJ_LAUNCH_METHOD_TEXT="node ./${node_entry_file}"
+    XMJ_LAUNCH_COMMAND="node ./${node_entry_file}"
+    XMJ_LAUNCH_ENTRY_FILE="$node_entry_file"
+    xmj_launch_log_line "未找到酒馆原生启动脚本，回退使用 node ./${node_entry_file}。"
     return 0
   fi
 
@@ -1095,6 +1153,9 @@ xmj_launch_start_process() {
       if [ -n "$merged_node_options" ]; then
         export NODE_OPTIONS="$merged_node_options"
       fi
+      if command -v script >/dev/null 2>&1; then
+        exec setsid script -qefc "${XMJ_LAUNCH_COMMAND}" "${XMJ_LAUNCH_RUNTIME_FILE}" >/dev/null 2>&1 </dev/null
+      fi
       case "${XMJ_LAUNCH_METHOD:-}" in
         node_entry)
           exec setsid node "$XMJ_LAUNCH_ENTRY_FILE" </dev/null
@@ -1109,14 +1170,21 @@ xmj_launch_start_process() {
           exec setsid bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
           ;;
       esac
-    ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
+    ) >>"${XMJ_LAUNCH_RUNTIME_FILE:-$XMJ_LAUNCH_LOG_FILE}" 2>&1 &
     XMJ_LAUNCH_USE_PGID='1'
-    xmj_launch_log_line '已使用 setsid 创建独立进程组。'
+    if command -v script >/dev/null 2>&1; then
+      xmj_launch_log_line '已使用 script + setsid 保留运行期原生终端输出。'
+    else
+      xmj_launch_log_line '已使用 setsid 创建独立进程组。'
+    fi
   else
     (
       cd "$repo_path" || exit 1
       if [ -n "$merged_node_options" ]; then
         export NODE_OPTIONS="$merged_node_options"
+      fi
+      if command -v script >/dev/null 2>&1; then
+        exec script -qefc "${XMJ_LAUNCH_COMMAND}" "${XMJ_LAUNCH_RUNTIME_FILE}" >/dev/null 2>&1 </dev/null
       fi
       case "${XMJ_LAUNCH_METHOD:-}" in
         node_entry)
@@ -1132,8 +1200,12 @@ xmj_launch_start_process() {
           exec bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
           ;;
       esac
-    ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
-    xmj_launch_log_line '当前环境未检测到 setsid，已退回普通后台启动。'
+    ) >>"${XMJ_LAUNCH_RUNTIME_FILE:-$XMJ_LAUNCH_LOG_FILE}" 2>&1 &
+    if command -v script >/dev/null 2>&1; then
+      xmj_launch_log_line '当前环境未检测到 setsid，已使用 script 保留运行期原生终端输出。'
+    else
+      xmj_launch_log_line '当前环境未检测到 setsid，已退回普通后台启动。'
+    fi
   fi
 
   XMJ_LAUNCH_PID="$!"
@@ -1211,9 +1283,22 @@ xmj_launch_stop_process() {
   return 1
 }
 
+xmj_launch_display_log_file() {
+  if [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ] && [ -f "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
+    printf '%s' "${XMJ_LAUNCH_RUNTIME_FILE}"
+    return 0
+  fi
+
+  printf '%s' "${XMJ_LAUNCH_LOG_FILE:-}"
+}
+
 xmj_launch_log_line_count() {
-  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local file="${1:-}"
   local count='0'
+
+  if [ -z "$file" ]; then
+    file="$(xmj_launch_display_log_file)"
+  fi
 
   if [ -z "$file" ] || [ ! -f "$file" ]; then
     printf '%s' '0'
@@ -1235,8 +1320,12 @@ xmj_launch_log_line_count() {
 xmj_launch_print_log_lines() {
   local start_line="${1:-1}"
   local end_line="${2:-0}"
-  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local file="${3:-}"
   local line=''
+
+  if [ -z "$file" ]; then
+    file="$(xmj_launch_display_log_file)"
+  fi
 
   if [ -z "$file" ] || [ ! -f "$file" ]; then
     return 0
@@ -1248,17 +1337,20 @@ xmj_launch_print_log_lines() {
 
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
-    printf '  %b%s%b\n' "$XMJ_WHITE" "$line" "$XMJ_RESET"
+    printf '  %s%b\n' "$line" "$XMJ_RESET"
   done < <(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null)
 }
 
 xmj_launch_render_log_snapshot() {
   local snapshot_size="${1:-18}"
+  local file=''
   local total_lines='0'
   local start_line='1'
   local runtime_start="${XMJ_LAUNCH_RUNTIME_LOG_START:-0}"
 
-  total_lines="$(xmj_launch_log_line_count)"
+  file="$(xmj_launch_display_log_file)"
+
+  total_lines="$(xmj_launch_log_line_count "$file")"
   if [ "$snapshot_size" -lt 1 ]; then
     snapshot_size='18'
   fi
@@ -1278,7 +1370,7 @@ xmj_launch_render_log_snapshot() {
   fi
 
   if [ "$total_lines" -ge "$start_line" ]; then
-    xmj_launch_print_log_lines "$start_line" "$total_lines"
+    xmj_launch_print_log_lines "$start_line" "$total_lines" "$file"
   elif [ "$runtime_start" -gt 0 ]; then
     printf '  %b酒馆已经在运行，等待新的后台输出。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   else
@@ -1289,12 +1381,14 @@ xmj_launch_render_log_snapshot() {
 }
 
 xmj_launch_print_new_log_lines() {
+  local file=''
   local total_lines='0'
   local start_line='1'
   local cursor="${XMJ_LAUNCH_LOG_CURSOR:-0}"
   local runtime_start="${XMJ_LAUNCH_RUNTIME_LOG_START:-0}"
 
-  total_lines="$(xmj_launch_log_line_count)"
+  file="$(xmj_launch_display_log_file)"
+  total_lines="$(xmj_launch_log_line_count "$file")"
 
   case "$runtime_start" in
     ''|*[!0-9]*)
@@ -1315,7 +1409,7 @@ xmj_launch_print_new_log_lines() {
   fi
 
   start_line=$((cursor + 1))
-  xmj_launch_print_log_lines "$start_line" "$total_lines"
+  xmj_launch_print_log_lines "$start_line" "$total_lines" "$file"
   XMJ_LAUNCH_LOG_CURSOR="$total_lines"
 }
 
