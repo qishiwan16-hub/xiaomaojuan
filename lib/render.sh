@@ -1753,6 +1753,12 @@ xmj_render_launch_progress() {
 
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  printf '  %b♡ 启动日志%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ] || [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
+    xmj_launch_render_boot_log_snapshot '18'
+  else
+    printf '  %b启动日志还没有准备好，新的输出会追加在这里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  fi
 }
 
 xmj_render_launch_running_screen() {
@@ -1764,7 +1770,7 @@ xmj_render_launch_running_screen() {
   printf '\n'
   xmj_render_setting_card \
     '运行中' \
-    '已经等到 Go to 后切进运行页，下面只继续显示运行期后台输出。' \
+    '已经等到 Go to 后切进运行页，下面会先保留启动尾部，再继续显示运行期后台输出。' \
     '按 Ctrl+C 会结束这次启动的酒馆，并回到首页。'
   printf '\n'
   printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
@@ -1790,7 +1796,7 @@ xmj_render_launch_running_screen() {
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
   printf '  %b♡ 酒馆后台%b\n' "$XMJ_PINK" "$XMJ_RESET"
-  printf '  %b这里只直显当前这次运行的新输出，不会保留到日志或 06。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里会先保留启动期最后几行，后面继续直显这次运行的新输出；不会保留到日志或 06。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
 }
 

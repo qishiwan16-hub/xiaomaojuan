@@ -1582,6 +1582,46 @@ xmj_launch_render_log_snapshot() {
   XMJ_LAUNCH_LOG_CURSOR="$total_lines"
 }
 
+xmj_launch_render_boot_log_snapshot() {
+  local snapshot_size="${1:-18}"
+  local file=''
+  local total_lines='0'
+  local start_line='1'
+  local end_line='0'
+  local runtime_start="${XMJ_LAUNCH_RUNTIME_LOG_START:-0}"
+
+  file="$(xmj_launch_display_log_file)"
+  total_lines="$(xmj_launch_log_line_count "$file")"
+  if [ "$snapshot_size" -lt 1 ]; then
+    snapshot_size='18'
+  fi
+
+  case "$runtime_start" in
+    ''|*[!0-9]*)
+      runtime_start='0'
+      ;;
+  esac
+
+  if [ "$runtime_start" -gt 1 ]; then
+    end_line=$((runtime_start - 1))
+  else
+    end_line="$total_lines"
+  fi
+
+  if [ "$end_line" -lt 1 ]; then
+    printf '  %b启动日志还没有输出，新的后台日志会追加在这里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+    XMJ_LAUNCH_LOG_CURSOR='0'
+    return 0
+  fi
+
+  if [ "$end_line" -gt "$snapshot_size" ]; then
+    start_line=$((end_line - snapshot_size + 1))
+  fi
+
+  xmj_launch_print_log_lines "$start_line" "$end_line" "$file"
+  XMJ_LAUNCH_LOG_CURSOR="$end_line"
+}
+
 xmj_launch_print_new_log_lines() {
   local file=''
   local total_lines='0'
@@ -1749,6 +1789,8 @@ xmj_launch_wait_for_running() {
       return 0
     fi
 
+    xmj_launch_print_new_log_lines
+
     sleep 1 || true
   done
 
@@ -1785,10 +1827,11 @@ xmj_launch_handle_interrupt() {
 xmj_launch_follow_running_log() {
   if [ "${XMJ_LAUNCH_LOG_VIEW_STARTED:-0}" != '1' ]; then
     xmj_render_launch_running_screen
+    xmj_launch_render_boot_log_snapshot '18'
     if xmj_launch_runtime_stream_enabled; then
       xmj_launch_enable_frontend_stream_output
     else
-      xmj_launch_render_log_snapshot '18'
+      xmj_launch_print_new_log_lines
     fi
     XMJ_LAUNCH_LOG_VIEW_STARTED='1'
   fi
