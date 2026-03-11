@@ -1609,7 +1609,6 @@ xmj_launch_render_boot_log_snapshot() {
   fi
 
   if [ "$end_line" -lt 1 ]; then
-    printf '  %b启动日志还没有输出，新的后台日志会追加在这里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
     XMJ_LAUNCH_LOG_CURSOR='0'
     return 0
   fi

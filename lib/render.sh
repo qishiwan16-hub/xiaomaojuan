@@ -1753,11 +1753,8 @@ xmj_render_launch_progress() {
 
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
-  printf '  %b♡ 启动日志%b\n' "$XMJ_PINK" "$XMJ_RESET"
   if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ] || [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
     xmj_launch_render_boot_log_snapshot '18'
-  else
-    printf '  %b启动日志还没有准备好，新的输出会追加在这里。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   fi
 }
 
@@ -1796,7 +1793,6 @@ xmj_render_launch_running_screen() {
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
   printf '  %b♡ 酒馆后台%b\n' "$XMJ_PINK" "$XMJ_RESET"
-  printf '  %b这里会先保留启动期最后几行，后面继续直显这次运行的新输出；不会保留到日志或 06。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
 }
 
