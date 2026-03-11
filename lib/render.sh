@@ -1237,6 +1237,9 @@ xmj_setting_view_title() {
     script_update)
       printf '%s' '脚本更新'
       ;;
+    script_branch)
+      printf '%s' '脚本分支'
+      ;;
     script_version)
       printf '%s' '脚本版本'
       ;;
@@ -1271,20 +1274,23 @@ xmj_setting_view_id() {
     script_update)
       printf '%s' '19-3'
       ;;
-    script_version)
+    script_branch)
       printf '%s' '19-4'
       ;;
-    logs)
+    script_version)
       printf '%s' '19-5'
       ;;
+    logs)
+      printf '%s' '19-6'
+      ;;
     logs_keep_count)
-      printf '%s' '19-5-1'
+      printf '%s' '19-6-1'
       ;;
     logs_delete_confirm)
-      printf '%s' '19-5-2'
+      printf '%s' '19-6-2'
       ;;
     logs_cleanup_confirm)
-      printf '%s' '19-5-3'
+      printf '%s' '19-6-3'
       ;;
     *)
       printf '%s' '19'
@@ -1453,6 +1459,9 @@ xmj_render_setting_center_page() {
       ;;
     script_update)
       xmj_render_setting_script_update_page
+      ;;
+    script_branch)
+      xmj_render_setting_script_branch_page
       ;;
     script_version)
       xmj_render_setting_script_version_page
@@ -1942,18 +1951,21 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_setting_card '3 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
   printf '\n'
-  xmj_render_setting_card '4 · 脚本版本' '' "分支：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_setting_card '4 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   printf '\n'
-  xmj_render_setting_card '5 · 后台显示' '' "当前：${log_count} 份后台日志"
+  xmj_render_setting_card '5 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  printf '\n'
+  xmj_render_setting_card '6 · 后台显示' '' "当前：${log_count} 份后台日志"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入字体管理'
   xmj_render_action_item '2' '查看是否自启动'
   xmj_render_action_item '3' '检查脚本更新'
-  xmj_render_action_item '4' '查看脚本版本'
-  xmj_render_action_item '5' '查看后台'
+  xmj_render_action_item '4' '切换脚本分支'
+  xmj_render_action_item '5' '查看脚本版本'
+  xmj_render_action_item '6' '查看后台'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
 }
 
 xmj_render_setting_font_page() {
@@ -2077,6 +2089,30 @@ xmj_render_setting_script_update_page() {
   fi
   xmj_render_action_item '0' '返回设置中心'
   xmj_render_action_footer "$action_hint"
+}
+
+xmj_render_setting_script_branch_page() {
+  xmj_setting_refresh_script_repo_state
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'script_branch')" 'script branch' 'setting'
+  printf '\n'
+  printf '  %b这里切的是小猫卷脚本自己的 Git 分支，不是酒馆分支。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b切完会自动重开脚本，避免界面还停在旧代码上。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_fact_line '脚本版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+  xmj_render_fact_line '上游分支' "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}"
+  xmj_render_fact_line '工作区' "$(xmj_setting_script_worktree_text)"
+  xmj_render_fact_line '远程仓库' "${XMJ_SETTING_SCRIPT_REMOTE:-未配置}"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '切到 main'
+  xmj_render_action_item '2' '切到 test'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
 }
 
 xmj_render_setting_script_version_page() {
@@ -3094,6 +3130,10 @@ xmj_render_script_password_page() {
     script_update)
       title='脚本更新验证'
       summary='更新小猫卷脚本前，要先输入安装密码。'
+      ;;
+    script_branch)
+      title='脚本分支切换验证'
+      summary='切换小猫卷脚本分支前，要先输入安装密码。'
       ;;
   esac
 
