@@ -12,6 +12,7 @@ xmj_launch_timestamp() {
 xmj_launch_reset_state() {
   XMJ_LAUNCH_LOG_FILE=''
   XMJ_LAUNCH_RUNTIME_FILE=''
+  XMJ_LAUNCH_RUNTIME_PENDING_FILE=''
   XMJ_LAUNCH_LOG_CURSOR='0'
   XMJ_LAUNCH_RUNTIME_LOG_START='0'
   XMJ_LAUNCH_READY_SCAN_LINE='1'
@@ -39,6 +40,11 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='0'
   XMJ_LAUNCH_ATTACHED_MODE='0'
   XMJ_LAUNCH_PREVIOUS_INT_TRAP=''
+  XMJ_LAUNCH_STREAM_PIPE=''
+  XMJ_LAUNCH_STREAM_PID=''
+  XMJ_LAUNCH_STREAM_READY_FILE=''
+  XMJ_LAUNCH_STREAM_FRONTEND_FILE=''
+  XMJ_LAUNCH_STREAM_DIRECT='0'
 }
 
 xmj_launch_log_line() {
@@ -49,6 +55,83 @@ xmj_launch_log_line() {
   fi
 
   printf '[%s] %s\n' "$(xmj_launch_timestamp)" "$line" >>"$XMJ_LAUNCH_LOG_FILE"
+}
+
+xmj_launch_runtime_stream_enabled() {
+  if [ "${XMJ_LAUNCH_STREAM_DIRECT:-0}" != '1' ]; then
+    return 1
+  fi
+
+  if [ -z "${XMJ_LAUNCH_STREAM_PIPE:-}" ] || [ ! -p "${XMJ_LAUNCH_STREAM_PIPE:-}" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_launch_runtime_output_target() {
+  if xmj_launch_runtime_stream_enabled \
+    && [ -n "${XMJ_LAUNCH_STREAM_PID:-}" ] \
+    && kill -0 "${XMJ_LAUNCH_STREAM_PID}" 2>/dev/null; then
+    printf '%s' "${XMJ_LAUNCH_STREAM_PIPE}"
+    return 0
+  fi
+
+  printf '%s' "${XMJ_LAUNCH_RUNTIME_FILE:-$XMJ_LAUNCH_LOG_FILE}"
+}
+
+xmj_launch_flush_pending_runtime_output() {
+  if [ -z "${XMJ_LAUNCH_RUNTIME_PENDING_FILE:-}" ] || [ ! -s "${XMJ_LAUNCH_RUNTIME_PENDING_FILE:-}" ]; then
+    return 0
+  fi
+
+  cat "${XMJ_LAUNCH_RUNTIME_PENDING_FILE}" 2>/dev/null || true
+  : >"${XMJ_LAUNCH_RUNTIME_PENDING_FILE}" 2>/dev/null || true
+}
+
+xmj_launch_enable_frontend_stream_output() {
+  if ! xmj_launch_runtime_stream_enabled; then
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_STREAM_FRONTEND_FILE:-}" ]; then
+    : >"${XMJ_LAUNCH_STREAM_FRONTEND_FILE}" 2>/dev/null || true
+  fi
+
+  xmj_launch_flush_pending_runtime_output
+}
+
+xmj_launch_start_runtime_stream_forwarder() {
+  if ! xmj_launch_runtime_stream_enabled; then
+    XMJ_LAUNCH_STREAM_PID=''
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_STREAM_PID:-}" ] && kill -0 "${XMJ_LAUNCH_STREAM_PID}" 2>/dev/null; then
+    return 0
+  fi
+
+  (
+    local line=''
+
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+
+      if [ ! -f "${XMJ_LAUNCH_STREAM_READY_FILE:-}" ]; then
+        printf '%s\n' "$line" >>"${XMJ_LAUNCH_RUNTIME_FILE}"
+        continue
+      fi
+
+      if [ ! -f "${XMJ_LAUNCH_STREAM_FRONTEND_FILE:-}" ]; then
+        printf '%s\n' "$line" >>"${XMJ_LAUNCH_RUNTIME_PENDING_FILE}"
+        continue
+      fi
+
+      printf '%s\n' "$line"
+    done < "${XMJ_LAUNCH_STREAM_PIPE}"
+  ) &
+
+  XMJ_LAUNCH_STREAM_PID="$!"
 }
 
 xmj_launch_prepare_log_file() {
@@ -75,6 +158,25 @@ xmj_launch_prepare_log_file() {
   XMJ_LAUNCH_RUNTIME_FILE="$XMJ_LOG_DIR/runtime-$stamp.log"
   if ! : >"$XMJ_LAUNCH_RUNTIME_FILE" 2>/dev/null; then
     return 1
+  fi
+
+  XMJ_LAUNCH_RUNTIME_PENDING_FILE="$XMJ_LOG_DIR/runtime-$stamp.pending"
+  if ! : >"$XMJ_LAUNCH_RUNTIME_PENDING_FILE" 2>/dev/null; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_STREAM_READY_FILE="$XMJ_LOG_DIR/runtime-$stamp.ready"
+  XMJ_LAUNCH_STREAM_FRONTEND_FILE="$XMJ_LOG_DIR/runtime-$stamp.frontend"
+  rm -f "${XMJ_LAUNCH_STREAM_READY_FILE}" "${XMJ_LAUNCH_STREAM_FRONTEND_FILE}" 2>/dev/null || true
+
+  if command -v mkfifo >/dev/null 2>&1; then
+    XMJ_LAUNCH_STREAM_PIPE="$XMJ_LOG_DIR/runtime-$stamp.pipe"
+    rm -f "${XMJ_LAUNCH_STREAM_PIPE}" 2>/dev/null || true
+    if mkfifo "${XMJ_LAUNCH_STREAM_PIPE}" 2>/dev/null; then
+      XMJ_LAUNCH_STREAM_DIRECT='1'
+    else
+      XMJ_LAUNCH_STREAM_PIPE=''
+    fi
   fi
 
   xmj_launch_log_line '小猫卷启动日志已创建。'
@@ -454,6 +556,9 @@ xmj_launch_mark_runtime_log_start() {
   total_lines="$(xmj_launch_log_line_count "${XMJ_LAUNCH_RUNTIME_FILE:-}")"
   XMJ_LAUNCH_RUNTIME_LOG_START=$((total_lines + 1))
   XMJ_LAUNCH_LOG_CURSOR='0'
+  if [ -n "${XMJ_LAUNCH_STREAM_READY_FILE:-}" ]; then
+    : >"${XMJ_LAUNCH_STREAM_READY_FILE}" 2>/dev/null || true
+  fi
   xmj_launch_log_line "运行输出起始行：${XMJ_LAUNCH_RUNTIME_LOG_START}"
   xmj_launch_log_line '运行输出已切换到前台直显，不再继续写入启动日志。'
 }
@@ -1170,6 +1275,10 @@ xmj_launch_wait_process() {
 
   wait "$pid" 2>/dev/null
   exit_code=$?
+  if [ -n "${XMJ_LAUNCH_STREAM_PID:-}" ]; then
+    wait "${XMJ_LAUNCH_STREAM_PID}" 2>/dev/null || true
+    XMJ_LAUNCH_STREAM_PID=''
+  fi
   XMJ_LAUNCH_EXIT_CODE="$exit_code"
   XMJ_LAUNCH_WAITED='1'
   printf '%s' "$exit_code"
@@ -1178,6 +1287,7 @@ xmj_launch_wait_process() {
 xmj_launch_start_process() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local merged_node_options=''
+  local output_target=''
 
   if [ -z "${XMJ_LAUNCH_COMMAND:-}" ]; then
     xmj_launch_fail 'boot' '缺少启动命令' '当前还没有识别出可用的酒馆启动方式。'
@@ -1194,6 +1304,8 @@ xmj_launch_start_process() {
   else
     xmj_launch_log_line '当前未附加额外的 Node 内存参数。'
   fi
+  xmj_launch_start_runtime_stream_forwarder
+  output_target="$(xmj_launch_runtime_output_target)"
 
   if command -v setsid >/dev/null 2>&1; then
     (
@@ -1202,7 +1314,7 @@ xmj_launch_start_process() {
         export NODE_OPTIONS="$merged_node_options"
       fi
       if command -v script >/dev/null 2>&1; then
-        exec setsid script -qefc "${XMJ_LAUNCH_COMMAND}" "${XMJ_LAUNCH_RUNTIME_FILE}" >/dev/null 2>&1 </dev/null
+        exec setsid script -qefc "${XMJ_LAUNCH_COMMAND}" "${output_target}" >/dev/null 2>&1 </dev/null
       fi
       case "${XMJ_LAUNCH_METHOD:-}" in
         node_entry)
@@ -1218,7 +1330,7 @@ xmj_launch_start_process() {
           exec setsid bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
           ;;
       esac
-    ) >>"${XMJ_LAUNCH_RUNTIME_FILE:-$XMJ_LAUNCH_LOG_FILE}" 2>&1 &
+    ) >>"${output_target}" 2>&1 &
     XMJ_LAUNCH_USE_PGID='1'
     if command -v script >/dev/null 2>&1; then
       xmj_launch_log_line '已使用 script + setsid 保留运行期原生终端输出。'
@@ -1232,7 +1344,7 @@ xmj_launch_start_process() {
         export NODE_OPTIONS="$merged_node_options"
       fi
       if command -v script >/dev/null 2>&1; then
-        exec script -qefc "${XMJ_LAUNCH_COMMAND}" "${XMJ_LAUNCH_RUNTIME_FILE}" >/dev/null 2>&1 </dev/null
+        exec script -qefc "${XMJ_LAUNCH_COMMAND}" "${output_target}" >/dev/null 2>&1 </dev/null
       fi
       case "${XMJ_LAUNCH_METHOD:-}" in
         node_entry)
@@ -1248,7 +1360,7 @@ xmj_launch_start_process() {
           exec bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
           ;;
       esac
-    ) >>"${XMJ_LAUNCH_RUNTIME_FILE:-$XMJ_LAUNCH_LOG_FILE}" 2>&1 &
+    ) >>"${output_target}" 2>&1 &
     if command -v script >/dev/null 2>&1; then
       xmj_launch_log_line '当前环境未检测到 setsid，已使用 script 保留运行期原生终端输出。'
     else
@@ -1629,7 +1741,11 @@ xmj_launch_handle_interrupt() {
 xmj_launch_follow_running_log() {
   if [ "${XMJ_LAUNCH_LOG_VIEW_STARTED:-0}" != '1' ]; then
     xmj_render_launch_running_screen
-    xmj_launch_render_log_snapshot '18'
+    if xmj_launch_runtime_stream_enabled; then
+      xmj_launch_enable_frontend_stream_output
+    else
+      xmj_launch_render_log_snapshot '18'
+    fi
     XMJ_LAUNCH_LOG_VIEW_STARTED='1'
   fi
 
@@ -1639,7 +1755,11 @@ xmj_launch_follow_running_log() {
     fi
 
     if ! xmj_launch_process_alive; then
-      xmj_launch_print_new_log_lines
+      if xmj_launch_runtime_stream_enabled; then
+        xmj_launch_flush_pending_runtime_output
+      else
+        xmj_launch_print_new_log_lines
+      fi
       return 0
     fi
 
@@ -1649,7 +1769,11 @@ xmj_launch_follow_running_log() {
       return 130
     fi
 
-    xmj_launch_print_new_log_lines
+    if xmj_launch_runtime_stream_enabled; then
+      xmj_launch_flush_pending_runtime_output
+    else
+      xmj_launch_print_new_log_lines
+    fi
   done
 }
 
