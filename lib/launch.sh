@@ -207,6 +207,43 @@ xmj_launch_update_tavern_state() {
   return 0
 }
 
+xmj_launch_check_node_runtime() {
+  local node_version=''
+  local runtime_issue=''
+  local fix_hint=''
+
+  if ! command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+
+  node_version="$(node -v 2>/dev/null || true)"
+  if [ -z "$node_version" ]; then
+    node_version='unknown'
+  fi
+
+  xmj_launch_log_line "Node.js 版本：${node_version}"
+
+  if ! declare -F xmj_node_runtime_issue >/dev/null 2>&1; then
+    return 0
+  fi
+
+  runtime_issue="$(xmj_node_runtime_issue "$node_version" || true)"
+  if [ -z "$runtime_issue" ]; then
+    return 0
+  fi
+
+  fix_hint='请先进入 13 异常修复，或在 Termux 执行 pkg install nodejs-lts。'
+  if declare -F xmj_node_runtime_fix_hint >/dev/null 2>&1; then
+    fix_hint="$(xmj_node_runtime_fix_hint)"
+  fi
+
+  xmj_launch_fail \
+    'env' \
+    'Node.js 版本不适合当前酒馆环境' \
+    "${runtime_issue} ${fix_hint} 这类环境常见表现就是启动时报 Unexpected token '{'。"
+  return 1
+}
+
 xmj_launch_check_environment() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
 
@@ -221,6 +258,9 @@ xmj_launch_check_environment() {
   fi
 
   xmj_launch_update_tavern_state
+  if ! xmj_launch_check_node_runtime; then
+    return 1
+  fi
   xmj_launch_log_line '酒馆目录检查通过。'
   return 0
 }

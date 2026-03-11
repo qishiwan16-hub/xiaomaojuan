@@ -2286,6 +2286,12 @@ xmj_render_tavern_setting_page() {
     port_conflict)
       xmj_render_tavern_setting_port_conflict_page
       ;;
+    security_guard)
+      xmj_render_tavern_setting_security_guard_page
+      ;;
+    multi_user_login)
+      xmj_render_tavern_setting_multi_user_login_page
+      ;;
     chat_freeze_fix)
       xmj_render_tavern_setting_chat_freeze_fix_page
       ;;
@@ -2322,6 +2328,12 @@ xmj_tavern_setting_view_title() {
       ;;
     port_conflict)
       printf '%s' '修复端口冲突'
+      ;;
+    security_guard)
+      printf '%s' '安全修复'
+      ;;
+    multi_user_login)
+      printf '%s' '多用户登录'
       ;;
     chat_freeze_fix)
       printf '%s' '聊天加载卡死修复'
@@ -2360,6 +2372,12 @@ xmj_tavern_setting_view_id() {
     port_conflict)
       printf '%s' '20-6'
       ;;
+    security_guard)
+      printf '%s' '20-10'
+      ;;
+    multi_user_login)
+      printf '%s' '20-11'
+      ;;
     chat_freeze_fix)
       printf '%s' '20-7'
       ;;
@@ -2397,6 +2415,12 @@ xmj_tavern_setting_status_text() {
     port_conflict)
       xmj_tavern_setting_port_conflict_status_text
       ;;
+    security_guard)
+      xmj_tavern_setting_security_guard_status_text
+      ;;
+    multi_user_login)
+      xmj_tavern_setting_multi_user_login_status_text
+      ;;
     chat_freeze_fix)
       xmj_tavern_setting_chat_freeze_fix_status_text
       ;;
@@ -2417,7 +2441,7 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
   printf '\n'
-  printf '  %b酒馆设置一共先收这 9 项，猫猫按你给的名字排好了。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b酒馆设置现在一共收这 11 项，猫猫按你给的名字排好了。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '  %b真要切版本且会影响设置时，确认提示还是会放在 03 版本切换里单独弹。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_setting_card '1 · 浏览器跳转' '' "$(xmj_tavern_setting_status_text 'browser_redirect')"
@@ -2437,6 +2461,10 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_setting_card '8 · 美化卡死修复' '' "$(xmj_tavern_setting_status_text 'beautify_freeze_fix')"
   printf '\n'
   xmj_render_setting_card '9 · 修改备份数量' '' "$(xmj_tavern_setting_status_text 'backup_keep_count')"
+  printf '\n'
+  xmj_render_setting_card '10 · 安全修复' '' "$(xmj_tavern_setting_status_text 'security_guard')"
+  printf '\n'
+  xmj_render_setting_card '11 · 多用户登录' '' "$(xmj_tavern_setting_status_text 'multi_user_login')"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '浏览器跳转'
@@ -2448,8 +2476,10 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_action_item '7' '聊天加载卡死修复'
   xmj_render_action_item '8' '美化卡死修复'
   xmj_render_action_item '9' '修改备份数量'
+  xmj_render_action_item '10' '安全修复'
+  xmj_render_action_item '11' '多用户登录'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 0 就好喵'
 }
 
 xmj_render_tavern_setting_browser_redirect_page() {
@@ -2780,6 +2810,67 @@ xmj_render_tavern_setting_port_conflict_page() {
   xmj_render_action_item '端口数字' '直接改成新的端口'
   xmj_render_action_item '0' '返回酒馆设置'
   xmj_render_action_footer '输入新的端口数字 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_security_guard_page() {
+  local config_file=''
+  local current_version=''
+  local compat_floor=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  current_version="$(xmj_tavern_setting_current_version)"
+  compat_floor="$(xmj_maintenance_compat_floor_version)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'security_guard')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会把 hostWhitelist 改成只允许本机访问' \
+    "主要面向 ${compat_floor} 及以上版本；猫猫会把 hostWhitelist 写成 enabled: true、scan: true，并只保留 localhost / 127.0.0.1 / [::1]。" \
+    '如果你平时只在本机或本机浏览器里玩，这样更稳；但局域网和外网访问会一起被拦住，改完后要重开酒馆。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'security_guard')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'security_guard')"
+  xmj_render_fact_line '当前版本' "${current_version:-未读到}"
+  xmj_render_fact_line '建议版本' "${compat_floor} 及以上"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_multi_user_login_page() {
+  local config_file=''
+  local enable_accounts=''
+  local discreet_login=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  enable_accounts="$(xmj_tavern_setting_yaml_top_value "$config_file" 'enableUserAccounts')"
+  discreet_login="$(xmj_tavern_setting_yaml_top_value "$config_file" 'enableDiscreetLogin')"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'multi_user_login')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会开启多用户，并让你选择登录页样式' \
+    '方案 1 是头像列表版：登录页先展示头像和用户名，点头像后再输入密码；方案 2 是账号密码版：直接输入账号和密码。' \
+    '猫猫会改 config.yaml 里的 enableUserAccounts 和 enableDiscreetLogin；改完后重开酒馆生效。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'multi_user_login')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'multi_user_login')"
+  xmj_render_fact_line 'enableUserAccounts' "${enable_accounts:-未写入}"
+  xmj_render_fact_line 'enableDiscreetLogin' "${discreet_login:-未写入}"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '切到头像列表登录页'
+  xmj_render_action_item '2' '切到账号密码登录页'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 切头像列表 / 2 切账号密码 / 0 返回酒馆设置'
 }
 
 xmj_render_tavern_setting_chat_freeze_fix_page() {

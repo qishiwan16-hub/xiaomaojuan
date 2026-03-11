@@ -1648,6 +1648,8 @@ xmj_version_write_history() {
 
 xmj_version_sync_dependencies() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local node_version=''
+  local node_issue=''
 
   if [ ! -f "$repo_path/package.json" ]; then
     XMJ_VERSION_DEPENDENCY_NOTE='未发现 package.json，已跳过依赖同步。'
@@ -1658,6 +1660,15 @@ xmj_version_sync_dependencies() {
   if ! command -v npm >/dev/null 2>&1; then
     xmj_version_fail 'deps' '未检测到 npm' '版本已切换，但当前环境无法完成依赖整理。'
     return 1
+  fi
+
+  if declare -F xmj_node_runtime_issue >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    node_version="$(node -v 2>/dev/null || true)"
+    node_issue="$(xmj_node_runtime_issue "$node_version" || true)"
+    if [ -n "$node_issue" ]; then
+      xmj_version_fail 'deps' 'Node.js 版本不适合依赖同步' "${node_issue} 请先切回 nodejs-lts 后再重试。"
+      return 1
+    fi
   fi
 
   if ! (

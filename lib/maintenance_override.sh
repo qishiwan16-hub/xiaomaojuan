@@ -2348,6 +2348,49 @@ xmj_dependency_find_repair_branch() {
   return 1
 }
 
+xmj_node_major_version() {
+  local version_text="${1:-}"
+  local normalized=''
+
+  normalized="${version_text#v}"
+  normalized="${normalized#V}"
+  if [[ "$normalized" =~ ^([0-9]+) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  printf '%s' ''
+  return 1
+}
+
+xmj_node_runtime_issue() {
+  local version_text="${1:-}"
+  local major=''
+
+  major="$(xmj_node_major_version "$version_text")"
+  if [ -z "$major" ]; then
+    printf '%s' ''
+    return 1
+  fi
+
+  if [ "$major" -lt 18 ]; then
+    printf '%s' "Node.js ${version_text} 过旧，SillyTavern 至少需要 Node.js 18。"
+    return 0
+  fi
+
+  if [ $((major % 2)) -eq 1 ]; then
+    printf '%s' "Node.js ${version_text} 属于非 LTS 奇数版本，Termux 下建议改用 nodejs-lts。"
+    return 0
+  fi
+
+  printf '%s' ''
+  return 1
+}
+
+xmj_node_runtime_fix_hint() {
+  printf '%s' '请先进入 13 异常修复，或在 Termux 执行 pkg install nodejs-lts。'
+}
+
 xmj_dependency_collect_missing_packages() {
   declare -ga XMJ_DEP_MISSING_PACKAGES=()
 
@@ -2355,7 +2398,9 @@ xmj_dependency_collect_missing_packages() {
     XMJ_DEP_MISSING_PACKAGES+=('git')
   fi
 
-  if [ "${XMJ_DEP_NODE_STATE:-missing}" != 'ok' ] || [ "${XMJ_DEP_NPM_STATE:-missing}" != 'ok' ]; then
+  if [ "${XMJ_DEP_NODE_STATE:-missing}" != 'ok' ] \
+    || [ "${XMJ_DEP_NPM_STATE:-missing}" != 'ok' ] \
+    || [ -n "${XMJ_DEP_NODE_RUNTIME_NOTE:-}" ]; then
     XMJ_DEP_MISSING_PACKAGES+=('nodejs-lts')
   fi
 
@@ -2400,6 +2445,10 @@ xmj_dependency_finalize_check() {
     blockers+=('未检测到 node / npm')
   fi
 
+  if [ -n "${XMJ_DEP_NODE_RUNTIME_NOTE:-}" ]; then
+    blockers+=("${XMJ_DEP_NODE_RUNTIME_NOTE}")
+  fi
+
   if [ "${XMJ_DEP_REPO_EXISTS:-0}" = '1' ] && [ "${XMJ_DEP_PACKAGE_JSON:-0}" != '1' ]; then
     blockers+=('目录里未发现 package.json')
   fi
@@ -2432,7 +2481,11 @@ xmj_dependency_finalize_check() {
     XMJ_DEP_CHECK_LEVEL='failure'
     XMJ_DEP_CHECK_SUMMARY='当前环境还不能直接执行酒馆维护。'
     detail_text="$(xmj_dependency_join_parts "${blockers[@]}" "${warnings[@]}")"
-    recommend_text='建议先执行 11 安装依赖或 13 异常修复。'
+    if [ -n "${XMJ_DEP_NODE_RUNTIME_NOTE:-}" ]; then
+      recommend_text='建议先执行 13 异常修复，把 Node.js 切回 nodejs-lts。'
+    else
+      recommend_text='建议先执行 11 安装依赖或 13 异常修复。'
+    fi
   elif [ "${#warnings[@]}" -gt 0 ]; then
     XMJ_DEP_CHECK_LEVEL='warn'
     XMJ_DEP_CHECK_SUMMARY='环境基本可用，但还有几项建议先整理。'
@@ -2492,6 +2545,7 @@ xmj_dependency_collect_context() {
   XMJ_DEP_WORKTREE_DIRTY='0'
   XMJ_DEP_WORKTREE_TEXT='未检测'
   XMJ_DEP_REPAIR_BRANCH=''
+  XMJ_DEP_NODE_RUNTIME_NOTE=''
 
   if [ -n "${XMJ_BACKUP_DIR:-}" ] && [ -d "${XMJ_BACKUP_DIR:-}" ]; then
     XMJ_DEP_BACKUP_DIR_OK='1'
@@ -2509,6 +2563,7 @@ xmj_dependency_collect_context() {
   if command -v node >/dev/null 2>&1; then
     XMJ_DEP_NODE_STATE='ok'
     XMJ_DEP_NODE_VERSION="$(xmj_dependency_capture_first_line node -v)"
+    XMJ_DEP_NODE_RUNTIME_NOTE="$(xmj_node_runtime_issue "$XMJ_DEP_NODE_VERSION" || true)"
   fi
 
   if command -v npm >/dev/null 2>&1; then
@@ -2783,6 +2838,9 @@ xmj_dependency_render_environment_snapshot() {
   xmj_render_fact_line '目录状态' "$(xmj_dependency_bool_text "${XMJ_DEP_REPO_EXISTS:-0}" '已找到' '未找到')"
   xmj_render_fact_line 'Git' "${XMJ_DEP_GIT_VERSION:-未检测到}"
   xmj_render_fact_line 'Node.js' "${XMJ_DEP_NODE_VERSION:-未检测到}"
+  if [ -n "${XMJ_DEP_NODE_RUNTIME_NOTE:-}" ]; then
+    xmj_render_fact_line 'Node.js 提示' "${XMJ_DEP_NODE_RUNTIME_NOTE}"
+  fi
   xmj_render_fact_line 'npm' "${XMJ_DEP_NPM_VERSION:-未检测到}"
   xmj_render_fact_line '压缩工具' "$(xmj_dependency_archive_state_text)"
   xmj_render_fact_line 'package.json' "$(xmj_dependency_bool_text "${XMJ_DEP_PACKAGE_JSON:-0}" '已找到' '未找到')"
@@ -2838,6 +2896,9 @@ xmj_render_dependency_status_page() {
   xmj_render_fact_line 'origin' "${XMJ_DEP_REMOTE_URL:-未配置}"
   xmj_render_fact_line 'detached HEAD' "$(xmj_dependency_bool_text "${XMJ_DEP_DETACHED:-0}" '是' '否')"
   xmj_render_fact_line 'Node.js' "${XMJ_DEP_NODE_VERSION:-未检测到}"
+  if [ -n "${XMJ_DEP_NODE_RUNTIME_NOTE:-}" ]; then
+    xmj_render_fact_line 'Node.js 提示' "${XMJ_DEP_NODE_RUNTIME_NOTE}"
+  fi
   xmj_render_fact_line 'npm' "${XMJ_DEP_NPM_VERSION:-未检测到}"
 
   if [ -n "$recommend_text" ]; then
@@ -2974,6 +3035,8 @@ xmj_dependency_install_termux_packages() {
 xmj_dependency_sync_project_dependencies() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local shell_log=''
+  local node_version=''
+  local node_issue=''
 
   shell_log="$(xmj_maintenance_shell_log_target "${XMJ_DEP_LOG_FILE:-}")"
 
@@ -2992,6 +3055,15 @@ xmj_dependency_sync_project_dependencies() {
   if ! command -v npm >/dev/null 2>&1; then
     XMJ_DEP_LAST_ERROR='未检测到 npm，无法执行 npm install。'
     return 1
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node_version="$(node -v 2>/dev/null || true)"
+    node_issue="$(xmj_node_runtime_issue "$node_version" || true)"
+    if [ -n "$node_issue" ]; then
+      XMJ_DEP_LAST_ERROR="${node_issue} $(xmj_node_runtime_fix_hint)"
+      return 1
+    fi
   fi
 
   xmj_dependency_log_line '开始执行 npm install。'

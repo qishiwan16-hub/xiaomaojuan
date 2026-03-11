@@ -1362,6 +1362,38 @@ xmj_tavern_setting_yaml_top_value() {
   printf '%s' ''
 }
 
+xmj_tavern_setting_yaml_section_text() {
+  local file_path="${1:-}"
+  local section="${2:-}"
+  local line=''
+  local in_section='0'
+  local section_text=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$section" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$in_section" = '1' ] && [[ "$line" =~ ^[^[:space:]#][^:]*:[[:space:]]* ]]; then
+      break
+    fi
+
+    if [[ "$line" =~ ^${section}:[[:space:]]*($|#) ]]; then
+      in_section='1'
+    fi
+
+    if [ "$in_section" = '1' ]; then
+      if [ -n "$section_text" ]; then
+        section_text="${section_text}"$'\n'
+      fi
+      section_text="${section_text}${line}"
+    fi
+  done <"$file_path"
+
+  printf '%s' "$section_text"
+}
+
 xmj_tavern_setting_json_key_value() {
   local file_path="${1:-}"
   local key="${2:-}"
@@ -1548,6 +1580,82 @@ xmj_tavern_setting_set_yaml_section_value() {
       printf '%s:\n' "$section"
       printf '  %s: %s\n' "$key" "$value"
     } >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_tavern_setting_replace_yaml_section_block() {
+  local file_path="${1:-}"
+  local section="${2:-}"
+  local block_text="${3:-}"
+  local temp_file=''
+  local line=''
+  local in_section='0'
+  local replaced='0'
+  local wrote_any='0'
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$section" ] || [ -z "$block_text" ]; then
+    return 1
+  fi
+
+  temp_file="${file_path}.tmp.$$"
+  if ! : >"$temp_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    wrote_any='1'
+
+    if [ "$in_section" = '1' ] && [[ "$line" =~ ^[^[:space:]#][^:]*:[[:space:]]* ]]; then
+      if [ "$replaced" != '1' ]; then
+        if ! printf '%s\n' "$block_text" >>"$temp_file"; then
+          rm -f "$temp_file" 2>/dev/null || true
+          return 1
+        fi
+        replaced='1'
+      fi
+      in_section='0'
+    fi
+
+    if [[ "$line" =~ ^${section}:[[:space:]]*($|#) ]]; then
+      in_section='1'
+      continue
+    fi
+
+    if [ "$in_section" = '1' ]; then
+      continue
+    fi
+
+    if ! printf '%s\n' "$line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  done <"$file_path"
+
+  if [ "$in_section" = '1' ] && [ "$replaced" != '1' ]; then
+    if ! printf '%s\n' "$block_text" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+    replaced='1'
+  fi
+
+  if [ "$replaced" != '1' ]; then
+    if [ "$wrote_any" = '1' ] && ! printf '\n' >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+
+    if ! printf '%s\n' "$block_text" >>"$temp_file"; then
       rm -f "$temp_file" 2>/dev/null || true
       return 1
     fi
@@ -2163,6 +2271,57 @@ xmj_tavern_setting_random_safe_port() {
   printf '%s' "$candidate"
 }
 
+xmj_tavern_setting_current_version() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  printf '%s' "$(xmj_maintenance_repo_version "$repo_path")"
+}
+
+xmj_tavern_setting_host_whitelist_local_block() {
+  cat <<'EOF'
+hostWhitelist:
+  enabled: true
+  scan: true
+  hosts:
+    - localhost
+    - 127.0.0.1
+    - "[::1]"
+EOF
+}
+
+xmj_tavern_setting_host_whitelist_is_local_only() {
+  local config_file="${1:-}"
+  local section_text=''
+  local enabled_value=''
+  local scan_value=''
+
+  if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  section_text="$(xmj_tavern_setting_yaml_section_text "$config_file" 'hostWhitelist')"
+  if [ -z "$section_text" ]; then
+    return 1
+  fi
+
+  enabled_value="$(xmj_tavern_setting_yaml_section_value "$config_file" 'hostWhitelist' 'enabled')"
+  scan_value="$(xmj_tavern_setting_yaml_section_value "$config_file" 'hostWhitelist' 'scan')"
+
+  if [ "$enabled_value" != 'true' ] || [ "$scan_value" != 'true' ]; then
+    return 1
+  fi
+
+  [[ "$section_text" =~ [[:space:]]-[[:space:]]localhost ]] || return 1
+  [[ "$section_text" =~ [[:space:]]-[[:space:]]127\.0\.0\.1 ]] || return 1
+  [[ "$section_text" == *"[::1]"* ]] || return 1
+  return 0
+}
+
 xmj_tavern_setting_file_chat_limit_key_label() {
   local scope="${1:-}"
   local section="${2:-}"
@@ -2443,6 +2602,65 @@ xmj_tavern_setting_beautify_freeze_fix_status_text() {
   printf '当前：%s 的主题是 %s' "$user_name" "${theme_value:-未读到}"
 }
 
+xmj_tavern_setting_security_guard_status_text() {
+  local config_file=''
+  local current_version=''
+  local compat_floor=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  current_version="$(xmj_tavern_setting_current_version)"
+  compat_floor="$(xmj_maintenance_compat_floor_version)"
+
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到酒馆配置文件'
+    return 0
+  fi
+
+  if [ -z "$(xmj_maintenance_extract_semver "$current_version")" ]; then
+    printf '当前：版本未识别（%s）' "${current_version:-未读到}"
+    return 0
+  fi
+
+  if xmj_maintenance_version_lt "$current_version" "$compat_floor"; then
+    printf '当前：%s 低于 %s' "$current_version" "$compat_floor"
+    return 0
+  fi
+
+  if xmj_tavern_setting_host_whitelist_is_local_only "$config_file"; then
+    printf '%s' '当前：已限制为本机访问'
+    return 0
+  fi
+
+  printf '%s' '当前：还没套用本机防护'
+}
+
+xmj_tavern_setting_multi_user_login_status_text() {
+  local config_file=''
+  local enable_accounts=''
+  local discreet_login=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到酒馆配置文件'
+    return 0
+  fi
+
+  enable_accounts="$(xmj_tavern_setting_yaml_top_value "$config_file" 'enableUserAccounts')"
+  discreet_login="$(xmj_tavern_setting_yaml_top_value "$config_file" 'enableDiscreetLogin')"
+
+  if [ "$enable_accounts" != 'true' ]; then
+    printf '%s' '当前：多用户未开启'
+    return 0
+  fi
+
+  if [ "$discreet_login" = 'true' ]; then
+    printf '%s' '当前：账号密码登录页'
+    return 0
+  fi
+
+  printf '%s' '当前：头像列表登录页'
+}
+
 xmj_tavern_setting_update_stutter_user() {
   local user_name="${1:-}"
 
@@ -2620,6 +2838,79 @@ xmj_tavern_setting_update_port_conflict() {
   fi
 
   xmj_font_set_notice 'success' "已把酒馆 port 和小猫卷访问端口一起改成 ${port_value}；重开酒馆后生效。"
+  return 0
+}
+
+xmj_tavern_setting_apply_security_guard_fix() {
+  local config_file=''
+  local current_version=''
+  local compat_floor=''
+  local block_text=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  current_version="$(xmj_tavern_setting_current_version)"
+  compat_floor="$(xmj_maintenance_compat_floor_version)"
+
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  if [ -z "$(xmj_maintenance_extract_semver "$current_version")" ]; then
+    xmj_font_set_notice 'warn' "当前酒馆版本未识别：${current_version:-未读到}；这一项主要面向 ${compat_floor} 及以上版本。"
+    return 1
+  fi
+
+  if xmj_maintenance_version_lt "$current_version" "$compat_floor"; then
+    xmj_font_set_notice 'warn' "当前酒馆版本 ${current_version} 低于 ${compat_floor}；这一项先别直接套。"
+    return 1
+  fi
+
+  block_text="$(xmj_tavern_setting_host_whitelist_local_block)"
+  if ! xmj_tavern_setting_replace_yaml_section_block "$config_file" 'hostWhitelist' "$block_text"; then
+    xmj_font_set_notice 'warn' "安全修复没写进去：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已把 hostWhitelist 改成仅允许 localhost / 127.0.0.1 / [::1]；局域网或外网访问会被拦住，重开酒馆后生效。"
+  return 0
+}
+
+xmj_tavern_setting_apply_multi_user_login_mode() {
+  local mode="${1:-avatar_list}"
+  local config_file=''
+  local discreet_value='false'
+  local mode_text='头像列表登录页'
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  case "$mode" in
+    discreet_password)
+      discreet_value='true'
+      mode_text='账号密码登录页'
+      ;;
+    *)
+      mode='avatar_list'
+      discreet_value='false'
+      mode_text='头像列表登录页'
+      ;;
+  esac
+
+  if ! xmj_tavern_setting_set_yaml_top_value "$config_file" 'enableUserAccounts' 'true'; then
+    xmj_font_set_notice 'warn' "多用户开关没写进去：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_yaml_top_value "$config_file" 'enableDiscreetLogin' "$discreet_value"; then
+    xmj_font_set_notice 'warn' "登录页模式没写进去：$(xmj_display_path "$config_file")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已开启多用户，并切到${mode_text}；重开酒馆后生效。"
   return 0
 }
 
@@ -2837,8 +3128,16 @@ xmj_handle_tavern_setting_action() {
           xmj_font_clear_notice
           XMJ_TAVERN_SETTING_NEXT_VIEW='backup_keep_count'
           ;;
+        10)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='security_guard'
+          ;;
+        11)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='multi_user_login'
+          ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 0。'
           ;;
       esac
       ;;
@@ -2961,6 +3260,37 @@ xmj_handle_tavern_setting_action() {
           ;;
         *)
           xmj_tavern_setting_update_port_conflict "$input"
+          ;;
+      esac
+      ;;
+    security_guard)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_tavern_setting_apply_security_guard_fix
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 0。'
+          ;;
+      esac
+      ;;
+    multi_user_login)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_tavern_setting_apply_multi_user_login_mode 'avatar_list'
+          ;;
+        2)
+          xmj_tavern_setting_apply_multi_user_login_mode 'discreet_password'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;
