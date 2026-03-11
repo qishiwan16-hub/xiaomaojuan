@@ -207,6 +207,198 @@ xmj_launch_update_tavern_state() {
   return 0
 }
 
+xmj_launch_file_has_legacy_import_assertion() {
+  local file_path="${1:-}"
+  local line=''
+  local in_import='0'
+  local import_lines='0'
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$in_import" != '1' ]; then
+      if [[ "$line" =~ ^[[:space:]]*import([[:space:]]|\{|\"|\') ]]; then
+        in_import='1'
+        import_lines='1'
+      else
+        continue
+      fi
+    else
+      import_lines=$((import_lines + 1))
+    fi
+
+    if [[ "$line" =~ assert[[:space:]]*\{ ]]; then
+      return 0
+    fi
+
+    if [[ "$line" =~ \;[[:space:]]*$ ]] || [ "$import_lines" -ge 8 ]; then
+      in_import='0'
+      import_lines='0'
+    fi
+  done <"$file_path"
+
+  return 1
+}
+
+xmj_launch_find_legacy_import_assertion_file() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local file_path=''
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while IFS= read -r file_path || [ -n "$file_path" ]; do
+    if xmj_launch_file_has_legacy_import_assertion "$file_path"; then
+      printf '%s' "$file_path"
+      return 0
+    fi
+  done < <(
+    find "$repo_path" \
+      \( -path "$repo_path/.git" -o -path "$repo_path/node_modules" -o -path "$repo_path/.next" -o -path "$repo_path/dist" \) -prune \
+      -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -print 2>/dev/null
+  )
+
+  printf '%s' ''
+}
+
+xmj_launch_patch_import_assertion_file() {
+  local file_path="${1:-}"
+  local temp_file=''
+  local line=''
+  local new_line=''
+  local in_import='0'
+  local import_lines='0'
+  local updated='0'
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    return 1
+  fi
+
+  temp_file="${file_path}.tmp.$$"
+  if ! : >"$temp_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    new_line="$line"
+
+    if [ "$in_import" != '1' ]; then
+      if [[ "$line" =~ ^[[:space:]]*import([[:space:]]|\{|\"|\') ]]; then
+        in_import='1'
+        import_lines='1'
+      fi
+    else
+      import_lines=$((import_lines + 1))
+    fi
+
+    if [ "$in_import" = '1' ] && [[ "$line" =~ assert[[:space:]]*\{ ]]; then
+      new_line="$(printf '%s\n' "$line" | sed 's/assert[[:space:]]*{/with {/')"
+      if [ "$new_line" != "$line" ]; then
+        updated='1'
+      fi
+    fi
+
+    if ! printf '%s\n' "$new_line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+
+    if [ "$in_import" = '1' ] && { [[ "$line" =~ \;[[:space:]]*$ ]] || [ "$import_lines" -ge 8 ]; }; then
+      in_import='0'
+      import_lines='0'
+    fi
+  done <"$file_path"
+
+  if [ "$updated" != '1' ]; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 0
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_launch_auto_fix_import_assertions() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local file_path=''
+  local fixed_count='0'
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    return 1
+  fi
+
+  while IFS= read -r file_path || [ -n "$file_path" ]; do
+    if ! xmj_launch_file_has_legacy_import_assertion "$file_path"; then
+      continue
+    fi
+
+    if ! xmj_launch_patch_import_assertion_file "$file_path"; then
+      xmj_launch_log_line "旧 import assert 自动修复失败：${file_path}"
+      return 1
+    fi
+
+    fixed_count=$((fixed_count + 1))
+    xmj_launch_log_line "已自动修复旧 import assert 语法：${file_path}"
+  done < <(
+    find "$repo_path" \
+      \( -path "$repo_path/.git" -o -path "$repo_path/node_modules" -o -path "$repo_path/.next" -o -path "$repo_path/dist" \) -prune \
+      -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -print 2>/dev/null
+  )
+
+  [ "$fixed_count" -gt 0 ]
+}
+
+xmj_launch_check_import_assertion_compat() {
+  local node_version=''
+  local node_major=''
+  local legacy_file=''
+  local short_file=''
+
+  if ! command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! declare -F xmj_node_major_version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  node_version="$(node -v 2>/dev/null || true)"
+  node_major="$(xmj_node_major_version "$node_version" || true)"
+
+  if [ -z "$node_major" ] || [ "$node_major" -lt 22 ]; then
+    return 0
+  fi
+
+  legacy_file="$(xmj_launch_find_legacy_import_assertion_file)"
+  if [ -z "$legacy_file" ]; then
+    return 0
+  fi
+
+  xmj_launch_log_line "检测到旧 import assert 语法，准备自动修复：${legacy_file}"
+  if xmj_launch_auto_fix_import_assertions; then
+    legacy_file="$(xmj_launch_find_legacy_import_assertion_file)"
+    if [ -z "$legacy_file" ]; then
+      xmj_launch_log_line '旧 import assert 语法已自动改成 with，继续启动。'
+      return 0
+    fi
+  fi
+
+  short_file="${legacy_file#${XMJ_SILLYTAVERN_PATH%/}/}"
+  xmj_launch_fail \
+    'env' \
+    '旧 import assert 语法自动修复失败' \
+    "当前是 ${node_version}，而 ${short_file:-$legacy_file} 里还在用 import ... assert { type: 'json' }。请手动改成 with { type: 'json' }，或换回 Node 20.x。"
+  return 1
+}
+
 xmj_launch_check_node_runtime() {
   local node_version=''
   local runtime_issue=''
@@ -259,6 +451,9 @@ xmj_launch_check_environment() {
 
   xmj_launch_update_tavern_state
   if ! xmj_launch_check_node_runtime; then
+    return 1
+  fi
+  if ! xmj_launch_check_import_assertion_compat; then
     return 1
   fi
   xmj_launch_log_line '酒馆目录检查通过。'
