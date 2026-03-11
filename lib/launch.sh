@@ -101,12 +101,21 @@ xmj_launch_access_host() {
   esac
 }
 
-xmj_launch_entry_url() {
-  local host=''
-  local port="${XMJ_TAVERN_PORT:-8000}"
-  local path="${XMJ_TAVERN_ENTRY_PATH:-/}"
+xmj_launch_build_url() {
+  local host="${1:-127.0.0.1}"
+  local port="${2:-8000}"
+  local path="${3:-/}"
 
-  host="$(xmj_launch_access_host)"
+  case "$path" in
+    '')
+      path='/'
+      ;;
+    /*)
+      ;;
+    *)
+      path="/$path"
+      ;;
+  esac
 
   case "$host" in
     \[*\])
@@ -117,6 +126,15 @@ xmj_launch_entry_url() {
   esac
 
   printf 'http://%s:%s%s' "$host" "$port" "$path"
+}
+
+xmj_launch_entry_url() {
+  local host=''
+  local port="${XMJ_TAVERN_PORT:-8000}"
+  local path="${XMJ_TAVERN_ENTRY_PATH:-/}"
+
+  host="$(xmj_launch_access_host)"
+  xmj_launch_build_url "$host" "$port" "$path"
 }
 
 xmj_launch_latest_log_file() {
@@ -154,10 +172,131 @@ xmj_launch_extract_entry_url_from_log() {
 
   url="$(sed -n \
     -e 's/.*酒馆入口已可访问：\(http[^[:space:]]*\).*/\1/p' \
+    -e 's/.*已从后台日志识别到入口：\(http[^[:space:]]*\).*/\1/p' \
     -e 's/.*准备检测酒馆入口：\(http[^[:space:]]*\).*/\1/p' \
     -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
     "$log_file" 2>/dev/null | tail -n 1)"
   printf '%s' "$url"
+}
+
+xmj_launch_normalize_runtime_url() {
+  local url="${1:-}"
+  local access_host=''
+
+  if [ -z "$url" ]; then
+    printf '%s' ''
+    return 1
+  fi
+
+  access_host="$(xmj_launch_access_host)"
+  url="$(printf '%s' "$url" | sed \
+    -e "s#://0\\.0\\.0\\.0:#://${access_host}:#g" \
+    -e 's#://\[::\]:#://127.0.0.1:#g' \
+    -e 's#://localhost:#://127.0.0.1:#g')"
+
+  printf '%s' "$url"
+}
+
+xmj_launch_detect_runtime_entry_url_from_log() {
+  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local port="${XMJ_TAVERN_PORT:-8000}"
+  local line=''
+  local candidate=''
+  local url=''
+
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    printf '%s' ''
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+
+    case "$line" in
+      *http://*|*https://*)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    case "$line" in
+      *准备检测酒馆入口：*|*补充检测入口：*|*酒馆入口已可访问：*|*进入链接：*|*已从后台日志识别到入口：*)
+        continue
+        ;;
+    esac
+
+    candidate="$(printf '%s\n' "$line" | sed -n 's#.*\(https\?://[^[:space:]]*\).*#\1#p' | tail -n 1)"
+    if [ -z "$candidate" ]; then
+      continue
+    fi
+
+    candidate="$(xmj_launch_normalize_runtime_url "$candidate")"
+
+    case "$candidate" in
+      *":${port}"*|*":${port}/"*)
+        url="$candidate"
+        ;;
+      *)
+        case "$line" in
+          *[Ll]istening*|*[Rr]eady*|*[Rr]unning*|*[Gg]o\ to*|*[Oo]pen*|*启动完成*|*已启动*|*可访问*)
+            url="$candidate"
+            ;;
+        esac
+        ;;
+    esac
+  done < <(tail -n 60 "$file" 2>/dev/null || cat "$file" 2>/dev/null)
+
+  if [ -n "$url" ]; then
+    printf '%s' "$url"
+    return 0
+  fi
+
+  printf '%s' ''
+  return 1
+}
+
+xmj_launch_probe_candidate_urls() {
+  local port="${XMJ_TAVERN_PORT:-8000}"
+  local path="${XMJ_TAVERN_ENTRY_PATH:-/}"
+  local access_host=''
+  local detected_url=''
+  local candidate=''
+  local seen='|'
+
+  access_host="$(xmj_launch_access_host)"
+  detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
+
+  for candidate in \
+    "${XMJ_LAUNCH_ENTRY_URL:-}" \
+    "$detected_url" \
+    "$(xmj_launch_build_url "$access_host" "$port" "$path")" \
+    "$(xmj_launch_build_url "$access_host" "$port" "/")" \
+    "$(xmj_launch_build_url '127.0.0.1' "$port" "$path")" \
+    "$(xmj_launch_build_url '127.0.0.1' "$port" "/")" \
+    "$(xmj_launch_build_url 'localhost' "$port" "$path")" \
+    "$(xmj_launch_build_url 'localhost' "$port" "/")"; do
+    if [ -z "$candidate" ]; then
+      continue
+    fi
+
+    case "$seen" in
+      *"|$candidate|"*)
+        continue
+        ;;
+    esac
+
+    seen="${seen}${candidate}|"
+    printf '%s\n' "$candidate"
+  done
+}
+
+xmj_launch_wait_limit_seconds() {
+  printf '%s' '300'
+}
+
+xmj_launch_slow_notice_seconds() {
+  printf '%s' '150'
 }
 
 xmj_launch_extract_use_pgid_from_log() {
@@ -212,12 +351,12 @@ xmj_launch_endpoint_available() {
   fi
 
   if command -v curl >/dev/null 2>&1; then
-    curl -sS --connect-timeout 2 --max-time 3 -o /dev/null "$url" >/dev/null 2>&1
+    curl -sS --connect-timeout 1 --max-time 2 -o /dev/null "$url" >/dev/null 2>&1
     return $?
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -q -T 3 -O /dev/null "$url" >/dev/null 2>&1
+    wget -q -T 2 -O /dev/null "$url" >/dev/null 2>&1
     return $?
   fi
 
@@ -1016,47 +1155,6 @@ xmj_launch_render_log_snapshot() {
   XMJ_LAUNCH_LOG_CURSOR="$total_lines"
 }
 
-xmj_launch_open_live_log_view() {
-  if [ "${XMJ_LAUNCH_LOG_VIEW_STARTED:-0}" = '1' ]; then
-    return 0
-  fi
-
-  printf '\n'
-  printf '  %b♡ 后台输出%b\n' "$XMJ_PINK" "$XMJ_RESET"
-  printf '\n'
-  xmj_launch_render_log_snapshot '18'
-  XMJ_LAUNCH_LOG_VIEW_STARTED='1'
-  return 0
-}
-
-xmj_launch_show_running_notice() {
-  if [ "${XMJ_LAUNCH_RUNNING_NOTICE_SHOWN:-0}" = '1' ]; then
-    return 0
-  fi
-
-  printf '\n'
-  xmj_rule_line "$XMJ_BORDER" '─' 68
-  printf '  %b♡ 启动完成%b\n' "$XMJ_PINK" "$XMJ_RESET"
-
-  if [ -n "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
-    xmj_render_fact_line '进入链接' "${XMJ_LAUNCH_ENTRY_URL}"
-  fi
-
-  if [ -n "${XMJ_LAUNCH_PID:-}" ]; then
-    xmj_render_fact_line 'PID' "${XMJ_LAUNCH_PID}"
-  fi
-
-  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
-    xmj_render_fact_line '日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
-  fi
-
-  printf '  %b下面继续显示酒馆后台输出，按 Ctrl+C 可以结束这次启动。%b\n' "$XMJ_MIST" "$XMJ_RESET"
-  printf '\n'
-
-  XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='1'
-  return 0
-}
-
 xmj_launch_print_new_log_lines() {
   local total_lines='0'
   local start_line='1'
@@ -1079,13 +1177,55 @@ xmj_launch_print_new_log_lines() {
 
 xmj_launch_wait_for_running() {
   local step='0'
-  local wait_limit='45'
+  local wait_limit=''
+  local slow_notice_at=''
+  local slow_notice_shown='0'
   local should_probe='0'
+  local candidate_url=''
+  local detected_url=''
+  local logged_probe_urls='|'
+
+  wait_limit="$(xmj_launch_wait_limit_seconds)"
+  case "$wait_limit" in
+    ''|*[!0-9]*)
+      wait_limit='300'
+      ;;
+  esac
+
+  slow_notice_at="$(xmj_launch_slow_notice_seconds)"
+  case "$slow_notice_at" in
+    ''|*[!0-9]*)
+      slow_notice_at='150'
+      ;;
+  esac
+
+  if [ "$slow_notice_at" -ge "$wait_limit" ]; then
+    slow_notice_at='0'
+      ;;
+  esac
 
   XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
   if xmj_launch_can_probe_url; then
     should_probe='1'
-    xmj_launch_log_line "准备检测酒馆入口：${XMJ_LAUNCH_ENTRY_URL}"
+    while IFS= read -r candidate_url || [ -n "$candidate_url" ]; do
+      if [ -z "$candidate_url" ]; then
+        continue
+      fi
+
+      case "$logged_probe_urls" in
+        *"|$candidate_url|"*)
+          continue
+          ;;
+      esac
+
+      if [ "$logged_probe_urls" = '|' ]; then
+        xmj_launch_log_line "准备检测酒馆入口：${candidate_url}"
+      else
+        xmj_launch_log_line "补充检测入口：${candidate_url}"
+      fi
+
+      logged_probe_urls="${logged_probe_urls}${candidate_url}|"
+    done < <(xmj_launch_probe_candidate_urls)
   else
     xmj_launch_log_line '当前环境未检测到 curl 或 wget，将按进程存活判定启动完成。'
   fi
@@ -1095,35 +1235,63 @@ xmj_launch_wait_for_running() {
       return 130
     fi
 
+    if [ "$slow_notice_at" -gt 0 ] && [ "$slow_notice_shown" != '1' ] && [ "$step" -ge "$slow_notice_at" ]; then
+      slow_notice_shown='1'
+      xmj_launch_log_line "启动等待已超过 ${slow_notice_at} 秒，继续等待直到 ${wait_limit} 秒。"
+      xmj_render_launch_progress \
+        'boot' \
+        '启动较久' \
+        "这次启动已经超过 ${slow_notice_at} 秒，可能还在编译前端或整理插件；猫猫会继续等到 ${wait_limit} 秒。"
+    fi
+
     if ! xmj_launch_process_alive; then
-      xmj_launch_print_new_log_lines
       xmj_launch_wait_process >/dev/null
       xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
       return 1
     fi
 
-    if [ "$should_probe" = '1' ]; then
-      if xmj_launch_endpoint_available "$XMJ_LAUNCH_ENTRY_URL"; then
-        xmj_launch_log_line "酒馆入口已可访问：${XMJ_LAUNCH_ENTRY_URL}"
-        xmj_launch_log_line '酒馆进程已进入运行阶段。'
-        xmj_launch_print_new_log_lines
-        xmj_launch_show_running_notice
-        return 0
+    detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
+    if [ -n "$detected_url" ]; then
+      if [ "$detected_url" != "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
+        xmj_launch_log_line "已从后台日志识别到入口：${detected_url}"
       fi
+      XMJ_LAUNCH_ENTRY_URL="$detected_url"
+      xmj_launch_log_line '后台日志已显示酒馆入口，按日志判定进入运行阶段。'
+      return 0
+    fi
+
+    if [ "$should_probe" = '1' ]; then
+      while IFS= read -r candidate_url || [ -n "$candidate_url" ]; do
+        if [ -z "$candidate_url" ]; then
+          continue
+        fi
+
+        case "$logged_probe_urls" in
+          *"|$candidate_url|"*)
+            ;;
+          *)
+            xmj_launch_log_line "补充检测入口：${candidate_url}"
+            logged_probe_urls="${logged_probe_urls}${candidate_url}|"
+            ;;
+        esac
+
+        if xmj_launch_endpoint_available "$candidate_url"; then
+          XMJ_LAUNCH_ENTRY_URL="$candidate_url"
+          xmj_launch_log_line "酒馆入口已可访问：${XMJ_LAUNCH_ENTRY_URL}"
+          xmj_launch_log_line '酒馆进程已进入运行阶段。'
+          return 0
+        fi
+      done < <(xmj_launch_probe_candidate_urls)
     elif [ "$step" -ge 2 ]; then
       xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
       xmj_launch_log_line "进入链接：${XMJ_LAUNCH_ENTRY_URL}"
-      xmj_launch_print_new_log_lines
-      xmj_launch_show_running_notice
       return 0
     fi
 
     sleep 1 || true
-    xmj_launch_print_new_log_lines
   done
 
   if ! xmj_launch_process_alive; then
-    xmj_launch_print_new_log_lines
     xmj_launch_wait_process >/dev/null
     xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
     return 1
@@ -1135,8 +1303,6 @@ xmj_launch_wait_for_running() {
   fi
 
   xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
-  xmj_launch_print_new_log_lines
-  xmj_launch_show_running_notice
   return 0
 }
 
@@ -1336,8 +1502,6 @@ xmj_run_tavern_launch() {
         "$XMJ_LAUNCH_DETAIL"
       return 0
     fi
-
-    xmj_launch_open_live_log_view
 
     if xmj_launch_wait_for_running; then
       break
