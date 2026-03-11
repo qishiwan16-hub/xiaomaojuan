@@ -76,8 +76,36 @@ xmj_run_log_display_page() {
   return 0
 }
 
+xmj_route_normalize_home_input() {
+  local input="${1:-}"
+
+  input="${input//$'\r'/}"
+  input="${input//０/0}"
+  input="${input//１/1}"
+  input="${input//２/2}"
+  input="${input//３/3}"
+  input="${input//４/4}"
+  input="${input//５/5}"
+  input="${input//６/6}"
+  input="${input//７/7}"
+  input="${input//８/8}"
+  input="${input//９/9}"
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+
+  case "$input" in
+    [0-9])
+      input="0$input"
+      ;;
+  esac
+
+  printf '%s' "$input"
+}
+
 xmj_handle_route() {
   local input="${1:-}"
+
+  input="$(xmj_route_normalize_home_input "$input")"
 
   case "$input" in
     00)
