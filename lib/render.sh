@@ -1682,6 +1682,12 @@ xmj_render_launch_progress() {
   xmj_render_launch_stage_line 'boot' "$current_stage" 'running'
   xmj_render_launch_stage_line 'running' "$current_stage" 'running'
   xmj_render_launch_tavern_state
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_LAUNCH_LOG_FILE")"
+  fi
+
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
 }
@@ -1708,6 +1714,10 @@ xmj_render_launch_running_screen() {
   printf '\n'
   if [ -n "$entry_url" ]; then
     xmj_render_fact_line '进入链接' "$entry_url"
+  fi
+
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_LAUNCH_LOG_FILE")"
   fi
 
   if [ -n "${XMJ_LAUNCH_PID:-}" ]; then
@@ -1762,11 +1772,25 @@ xmj_render_launch_result() {
   xmj_render_launch_stage_line 'running' "$current_stage" "$stage_mode"
   xmj_render_launch_tavern_state
 
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '日志' "$(xmj_display_path "$XMJ_LAUNCH_LOG_FILE")"
+  fi
+
   if [ "$auto_back" = '1' ]; then
     printf '\n'
     xmj_rule_line "$XMJ_BORDER" '鈹€' 68
     printf '  %b马上回到首页喵%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
     return 0
+  fi
+
+  if [ "$result_mode" = 'failure' ] || [ "$result_mode" = 'exited' ]; then
+    printf '\n'
+    xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+    printf '  %b♡ 最近日志%b\n' "$XMJ_PINK" "$XMJ_RESET"
+    printf '  %b下面直接展示最近输出，方便马上看报错。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+    printf '\n'
+    xmj_launch_render_log_snapshot '18'
   fi
 
   xmj_render_page_footer '按回车返回首页'
