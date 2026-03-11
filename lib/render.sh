@@ -1754,8 +1754,8 @@ xmj_render_launch_running_screen() {
   xmj_render_page_title "${XMJ_MENU_LABEL['01']}" 'launch tavern' 'update'
   printf '\n'
   xmj_render_setting_card \
-    '启动完成' \
-    '酒馆已经在后台运行，下面会继续显示酒馆后台输出。' \
+    '运行中' \
+    '已经等到 Go to 后切进运行页，下面只继续显示运行期后台输出。' \
     '按 Ctrl+C 会结束这次启动的酒馆，并回到首页。'
   printf '\n'
   printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
