@@ -429,7 +429,7 @@ xmj_update_run_backup() {
     "$repo_path" \
     'xmj_update_log_line' \
     "$XMJ_UPDATE_LOG_FILE" \
-    '一键更新' \
+    '安装更新' \
     "${XMJ_UPDATE_BEFORE_VERSION:-}" \
     ''; then
     xmj_update_fail 'backup' '自动备份失败' "${XMJ_MAINT_LAST_ERROR:-未能顺利生成 zip 备份。}"
@@ -659,7 +659,7 @@ xmj_run_tavern_update() {
     return 0
   fi
 
-  xmj_update_log_line '开始执行 02 一键更新。'
+  xmj_update_log_line '开始执行 02 安装更新。'
 
   xmj_render_update_progress \
     'env' \

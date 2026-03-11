@@ -99,7 +99,7 @@ xmj_maintenance_compat_floor_version() {
 }
 
 xmj_maintenance_tavern_setting_hint() {
-  printf '%s' '更新维护里的 02 一键更新 / 03 版本切换'
+  printf '%s' '更新维护里的 02 安装更新 / 03 版本切换'
 }
 
 xmj_maintenance_extract_semver() {

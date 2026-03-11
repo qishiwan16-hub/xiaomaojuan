@@ -31,6 +31,7 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_WAITED='0'
   XMJ_LAUNCH_USE_PGID='0'
   XMJ_LAUNCH_IMPORT_ASSERT_RETRY='0'
+  XMJ_LAUNCH_LOG_VIEW_STARTED='0'
   XMJ_LAUNCH_PREVIOUS_INT_TRAP=''
 }
 
@@ -929,6 +930,19 @@ xmj_launch_render_log_snapshot() {
   XMJ_LAUNCH_LOG_CURSOR="$total_lines"
 }
 
+xmj_launch_open_live_log_view() {
+  if [ "${XMJ_LAUNCH_LOG_VIEW_STARTED:-0}" = '1' ]; then
+    return 0
+  fi
+
+  printf '\n'
+  printf '  %b♡ 后台输出%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  printf '\n'
+  xmj_launch_render_log_snapshot '18'
+  XMJ_LAUNCH_LOG_VIEW_STARTED='1'
+  return 0
+}
+
 xmj_launch_print_new_log_lines() {
   local total_lines='0'
   local start_line='1'
@@ -968,6 +982,7 @@ xmj_launch_wait_for_running() {
     fi
 
     if ! xmj_launch_process_alive; then
+      xmj_launch_print_new_log_lines
       xmj_launch_wait_process >/dev/null
       xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
       return 1
@@ -977,18 +992,22 @@ xmj_launch_wait_for_running() {
       if xmj_launch_endpoint_available "$XMJ_LAUNCH_ENTRY_URL"; then
         xmj_launch_log_line "酒馆入口已可访问：${XMJ_LAUNCH_ENTRY_URL}"
         xmj_launch_log_line '酒馆进程已进入运行阶段。'
+        xmj_launch_print_new_log_lines
         return 0
       fi
     elif [ "$step" -ge 2 ]; then
       xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
       xmj_launch_log_line "进入链接：${XMJ_LAUNCH_ENTRY_URL}"
+      xmj_launch_print_new_log_lines
       return 0
     fi
 
     sleep 1 || true
+    xmj_launch_print_new_log_lines
   done
 
   if ! xmj_launch_process_alive; then
+    xmj_launch_print_new_log_lines
     xmj_launch_wait_process >/dev/null
     xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
     return 1
@@ -1019,8 +1038,11 @@ xmj_launch_handle_interrupt() {
 }
 
 xmj_launch_follow_running_log() {
-  xmj_render_launch_running_screen
-  xmj_launch_render_log_snapshot '18'
+  if [ "${XMJ_LAUNCH_LOG_VIEW_STARTED:-0}" != '1' ]; then
+    xmj_render_launch_running_screen
+    xmj_launch_render_log_snapshot '18'
+    XMJ_LAUNCH_LOG_VIEW_STARTED='1'
+  fi
 
   while true; do
     if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
@@ -1130,6 +1152,7 @@ xmj_run_tavern_launch() {
       'boot' \
       '启动中' \
       "$boot_detail"
+    XMJ_LAUNCH_LOG_VIEW_STARTED='0'
 
     if ! xmj_launch_start_process; then
       xmj_launch_restore_int_trap
@@ -1140,6 +1163,8 @@ xmj_run_tavern_launch() {
         "$XMJ_LAUNCH_DETAIL"
       return 0
     fi
+
+    xmj_launch_open_live_log_view
 
     if xmj_launch_wait_for_running; then
       break

@@ -420,7 +420,11 @@ xmj_reinstall_action_label() {
       printf '%s' '卸载酒馆'
       ;;
     reinstall)
-      printf '%s' '重装酒馆'
+      if [ "${XMJ_REINSTALL_TARGET_EXISTS:-0}" = '1' ]; then
+        printf '%s' '重装酒馆'
+      else
+        printf '%s' '安装酒馆'
+      fi
       ;;
     *)
       printf '%s' "${XMJ_MENU_LABEL['04']}"
@@ -434,7 +438,11 @@ xmj_reinstall_action_phrase() {
       printf '%s' 'uninstall tavern'
       ;;
     reinstall)
-      printf '%s' 'reinstall tavern'
+      if [ "${XMJ_REINSTALL_TARGET_EXISTS:-0}" = '1' ]; then
+        printf '%s' 'reinstall tavern'
+      else
+        printf '%s' 'install tavern'
+      fi
       ;;
     *)
       printf '%s' 'maintenance room'

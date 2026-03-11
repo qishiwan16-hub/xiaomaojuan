@@ -7,6 +7,91 @@ xmj_exit_panel() {
   printf '\n'
 }
 
+xmj_run_tavern_install_update() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if [ -n "$repo_path" ] && [ -d "$repo_path" ]; then
+    xmj_run_tavern_update
+    return 0
+  fi
+
+  xmj_reinstall_reset_state
+  XMJ_REINSTALL_OPERATION='reinstall'
+
+  xmj_render_reinstall_progress \
+    'prepare' \
+    'running' \
+    '准备安装' \
+    '当前没有检测到酒馆目录，这次会直接安装最新版本的酒馆。'
+
+  if ! xmj_reinstall_prepare_log_file; then
+    xmj_render_reinstall_result 'failure' 'prepare' '无法创建安装日志' '请检查脚本目录的写入权限后再试。'
+    return 0
+  fi
+
+  if ! xmj_reinstall_check_environment; then
+    xmj_render_reinstall_result 'failure' "$XMJ_REINSTALL_STAGE" "$XMJ_REINSTALL_SUMMARY" "$XMJ_REINSTALL_DETAIL"
+    return 0
+  fi
+
+  XMJ_REINSTALL_BACKUP_ENABLED='0'
+  XMJ_REINSTALL_BACKUP_NOTE='当前没有旧酒馆目录，这次没有备份内容。'
+  XMJ_REINSTALL_CONFIRM_NOTICE=''
+  XMJ_REINSTALL_CONFIRM_NOTICE_KIND='info'
+  xmj_run_tavern_reinstall_flow
+  return 0
+}
+
+xmj_setting_select_latest_launch_log() {
+  local index='0'
+  local file_name=''
+
+  xmj_setting_refresh_log_files
+
+  if [ "${#XMJ_SETTING_LOG_FILES[@]}" -eq 0 ]; then
+    XMJ_SETTING_LOG_SELECTED_INDEX='0'
+    return 0
+  fi
+
+  for ((index = 0; index < ${#XMJ_SETTING_LOG_FILES[@]}; index += 1)); do
+    file_name="$(basename "${XMJ_SETTING_LOG_FILES[$index]}")"
+    case "$file_name" in
+      launch-*.log)
+        XMJ_SETTING_LOG_SELECTED_INDEX="$((index + 1))"
+        return 0
+        ;;
+    esac
+  done
+
+  XMJ_SETTING_LOG_SELECTED_INDEX='1'
+}
+
+xmj_prompt_log_display_input() {
+  printf '%b%s%b' "$XMJ_PINK_SOFT" '  日志显示 > ' "$XMJ_RESET"
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_run_log_display_page() {
+  local view='logs'
+  local input=''
+
+  xmj_font_clear_notice
+  xmj_setting_select_latest_launch_log
+
+  while true; do
+    xmj_render_setting_center_page "$view"
+    xmj_prompt_log_display_input
+    input="${XMJ_LAST_INPUT:-}"
+
+    xmj_handle_script_setting_action "$view" "$input"
+    view="${XMJ_SETTING_NEXT_VIEW:-$view}"
+
+    if [ "$view" = 'home' ] || [ "$view" = 'exit' ]; then
+      return 0
+    fi
+  done
+}
+
 xmj_handle_route() {
   local input="${1:-}"
 
@@ -20,7 +105,7 @@ xmj_handle_route() {
       return 0
       ;;
     02)
-      xmj_run_tavern_update
+      xmj_run_tavern_install_update
       return 0
       ;;
     03)
@@ -56,7 +141,7 @@ xmj_handle_route() {
       return 0
       ;;
     06)
-      xmj_render_menu_page "$input"
+      xmj_run_log_display_page
       return 0
       ;;
     07)

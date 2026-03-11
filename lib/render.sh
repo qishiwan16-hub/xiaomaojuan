@@ -470,7 +470,7 @@ xmj_render_update_progress() {
   xmj_render_section_title 'update'
   printf '\n'
   xmj_render_page_intro \
-    '一键更新进行中，详细命令会悄悄写进日志本。' \
+    '安装更新进行中，详细命令会悄悄写进日志本。' \
     '前台只保留简洁阶段提示。'
   printf '\n'
   xmj_render_setting_card "$headline" "$detail_text" ''
@@ -503,7 +503,7 @@ xmj_render_update_result() {
   local before_commit="${6:-}"
   local after_commit="${7:-}"
   local result_title='更新完成'
-  local result_intro='猫猫已经把一键更新整理好了。'
+  local result_intro='猫猫已经把安装更新整理好了。'
   local result_hint=''
   local stage_mode='success'
   local stage_for_display='done'
@@ -1107,7 +1107,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程，教程说明与扩展脚本入口仍保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在可以直接查看最新日志，扩展脚本入口仍保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -1527,7 +1527,7 @@ xmj_render_update_progress() {
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'install update' 'update'
   printf '\n'
   xmj_render_setting_card "$headline" "$detail_text" ''
   printf '\n'
@@ -1571,7 +1571,7 @@ xmj_render_update_result() {
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'install update' 'update'
   printf '\n'
   xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
 
@@ -2025,6 +2025,7 @@ xmj_render_setting_logs_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
   printf '\n'
+  printf '  %b01 启动酒馆后就算退出了前台，也可以回到 06 继续看最新的 launch 日志。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
   printf '  %b这里先摆最新日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '  %b详细内容还是留在原日志文件里；删单个和按保留数量清理也都放这页了。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
@@ -2205,7 +2206,7 @@ xmj_render_update_progress() {
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'install update' 'update'
   printf '\n'
   xmj_render_setting_card "$headline" "$detail_text" ''
   printf '\n'
@@ -2251,7 +2252,7 @@ xmj_render_update_result() {
 
   xmj_clear_screen
   xmj_render_header
-  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'one-click update' 'update'
+  xmj_render_page_title "${XMJ_MENU_LABEL['02']}" 'install update' 'update'
   printf '\n'
   xmj_render_setting_card "$result_title" "$summary_text" "$detail_text"
 
