@@ -701,6 +701,7 @@ xmj_version_prepare_local_changes() {
 
 xmj_version_restore_local_changes() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local unmerged_files=''
 
   if [ "${XMJ_VERSION_STASH_CREATED:-0}" != '1' ]; then
     XMJ_VERSION_RESTORE_NOTE='无需放回本地改动。'
@@ -715,6 +716,24 @@ xmj_version_restore_local_changes() {
     XMJ_VERSION_RESTORE_NOTE='本地改动已自动放回。'
     xmj_version_log_line "$XMJ_VERSION_RESTORE_NOTE"
     return 0
+  fi
+
+  xmj_version_log_line '带 --index 的放回失败，准备改用不恢复暂存状态的方式再试一次。'
+  unmerged_files="$(git -C "$repo_path" diff --name-only --diff-filter=U 2>>"$XMJ_VERSION_LOG_FILE" || true)"
+  if [ -z "$unmerged_files" ] \
+    && git -C "$repo_path" stash apply "$XMJ_VERSION_STASH_REF" >>"$XMJ_VERSION_LOG_FILE" 2>&1; then
+    git -C "$repo_path" stash drop --quiet "$XMJ_VERSION_STASH_REF" >>"$XMJ_VERSION_LOG_FILE" 2>&1 || true
+    XMJ_VERSION_STASH_CREATED='0'
+    XMJ_VERSION_STASH_REF=''
+    XMJ_VERSION_RESTORE_NOTE='本地改动已自动放回。'
+    xmj_version_log_line '已改用非 --index 模式放回本地改动，原来的暂存状态未恢复。'
+    xmj_version_log_line "$XMJ_VERSION_RESTORE_NOTE"
+    return 0
+  fi
+
+  if [ -n "$unmerged_files" ]; then
+    xmj_version_log_line '检测到未解决的冲突，停止自动二次放回。'
+    printf '%s\n' "$unmerged_files" >>"$XMJ_VERSION_LOG_FILE"
   fi
 
   if [ -n "${XMJ_VERSION_STASH_LABEL:-}" ]; then

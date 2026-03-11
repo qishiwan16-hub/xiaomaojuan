@@ -30,6 +30,7 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_INTERRUPT='0'
   XMJ_LAUNCH_WAITED='0'
   XMJ_LAUNCH_USE_PGID='0'
+  XMJ_LAUNCH_IMPORT_ASSERT_RETRY='0'
   XMJ_LAUNCH_PREVIOUS_INT_TRAP=''
 }
 
@@ -242,25 +243,100 @@ xmj_launch_file_has_legacy_import_assertion() {
   return 1
 }
 
-xmj_launch_find_legacy_import_assertion_file() {
-  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
-  local file_path=''
+xmj_launch_list_legacy_import_assertion_candidates_in_path() {
+  local search_root="${1:-}"
+  local exclude_node_modules="${2:-1}"
+  local -a rg_args=()
+  local -a grep_args=()
 
-  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
-    printf '%s' ''
+  if [ -z "$search_root" ] || [ ! -d "$search_root" ]; then
     return 0
   fi
+
+  if command -v rg >/dev/null 2>&1; then
+    rg_args=(
+      -l
+      --no-messages
+      -g '*.js'
+      -g '*.mjs'
+      -g '*.cjs'
+      -g '!.git/**'
+      -g '!.next/**'
+      -g '!dist/**'
+    )
+    if [ "$exclude_node_modules" = '1' ]; then
+      rg_args+=(-g '!node_modules/**')
+    fi
+
+    rg "${rg_args[@]}" 'assert[[:space:]]*\{' "$search_root" 2>/dev/null || true
+    return 0
+  fi
+
+  if command -v grep >/dev/null 2>&1; then
+    grep_args=(
+      -RIlE
+      --include='*.js'
+      --include='*.mjs'
+      --include='*.cjs'
+      --exclude-dir='.git'
+      --exclude-dir='.next'
+      --exclude-dir='dist'
+    )
+    if [ "$exclude_node_modules" = '1' ]; then
+      grep_args+=(--exclude-dir='node_modules')
+    fi
+
+    grep "${grep_args[@]}" 'assert[[:space:]]*\{' "$search_root" 2>/dev/null || true
+    return 0
+  fi
+
+  if [ "$exclude_node_modules" = '1' ]; then
+    find "$search_root" \
+      \( -path "$search_root/.git" -o -path "$search_root/node_modules" -o -path "$search_root/.next" -o -path "$search_root/dist" \) -prune \
+      -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -exec grep -IlE 'assert[[:space:]]*\{' {} + 2>/dev/null || true
+    return 0
+  fi
+
+  find "$search_root" \
+    \( -path "$search_root/.git" -o -path "$search_root/.next" -o -path "$search_root/dist" \) -prune \
+    -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -exec grep -IlE 'assert[[:space:]]*\{' {} + 2>/dev/null || true
+  return 0
+}
+
+xmj_launch_list_legacy_import_assertion_candidates() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  xmj_launch_list_legacy_import_assertion_candidates_in_path "$repo_path" '1'
+}
+
+xmj_launch_list_dependency_legacy_import_assertion_candidates() {
+  local dependency_root="${XMJ_SILLYTAVERN_PATH%/}/node_modules"
+
+  xmj_launch_list_legacy_import_assertion_candidates_in_path "$dependency_root" '0'
+}
+
+xmj_launch_find_legacy_import_assertion_file() {
+  local file_path=''
 
   while IFS= read -r file_path || [ -n "$file_path" ]; do
     if xmj_launch_file_has_legacy_import_assertion "$file_path"; then
       printf '%s' "$file_path"
       return 0
     fi
-  done < <(
-    find "$repo_path" \
-      \( -path "$repo_path/.git" -o -path "$repo_path/node_modules" -o -path "$repo_path/.next" -o -path "$repo_path/dist" \) -prune \
-      -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -print 2>/dev/null
-  )
+  done < <(xmj_launch_list_legacy_import_assertion_candidates)
+
+  printf '%s' ''
+}
+
+xmj_launch_find_dependency_legacy_import_assertion_file() {
+  local file_path=''
+
+  while IFS= read -r file_path || [ -n "$file_path" ]; do
+    if xmj_launch_file_has_legacy_import_assertion "$file_path"; then
+      printf '%s' "$file_path"
+      return 0
+    fi
+  done < <(xmj_launch_list_dependency_legacy_import_assertion_candidates)
 
   printf '%s' ''
 }
@@ -326,14 +402,10 @@ xmj_launch_patch_import_assertion_file() {
   return 0
 }
 
-xmj_launch_auto_fix_import_assertions() {
-  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+xmj_launch_auto_fix_import_assertions_in_scope() {
+  local scope="${1:-repo}"
   local file_path=''
   local fixed_count='0'
-
-  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
-    return 1
-  fi
 
   while IFS= read -r file_path || [ -n "$file_path" ]; do
     if ! xmj_launch_file_has_legacy_import_assertion "$file_path"; then
@@ -347,13 +419,31 @@ xmj_launch_auto_fix_import_assertions() {
 
     fixed_count=$((fixed_count + 1))
     xmj_launch_log_line "已自动修复旧 import assert 语法：${file_path}"
+
+    if xmj_launch_file_has_legacy_import_assertion "$file_path"; then
+      xmj_launch_log_line "旧 import assert 自动修复后仍未通过复检：${file_path}"
+      return 1
+    fi
   done < <(
-    find "$repo_path" \
-      \( -path "$repo_path/.git" -o -path "$repo_path/node_modules" -o -path "$repo_path/.next" -o -path "$repo_path/dist" \) -prune \
-      -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -print 2>/dev/null
+    case "$scope" in
+      dependencies)
+        xmj_launch_list_dependency_legacy_import_assertion_candidates
+        ;;
+      *)
+        xmj_launch_list_legacy_import_assertion_candidates
+        ;;
+    esac
   )
 
   [ "$fixed_count" -gt 0 ]
+}
+
+xmj_launch_auto_fix_import_assertions() {
+  xmj_launch_auto_fix_import_assertions_in_scope 'repo'
+}
+
+xmj_launch_auto_fix_dependency_import_assertions() {
+  xmj_launch_auto_fix_import_assertions_in_scope 'dependencies'
 }
 
 xmj_launch_check_import_assertion_compat() {
@@ -397,6 +487,64 @@ xmj_launch_check_import_assertion_compat() {
     '旧 import assert 语法自动修复失败' \
     "当前是 ${node_version}，而 ${short_file:-$legacy_file} 里还在用 import ... assert { type: 'json' }。请手动改成 with { type: 'json' }，或换回 Node 20.x。"
   return 1
+}
+
+xmj_launch_log_has_unexpected_token_brace() {
+  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    return 1
+  fi
+
+  grep -Fq "Unexpected token '{'" "$file" 2>/dev/null
+}
+
+xmj_launch_try_recover_dependency_import_assertion_failure() {
+  local node_version=''
+  local node_major=''
+  local legacy_file=''
+
+  if [ "${XMJ_LAUNCH_IMPORT_ASSERT_RETRY:-0}" = '1' ]; then
+    return 1
+  fi
+
+  if ! xmj_launch_log_has_unexpected_token_brace; then
+    return 1
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! declare -F xmj_node_major_version >/dev/null 2>&1; then
+    return 1
+  fi
+
+  node_version="$(node -v 2>/dev/null || true)"
+  node_major="$(xmj_node_major_version "$node_version" || true)"
+  if [ -z "$node_major" ] || [ "$node_major" -lt 22 ]; then
+    return 1
+  fi
+
+  legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
+  if [ -z "$legacy_file" ]; then
+    return 1
+  fi
+
+  xmj_launch_log_line "启动失败后在依赖目录检测到旧 import assert 语法：${legacy_file}"
+  if ! xmj_launch_auto_fix_dependency_import_assertions; then
+    return 1
+  fi
+
+  legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
+  if [ -n "$legacy_file" ]; then
+    xmj_launch_log_line "依赖目录里仍残留旧 import assert 语法：${legacy_file}"
+    return 1
+  fi
+
+  XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
+  xmj_launch_log_line '已完成依赖目录旧 import assert 自动修复，准备重新启动酒馆。'
+  return 0
 }
 
 xmj_launch_check_node_runtime() {
@@ -927,6 +1075,8 @@ xmj_launch_monitor_running() {
 }
 
 xmj_run_tavern_launch() {
+  local boot_detail='(,,>ヮ<,,)! 小猫正在把酒馆悄悄放到后台运行喵~'
+
   xmj_launch_reset_state
 
   xmj_render_launch_progress \
@@ -975,21 +1125,35 @@ xmj_run_tavern_launch() {
     '启动中' \
     '₍˄·͈༝·͈˄₎◞ 猫猫正在把酒馆悄悄放到后台运行喵~'
 
-  if ! xmj_launch_start_process; then
-    xmj_launch_restore_int_trap
-    xmj_render_launch_result \
-      'failure' \
-      "$XMJ_LAUNCH_STAGE" \
-      "$XMJ_LAUNCH_SUMMARY" \
-      "$XMJ_LAUNCH_DETAIL"
-    return 0
-  fi
+  while true; do
+    xmj_render_launch_progress \
+      'boot' \
+      '启动中' \
+      "$boot_detail"
 
-  if ! xmj_launch_wait_for_running; then
+    if ! xmj_launch_start_process; then
+      xmj_launch_restore_int_trap
+      xmj_render_launch_result \
+        'failure' \
+        "$XMJ_LAUNCH_STAGE" \
+        "$XMJ_LAUNCH_SUMMARY" \
+        "$XMJ_LAUNCH_DETAIL"
+      return 0
+    fi
+
+    if xmj_launch_wait_for_running; then
+      break
+    fi
+
     if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
       xmj_launch_handle_interrupt
       xmj_launch_restore_int_trap
       return 0
+    fi
+
+    if xmj_launch_try_recover_dependency_import_assertion_failure; then
+      boot_detail='(,,>ヮ<,,)! 检测到依赖里旧 JSON 导入语法，已经自动修好，准备重试启动喵~'
+      continue
     fi
 
     xmj_launch_restore_int_trap
@@ -999,7 +1163,7 @@ xmj_run_tavern_launch() {
       "$XMJ_LAUNCH_SUMMARY" \
       "$XMJ_LAUNCH_DETAIL"
     return 0
-  fi
+  done
 
   xmj_launch_monitor_running
   xmj_launch_restore_int_trap
