@@ -13,6 +13,7 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_LOG_FILE=''
   XMJ_LAUNCH_LOG_CURSOR='0'
   XMJ_LAUNCH_RUNTIME_LOG_START='0'
+  XMJ_LAUNCH_READY_SCAN_LINE='1'
   XMJ_LAUNCH_STAGE='prepare'
   XMJ_LAUNCH_SUMMARY=''
   XMJ_LAUNCH_DETAIL=''
@@ -32,6 +33,7 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_WAITED='0'
   XMJ_LAUNCH_USE_PGID='0'
   XMJ_LAUNCH_IMPORT_ASSERT_RETRY='0'
+  XMJ_LAUNCH_START_SH_FALLBACK_USED='0'
   XMJ_LAUNCH_LOG_VIEW_STARTED='0'
   XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='0'
   XMJ_LAUNCH_ATTACHED_MODE='0'
@@ -244,6 +246,8 @@ xmj_launch_normalize_runtime_url() {
 
 xmj_launch_detect_runtime_entry_url_from_log() {
   local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local start_line="${XMJ_LAUNCH_READY_SCAN_LINE:-1}"
+  local total_lines='0'
   local url=''
 
   if [ -z "$file" ] || [ ! -f "$file" ]; then
@@ -251,12 +255,28 @@ xmj_launch_detect_runtime_entry_url_from_log() {
     return 1
   fi
 
-  url="$(sed -n \
+  total_lines="$(xmj_launch_log_line_count)"
+  case "$start_line" in
+    ''|*[!0-9]*)
+      start_line='1'
+      ;;
+  esac
+
+  if [ "$start_line" -lt 1 ]; then
+    start_line='1'
+  fi
+
+  if [ "$total_lines" -lt "$start_line" ]; then
+    start_line='1'
+  fi
+
+  url="$(sed -n "${start_line},\$p" "$file" 2>/dev/null | sed -n \
     -e 's/.*[Gg]o to:[[:space:]]*\(http[^[:space:]]*\).*/\1/p' \
     -e 's/.*已从后台日志识别到入口：\(http[^[:space:]]*\).*/\1/p' \
     -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
-    "$file" 2>/dev/null | tail -n 1)"
+    | tail -n 1)"
 
+  XMJ_LAUNCH_READY_SCAN_LINE=$((total_lines + 1))
   url="$(xmj_launch_normalize_runtime_url "$url" || true)"
 
   if [ -n "$url" ]; then
@@ -272,16 +292,13 @@ xmj_launch_probe_candidate_urls() {
   local port="${XMJ_TAVERN_PORT:-8000}"
   local path="${XMJ_TAVERN_ENTRY_PATH:-/}"
   local access_host=''
-  local detected_url=''
   local candidate=''
   local seen='|'
 
   access_host="$(xmj_launch_access_host)"
-  detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
 
   for candidate in \
     "${XMJ_LAUNCH_ENTRY_URL:-}" \
-    "$detected_url" \
     "$(xmj_launch_build_url "$access_host" "$port" "$path")" \
     "$(xmj_launch_build_url "$access_host" "$port" "/")" \
     "$(xmj_launch_build_url '127.0.0.1' "$port" "$path")" \
@@ -302,7 +319,6 @@ xmj_launch_probe_candidate_urls() {
     printf '%s\n' "$candidate"
   done
 }
-
 xmj_launch_wait_limit_seconds() {
   printf '%s' '300'
 }
@@ -312,7 +328,7 @@ xmj_launch_slow_notice_seconds() {
 }
 
 xmj_launch_probe_fallback_seconds() {
-  printf '%s' '240'
+  printf '%s' '120'
 }
 
 xmj_launch_extract_use_pgid_from_log() {
@@ -849,18 +865,52 @@ xmj_launch_check_environment() {
   return 0
 }
 
+xmj_launch_detect_node_entry_file() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local candidate=''
+
+  if [ -z "$repo_path" ]; then
+    printf '%s' ''
+    return 1
+  fi
+
+  for candidate in \
+    'server-main.js' \
+    'server.js' \
+    'dist/server-main.js' \
+    'dist/server.js' \
+    'src/server-main.js' \
+    'src/server.js'
+  do
+    if [ -f "$repo_path/$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  printf '%s' ''
+  return 1
+}
+
 xmj_launch_detect_command() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local package_json=''
+  local node_entry_file=''
 
   package_json="$repo_path/package.json"
+  node_entry_file="$(xmj_launch_detect_node_entry_file || true)"
 
-  if [ -f "$repo_path/start.sh" ]; then
-    XMJ_LAUNCH_METHOD='start_sh'
-    XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
-    XMJ_LAUNCH_COMMAND='bash ./start.sh'
-    XMJ_LAUNCH_ENTRY_FILE='start.sh'
-    xmj_launch_log_line '检测到 start.sh，准备使用 bash ./start.sh 启动喵~'
+  if [ -n "$node_entry_file" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      xmj_launch_fail 'env' '未检测到 Node.js' "检测到 ${node_entry_file}，但当前环境无法执行 node。"
+      return 1
+    fi
+
+    XMJ_LAUNCH_METHOD='node_entry'
+    XMJ_LAUNCH_METHOD_TEXT="node ./${node_entry_file}"
+    XMJ_LAUNCH_COMMAND="node ./${node_entry_file}"
+    XMJ_LAUNCH_ENTRY_FILE="$node_entry_file"
+    xmj_launch_log_line "检测到 ${node_entry_file}，本次优先直启 Node 主入口，减少额外启动壳层。"
     return 0
   fi
 
@@ -878,22 +928,41 @@ xmj_launch_detect_command() {
     return 0
   fi
 
-  if [ -f "$repo_path/server.js" ]; then
-    if ! command -v node >/dev/null 2>&1; then
-      xmj_launch_fail 'env' '未检测到 Node.js' '检测到 server.js，但当前环境无法执行 node。'
-      return 1
-    fi
-
-    XMJ_LAUNCH_METHOD='node_server'
-    XMJ_LAUNCH_METHOD_TEXT='node ./server.js'
-    XMJ_LAUNCH_COMMAND='node ./server.js'
-    XMJ_LAUNCH_ENTRY_FILE='server.js'
-    xmj_launch_log_line '检测到 server.js，准备使用 node ./server.js 启动喵~'
+  if [ -f "$repo_path/start.sh" ]; then
+    XMJ_LAUNCH_METHOD='start_sh'
+    XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
+    XMJ_LAUNCH_COMMAND='bash ./start.sh'
+    XMJ_LAUNCH_ENTRY_FILE='start.sh'
+    xmj_launch_log_line '未找到可直启的 Node 主入口，回退使用 bash ./start.sh 启动。'
     return 0
   fi
 
-  xmj_launch_fail 'env' '未识别到可用启动入口' '未找到 start.sh、package.json 的 start 脚本或 server.js。'
+  xmj_launch_fail 'env' '未识别到可用启动入口' '未找到 server-main.js、server.js、package.json 的 start 脚本或 start.sh。'
   return 1
+}
+
+xmj_launch_try_start_sh_fallback() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if [ "${XMJ_LAUNCH_METHOD:-}" != 'node_entry' ]; then
+    return 1
+  fi
+
+  if [ "${XMJ_LAUNCH_START_SH_FALLBACK_USED:-0}" = '1' ]; then
+    return 1
+  fi
+
+  if [ -z "$repo_path" ] || [ ! -f "$repo_path/start.sh" ]; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_START_SH_FALLBACK_USED='1'
+  XMJ_LAUNCH_METHOD='start_sh'
+  XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
+  XMJ_LAUNCH_COMMAND='bash ./start.sh'
+  XMJ_LAUNCH_ENTRY_FILE='start.sh'
+  xmj_launch_log_line '直启 Node 主入口未成功，已自动回退为 bash ./start.sh 重试。'
+  return 0
 }
 
 xmj_launch_merged_node_options() {
@@ -1015,7 +1084,7 @@ xmj_launch_start_process() {
   merged_node_options="$(xmj_launch_merged_node_options)"
 
   if [ -n "$merged_node_options" ]; then
-    xmj_launch_log_line "已附加 NODE_OPTIONS：$merged_node_options"
+    xmj_launch_log_line "已附加 NODE_OPTIONS：${merged_node_options}"
   else
     xmj_launch_log_line '当前未附加额外的 Node 内存参数。'
   fi
@@ -1026,7 +1095,20 @@ xmj_launch_start_process() {
       if [ -n "$merged_node_options" ]; then
         export NODE_OPTIONS="$merged_node_options"
       fi
-      exec setsid bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
+      case "${XMJ_LAUNCH_METHOD:-}" in
+        node_entry)
+          exec setsid node "$XMJ_LAUNCH_ENTRY_FILE" </dev/null
+          ;;
+        npm_start)
+          exec setsid npm run start </dev/null
+          ;;
+        start_sh)
+          exec setsid bash ./start.sh </dev/null
+          ;;
+        *)
+          exec setsid bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
+          ;;
+      esac
     ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
     XMJ_LAUNCH_USE_PGID='1'
     xmj_launch_log_line '已使用 setsid 创建独立进程组。'
@@ -1036,7 +1118,20 @@ xmj_launch_start_process() {
       if [ -n "$merged_node_options" ]; then
         export NODE_OPTIONS="$merged_node_options"
       fi
-      exec bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
+      case "${XMJ_LAUNCH_METHOD:-}" in
+        node_entry)
+          exec node "$XMJ_LAUNCH_ENTRY_FILE" </dev/null
+          ;;
+        npm_start)
+          exec npm run start </dev/null
+          ;;
+        start_sh)
+          exec bash ./start.sh </dev/null
+          ;;
+        *)
+          exec bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
+          ;;
+      esac
     ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
     xmj_launch_log_line '当前环境未检测到 setsid，已退回普通后台启动。'
   fi
@@ -1053,7 +1148,6 @@ xmj_launch_start_process() {
   xmj_launch_log_line "后台进程 PID：${XMJ_LAUNCH_PID}"
   return 0
 }
-
 xmj_launch_send_signal() {
   local signal="${1:-TERM}"
   local pid="${XMJ_LAUNCH_PID:-}"
@@ -1580,6 +1674,11 @@ xmj_run_tavern_launch() {
       xmj_launch_handle_interrupt
       xmj_launch_restore_int_trap
       return 0
+    fi
+
+    if xmj_launch_try_start_sh_fallback; then
+      boot_detail='(,,>ヮ<,,)! 直启主入口这次没顺利跑起来，猫猫已经自动切回 start.sh 再试一次喵~'
+      continue
     fi
 
     if xmj_launch_try_recover_dependency_import_assertion_failure; then
