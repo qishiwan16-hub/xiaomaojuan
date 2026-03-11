@@ -78,8 +78,12 @@ xmj_run_log_display_page() {
 
 xmj_route_normalize_home_input() {
   local input="${1:-}"
+  local digits=''
+  local ch=''
+  local i='0'
 
   input="${input//$'\r'/}"
+  input="${input//$'\t'/}"
   input="${input//０/0}"
   input="${input//１/1}"
   input="${input//２/2}"
@@ -96,6 +100,36 @@ xmj_route_normalize_home_input() {
   case "$input" in
     [0-9])
       input="0$input"
+      ;;
+  esac
+
+  case "$input" in
+    [0-9][0-9])
+      printf '%s' "$input"
+      return 0
+      ;;
+  esac
+
+  for ((i = 0; i < ${#input}; i += 1)); do
+    ch="${input:i:1}"
+    case "$ch" in
+      [0-9])
+        digits="${digits}${ch}"
+        if [ "${#digits}" -ge 2 ]; then
+          break
+        fi
+        ;;
+    esac
+  done
+
+  case "$digits" in
+    [0-9])
+      printf '0%s' "$digits"
+      return 0
+      ;;
+    [0-9][0-9])
+      printf '%s' "$digits"
+      return 0
       ;;
   esac
 
