@@ -595,6 +595,48 @@ xmj_launch_endpoint_available() {
   return 1
 }
 
+xmj_launch_session_running() {
+  if [ -n "${XMJ_LAUNCH_PID:-}" ] && xmj_launch_process_alive; then
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_ENTRY_URL:-}" ] \
+    && xmj_launch_can_probe_url \
+    && xmj_launch_endpoint_available "${XMJ_LAUNCH_ENTRY_URL}"; then
+    return 0
+  fi
+
+  return 1
+}
+
+xmj_launch_confirm_ready_state() {
+  local url="${1:-${XMJ_LAUNCH_ENTRY_URL:-}}"
+  local attempt='0'
+
+  if [ -z "$url" ]; then
+    return 1
+  fi
+
+  if ! xmj_launch_can_probe_url; then
+    xmj_launch_process_alive
+    return $?
+  fi
+
+  for attempt in 1 2 3 4 5; do
+    if xmj_launch_endpoint_available "$url"; then
+      return 0
+    fi
+
+    if ! xmj_launch_process_alive; then
+      return 1
+    fi
+
+    sleep 1 || true
+  done
+
+  return 1
+}
+
 xmj_launch_update_tavern_state() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local repo_flag=''
@@ -1657,24 +1699,24 @@ xmj_launch_wait_for_running() {
       xmj_launch_fail 'boot' '启动失败' '酒馆没有顺利进入运行状态，可温和查看日志。'
       return 1
     fi
-
     detected_url="$(xmj_launch_detect_ready_entry_url || true)"
     if [ -n "$detected_url" ]; then
       if [ "$detected_url" != "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
-        xmj_launch_log_line "已从后台日志识别到入口：${detected_url}"
+        xmj_launch_log_line "宸蹭粠鍚庡彴鏃ュ織璇嗗埆鍒板叆鍙ｏ細${detected_url}"
       fi
       XMJ_LAUNCH_ENTRY_URL="$detected_url"
-      xmj_launch_log_line '后台日志已显示酒馆入口，按日志判定进入运行阶段。'
+      if ! xmj_launch_confirm_ready_state "$XMJ_LAUNCH_ENTRY_URL"; then
+        if ! xmj_launch_process_alive; then
+          xmj_launch_wait_process >/dev/null
+          xmj_launch_fail 'boot' '鍚姩澶辫触' '閰掗鍦ㄦ樉绀?Go to 鍚庡張寰堝揩閫€鍑轰簡锛屽彲浠ユ俯鍜屾煡鐪嬫棩蹇椼€?'
+          return 1
+        fi
+        continue
+      fi
+      xmj_launch_log_line '鍚庡彴鏃ュ織宸叉樉绀洪厭棣嗗叆鍙ｏ紝鎸夋棩蹇楀垽瀹氳繘鍏ヨ繍琛岄樁娈点€?'
       xmj_launch_mark_runtime_log_start
       return 0
     fi
-
-    if [ "$should_probe" = '1' ]; then
-      if [ "$step" -lt "$probe_fallback_at" ]; then
-        sleep 1 || true
-        continue
-      fi
-
       while IFS= read -r candidate_url || [ -n "$candidate_url" ]; do
         if [ -z "$candidate_url" ]; then
           continue
@@ -1816,7 +1858,7 @@ xmj_launch_monitor_attached_session() {
       return 0
     fi
 
-    if ! xmj_launch_process_alive; then
+    if ! xmj_launch_session_running; then
       xmj_launch_print_new_log_lines
       XMJ_LAUNCH_EXIT_CODE='0'
       XMJ_LAUNCH_WAITED='1'
@@ -1846,7 +1888,7 @@ xmj_run_backend_display_page() {
     return 0
   fi
 
-  if [ -n "${XMJ_LAUNCH_PID:-}" ] && xmj_launch_process_alive; then
+  if xmj_launch_session_running; then
     xmj_launch_install_int_trap
     xmj_render_backend_display_screen 'running'
     xmj_launch_render_log_snapshot '18'
