@@ -1907,15 +1907,19 @@ xmj_render_startup_failure() {
 }
 
 xmj_render_about_status_page() {
+  xmj_setting_refresh_script_repo_state >/dev/null 2>&1 || true
+
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['23']}" 'runtime status' 'about'
   printf '\n'
-  printf '  %b猫猫现在的状态都叠在这里啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b这里专门收纳小猫卷自己的版本信息。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '\n'
-  xmj_render_fact_line '配置' "$(xmj_config_status_text)"
-  xmj_render_fact_line '酒馆' "$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
-  xmj_render_fact_line '备份' "$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
+  xmj_render_fact_line '当前版本' "$(xmj_setting_script_current_version_text)"
+  xmj_render_fact_line '更新日志' "$(xmj_setting_script_current_changelog_text)"
+  xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
   xmj_render_page_footer '按回车回首页'
 }
 
@@ -1936,7 +1940,7 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_setting_card '2 · 是否自启动' '' "当前：$(xmj_setting_autostart_status_text)"
   printf '\n'
-  xmj_render_setting_card '3 · 脚本更新' '' "当前：${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+  xmj_render_setting_card '3 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
   printf '\n'
   xmj_render_setting_card '4 · 脚本版本' '' "分支：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   printf '\n'
@@ -2011,32 +2015,69 @@ xmj_render_setting_autostart_page() {
 }
 
 xmj_render_setting_script_update_page() {
-  xmj_setting_refresh_script_repo_state
+  local action_label=''
+  local action_hint='输入 0 返回设置中心'
+
+  xmj_setting_refresh_script_update_status >/dev/null 2>&1 || true
 
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'script_update')" 'script update' 'setting'
   printf '\n'
-  printf '  %b这里会先对齐到 origin/%s，再执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$(xmj_setting_script_release_branch)" "$XMJ_RESET"
-  printf '  %b如果只有 config/xiaomaojuan.conf 有本地改动，猫猫会先临时护住它再更新。%b\n' "$XMJ_MIST" "$XMJ_RESET"
-  printf '  %b如果这次真的拉到了新代码，猫猫会自动帮你重开小猫卷。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里会先检查当前分支是不是最新版本；确认需要更新后，会对齐到 origin/%s 再执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$(xmj_setting_script_release_branch)" "$XMJ_RESET"
+  printf '  %b如果只有 config/xiaomaojuan.conf 有本地改动，猫猫会先临时护住它；拉到新代码后会自动重开小猫卷。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
-  xmj_render_fact_line '当前版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+  xmj_render_fact_line '当前版本' "$(xmj_setting_script_current_version_text)"
+  xmj_render_fact_line '当前更新日志' "$(xmj_setting_script_current_changelog_text)"
   xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   xmj_render_fact_line '更新分支' "$(xmj_setting_script_release_branch)"
   xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_fact_line '检查结果' "${XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT:-还没检查远端版本}"
+  xmj_render_fact_line '远端分支' "${XMJ_SETTING_SCRIPT_UPDATE_REMOTE_BRANCH:-未识别}"
+
+  if [ -n "${XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT:-}" ]; then
+    xmj_render_fact_line '远端版本' "${XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION:-未识别}"
+    xmj_render_fact_line '远端更新日志' "${XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE:-暂无}"
+  fi
+
   xmj_render_fact_line '上游分支' "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}"
   xmj_render_fact_line '工作区' "$(xmj_setting_script_worktree_text)"
 
   if [ -n "${XMJ_SETTING_SCRIPT_UPDATE_LOG:-}" ]; then
-    xmj_render_fact_line '更新日志' "$(xmj_display_path "$XMJ_SETTING_SCRIPT_UPDATE_LOG")"
+    xmj_render_fact_line '执行日志' "$(xmj_display_path "$XMJ_SETTING_SCRIPT_UPDATE_LOG")"
   fi
 
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item '1' '立即检查并更新脚本'
+
+  case "${XMJ_SETTING_SCRIPT_UPDATE_STATE:-unknown}" in
+    behind)
+      action_label='更新到远端最新版本'
+      action_hint='输入 1 开始更新 / 0 返回设置中心'
+      ;;
+    check_failed)
+      action_label='仍然尝试更新'
+      action_hint='输入 1 继续尝试更新 / 0 返回设置中心'
+      ;;
+    latest)
+      action_hint='当前已经是最新版本，输入 0 返回设置中心'
+      ;;
+    ahead)
+      action_hint='当前本地版本领先远端，输入 0 返回设置中心'
+      ;;
+    diverged)
+      action_hint='当前分支和远端已分叉，先处理分支后再回来；输入 0 返回设置中心'
+      ;;
+    *)
+      action_hint='当前暂时不能直接更新，输入 0 返回设置中心'
+      ;;
+  esac
+
+  if [ -n "$action_label" ]; then
+    xmj_render_action_item '1' "$action_label"
+  fi
   xmj_render_action_item '0' '返回设置中心'
-  xmj_render_action_footer '输入 1 / 0 就好喵'
+  xmj_render_action_footer "$action_hint"
 }
 
 xmj_render_setting_script_version_page() {

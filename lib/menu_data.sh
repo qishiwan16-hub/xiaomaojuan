@@ -74,18 +74,19 @@ xmj_load_menu_data() {
     '目标'
     'SillyTavern'
     '备份'
-    '状态'
+    '版本信息'
     '主题'
   )
 
   declare -gA XMJ_INFO_VALUE=()
+  xmj_setting_refresh_script_repo_state >/dev/null 2>&1 || true
   XMJ_INFO_VALUE['名称']="${XMJ_SCRIPT_NAME:-小猫卷}"
   XMJ_INFO_VALUE['作者']="${XMJ_SCRIPT_AUTHOR:-meoroll}"
   XMJ_INFO_VALUE['环境']="${XMJ_RUNTIME_ENV:-Termux / Android / Bash}"
   XMJ_INFO_VALUE['目标']="${XMJ_TARGET_PROJECT:-SillyTavern}"
   XMJ_INFO_VALUE['SillyTavern']="状态：$(xmj_dir_state "${XMJ_SILLYTAVERN_PATH:-}" '已发现' '待确认')"
   XMJ_INFO_VALUE['备份']="状态：$(xmj_dir_state "$(xmj_maintenance_backup_dir)" '已就绪' '待创建')"
-  XMJ_INFO_VALUE['状态']="$(xmj_config_status_text)"
+  XMJ_INFO_VALUE['版本信息']="$(xmj_setting_script_version_info_text)"
   XMJ_INFO_VALUE['主题']="$(xmj_theme_label)"
 
   XMJ_MENU_IDS=(
@@ -122,7 +123,7 @@ xmj_load_menu_data() {
   XMJ_MENU_LABEL['20']='酒馆设置'
   XMJ_MENU_LABEL['21']='字体管理'
   XMJ_MENU_LABEL['22']='是否自启动'
-  XMJ_MENU_LABEL['23']='状态信息'
+  XMJ_MENU_LABEL['23']='版本信息'
   XMJ_MENU_LABEL['24']='关于面板'
   XMJ_MENU_LABEL['25']='作者信息'
   XMJ_MENU_LABEL['00']='退出面板'

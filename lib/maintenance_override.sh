@@ -26,23 +26,26 @@ xmj_maintenance_require_archive_tools() {
 }
 
 xmj_maintenance_create_archive() {
-  local source_dir="${1:-}"
-  local bundle_name="${2:-}"
-  local archive_file="${3:-}"
-  local shell_log="${4:-/dev/null}"
+  local repo_path="${1:-}"
+  local archive_file="${2:-}"
+  local shell_log="${3:-/dev/null}"
+  local meta_file="${4:-}"
   local python_cmd=''
-  local bundle_root=''
-
-  bundle_root="$source_dir/$bundle_name"
+  shift 4
+  local -a items=("$@")
 
   if command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1; then
     (
-      cd "$bundle_root" || exit 1
-      find . -mindepth 1 -maxdepth 1 -print \
+      cd "$repo_path" || exit 1
+      printf '%s\n' "${items[@]}" \
         | LC_ALL=C sort \
-        | sed 's#^\./##' \
-        | zip -rq "$archive_file" -@
+        | zip -1rq "$archive_file" -@
     ) >>"$shell_log" 2>&1
+    if [ $? -ne 0 ]; then
+      return 1
+    fi
+
+    zip -1qj "$archive_file" "$meta_file" >>"$shell_log" 2>&1
     return $?
   fi
 
@@ -51,25 +54,31 @@ xmj_maintenance_create_archive() {
     return 1
   fi
 
-  "$python_cmd" - "$source_dir" "$bundle_name" "$archive_file" >>"$shell_log" 2>&1 <<'PY'
+  "$python_cmd" - "$repo_path" "$archive_file" "$meta_file" "${items[@]}" >>"$shell_log" 2>&1 <<'PY'
 import os
 import sys
 import zipfile
 
-source_dir, bundle_name, archive_file = sys.argv[1:4]
-root = os.path.join(source_dir, bundle_name)
-if not os.path.isdir(root):
+repo_path, archive_file, meta_file, *items = sys.argv[1:]
+if not os.path.isdir(repo_path) or not os.path.isfile(meta_file):
     raise SystemExit(1)
 
-with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    for current_root, dirnames, filenames in os.walk(root):
-        rel_root = os.path.relpath(current_root, root)
-        if rel_root != ".":
-            zf.write(current_root, rel_root)
-        for filename in filenames:
-            file_path = os.path.join(current_root, filename)
-            arcname = os.path.relpath(file_path, root)
-            zf.write(file_path, arcname)
+with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+    zf.write(meta_file, os.path.basename(meta_file))
+    for item in items:
+        item_path = os.path.join(repo_path, item)
+        if not os.path.exists(item_path):
+            continue
+        if os.path.isdir(item_path):
+            for current_root, dirnames, filenames in os.walk(item_path):
+                rel_root = os.path.relpath(current_root, repo_path)
+                zf.write(current_root, rel_root)
+                for filename in filenames:
+                    file_path = os.path.join(current_root, filename)
+                    arcname = os.path.relpath(file_path, repo_path)
+                    zf.write(file_path, arcname)
+        else:
+            zf.write(item_path, item)
 PY
 }
 
@@ -110,11 +119,9 @@ xmj_maintenance_create_backup() {
   local backup_dir=''
   local archive_name=''
   local archive_file=''
-  local bundle_name=''
   local temp_root=''
-  local bundle_root=''
   local item=''
-  local target_path=''
+  local meta_file=''
   local joined_items=''
   local joined_missing=''
   local current_version=''
@@ -158,7 +165,6 @@ xmj_maintenance_create_backup() {
 
   archive_name="$(xmj_maintenance_timestamp).zip"
   archive_file="$backup_dir/$archive_name"
-  bundle_name="${archive_name%.zip}"
 
   if [ "${XMJ_MAINT_BACKUP_SCOPE:-full}" = 'data-only' ]; then
     set -- 'data'
@@ -204,21 +210,14 @@ xmj_maintenance_create_backup() {
   rm -f "$archive_file" 2>/dev/null || true
   temp_root="$(mktemp -d "$backup_dir/.xmj-backup-XXXXXX" 2>/dev/null || true)"
   if [ -z "$temp_root" ]; then
-    temp_root="$backup_dir/.xmj-backup-${bundle_name}-$$"
+    temp_root="$backup_dir/.xmj-backup-$$"
     if ! mkdir -p "$temp_root" 2>/dev/null; then
       XMJ_MAINT_LAST_ERROR='无法准备自动备份临时目录。'
       return 1
     fi
   fi
 
-  bundle_root="$temp_root/$bundle_name"
-  if ! mkdir -p "$bundle_root" 2>/dev/null; then
-    rm -rf "$temp_root" 2>/dev/null || true
-    XMJ_MAINT_LAST_ERROR='无法准备自动备份临时目录。'
-    return 1
-  fi
-
-  if ! xmj_maintenance_write_backup_meta "$bundle_root"; then
+  if ! xmj_maintenance_write_backup_meta "$temp_root"; then
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='无法写入备份元信息。'
     return 1
@@ -227,24 +226,9 @@ xmj_maintenance_create_backup() {
   xmj_maintenance_log "$logger_name" "开始为${op_name}自动打包备份。"
   xmj_backup_start_busy '生成备份中'
 
-  for item in "${items[@]}"; do
-    target_path="$bundle_root/$item"
-    if ! mkdir -p "$(dirname "$target_path")" 2>/dev/null; then
-      xmj_backup_stop_busy
-      rm -rf "$temp_root" 2>/dev/null || true
-      XMJ_MAINT_LAST_ERROR='整理自动备份内容时失败。'
-      return 1
-    fi
+  meta_file="$temp_root/$(xmj_maintenance_backup_meta_name)"
 
-    if ! cp -a "$repo_path/$item" "$target_path" 2>>"$shell_log"; then
-      xmj_backup_stop_busy
-      rm -rf "$temp_root" 2>/dev/null || true
-      XMJ_MAINT_LAST_ERROR='整理自动备份内容时失败。'
-      return 1
-    fi
-  done
-
-  if ! xmj_maintenance_create_archive "$temp_root" "$bundle_name" "$archive_file" "$shell_log"; then
+  if ! xmj_maintenance_create_archive "$repo_path" "$archive_file" "$shell_log" "$meta_file" "${items[@]}"; then
     xmj_backup_stop_busy
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='生成备份压缩包失败，可温和查看日志。'
@@ -355,11 +339,13 @@ xmj_maintenance_restore_backup() {
       return 1
     fi
 
-    if ! cp -a "$source_path" "$target_path" 2>>"$shell_log"; then
-      xmj_backup_stop_busy
-      rm -rf "$temp_root" 2>/dev/null || true
-      XMJ_MAINT_LAST_ERROR='恢复备份内容时失败。'
-      return 1
+    if ! mv "$source_path" "$target_path" 2>>"$shell_log"; then
+      if ! cp -a "$source_path" "$target_path" 2>>"$shell_log"; then
+        xmj_backup_stop_busy
+        rm -rf "$temp_root" 2>/dev/null || true
+        XMJ_MAINT_LAST_ERROR='恢复备份内容时失败。'
+        return 1
+      fi
     fi
 
     restored_items="$(xmj_maintenance_join_labels "$restored_items" "$(xmj_maintenance_backup_label "$item")")"
