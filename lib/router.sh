@@ -1384,6 +1384,35 @@ xmj_tavern_setting_json_key_value() {
   printf '%s' ''
 }
 
+xmj_tavern_setting_json_string_value() {
+  local value=''
+
+  value="$(xmj_tavern_setting_json_key_value "${1:-}" "${2:-}")"
+  case "$value" in
+    \"*\")
+      value="${value#\"}"
+      value="${value%\"}"
+      value="${value//\\\"/\"}"
+      value="${value//\\\\/\\}"
+      printf '%s' "$value"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
+
+xmj_tavern_setting_json_escape_string() {
+  local value="${1:-}"
+
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\t'/\\t}"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/\\n}"
+  printf '%s' "$value"
+}
+
 xmj_tavern_setting_set_yaml_top_value() {
   local file_path="${1:-}"
   local key="${2:-}"
@@ -1532,18 +1561,80 @@ xmj_tavern_setting_set_yaml_section_value() {
   return 0
 }
 
-xmj_tavern_setting_set_json_bool_value() {
+xmj_tavern_setting_set_json_value() {
   local file_path="${1:-}"
   local key="${2:-}"
-  local value="${3:-false}"
+  local value_text="${3:-null}"
   local temp_file=''
   local line=''
   local found='0'
   local indent=''
-  local comma=''
+  local insert_index='-1'
+  local prev_index='-1'
+  local trimmed=''
+  local i='0'
+  local -a lines=()
 
   if [ -z "$file_path" ] || [ ! -f "$file_path" ] || [ -z "$key" ]; then
     return 1
+  fi
+
+  if ! mapfile -t lines <"$file_path"; then
+    return 1
+  fi
+
+  indent='  '
+  for i in "${!lines[@]}"; do
+    line="${lines[$i]}"
+
+    if [ "$indent" = '  ' ] && [[ "$line" =~ ^([[:space:]]+)\"[^\"]+\"[[:space:]]*: ]]; then
+      indent="${BASH_REMATCH[1]}"
+    fi
+
+    if [[ "$line" =~ ^([[:space:]]*)\"${key}\"[[:space:]]*: ]]; then
+      indent="${BASH_REMATCH[1]}"
+      if [[ "$line" =~ ,[[:space:]]*$ ]]; then
+        lines[$i]="${indent}\"${key}\": ${value_text},"
+      else
+        lines[$i]="${indent}\"${key}\": ${value_text}"
+      fi
+      found='1'
+      break
+    fi
+  done
+
+  if [ "$found" != '1' ]; then
+    for ((i=${#lines[@]} - 1; i >= 0; i--)); do
+      line="${lines[$i]}"
+      if [[ "$line" =~ ^[[:space:]]*}[[:space:]]*,?[[:space:]]*$ ]]; then
+        insert_index="$i"
+        break
+      fi
+    done
+
+    if [ "$insert_index" -lt 0 ]; then
+      return 1
+    fi
+
+    for ((i=insert_index - 1; i >= 0; i--)); do
+      trimmed="$(xmj_tavern_setting_trim_spaces "${lines[$i]}")"
+      if [ -n "$trimmed" ]; then
+        prev_index="$i"
+        break
+      fi
+    done
+
+    if [ "$prev_index" -ge 0 ] \
+      && ! [[ "${lines[$prev_index]}" =~ ,[[:space:]]*$ ]] \
+      && ! [[ "${lines[$prev_index]}" =~ ^[[:space:]]*\{[[:space:]]*$ ]]; then
+      lines[$prev_index]="${lines[$prev_index]},"
+    fi
+
+    lines=(
+      "${lines[@]:0:$insert_index}"
+      "${indent}\"${key}\": ${value_text}"
+      "${lines[@]:$insert_index}"
+    )
   fi
 
   temp_file="${file_path}.tmp.$$"
@@ -1551,31 +1642,12 @@ xmj_tavern_setting_set_json_bool_value() {
     return 1
   fi
 
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [[ "$line" =~ ^([[:space:]]*)\"${key}\"[[:space:]]*: ]]; then
-      indent="${BASH_REMATCH[1]}"
-      comma=''
-      if [[ "$line" =~ ,[[:space:]]*$ ]]; then
-        comma=','
-      fi
-      if ! printf '%s"%s": %s%s\n' "$indent" "$key" "$value" "$comma" >>"$temp_file"; then
-        rm -f "$temp_file" 2>/dev/null || true
-        return 1
-      fi
-      found='1'
-      continue
-    fi
-
+  for line in "${lines[@]}"; do
     if ! printf '%s\n' "$line" >>"$temp_file"; then
       rm -f "$temp_file" 2>/dev/null || true
       return 1
     fi
-  done <"$file_path"
-
-  if [ "$found" != '1' ]; then
-    rm -f "$temp_file" 2>/dev/null || true
-    return 1
-  fi
+  done
 
   if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
     rm -f "$temp_file" 2>/dev/null || true
@@ -1583,6 +1655,32 @@ xmj_tavern_setting_set_json_bool_value() {
   fi
 
   return 0
+}
+
+xmj_tavern_setting_set_json_bool_value() {
+  local file_path="${1:-}"
+  local key="${2:-}"
+  local value="${3:-false}"
+
+  case "$value" in
+    true|false)
+      ;;
+    *)
+      value='false'
+      ;;
+  esac
+
+  xmj_tavern_setting_set_json_value "$file_path" "$key" "$value"
+}
+
+xmj_tavern_setting_set_json_string_value() {
+  local file_path="${1:-}"
+  local key="${2:-}"
+  local value="${3:-}"
+  local escaped=''
+
+  escaped="$(xmj_tavern_setting_json_escape_string "$value")"
+  xmj_tavern_setting_set_json_value "$file_path" "$key" "\"$escaped\""
 }
 
 xmj_tavern_setting_is_integer() {
@@ -1657,6 +1755,207 @@ xmj_tavern_setting_size_value_for_write() {
       printf '%s' "$input_mb"
       ;;
   esac
+}
+
+xmj_tavern_setting_server_main_file() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+
+  if [ -z "$repo_path" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  if [ -f "$repo_path/src/server-main.js" ]; then
+    printf '%s' "$repo_path/src/server-main.js"
+    return 0
+  fi
+
+  printf '%s' ''
+}
+
+xmj_tavern_setting_body_parser_limit_mb() {
+  local file_path="${1:-}"
+  local parser_kind="${2:-json}"
+  local line=''
+  local value_text=''
+  local digits=''
+  local unit=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$parser_kind" in
+      json)
+        [[ "$line" == *"bodyParser.json("* ]] || continue
+        ;;
+      urlencoded)
+        [[ "$line" == *"bodyParser.urlencoded("* ]] || continue
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    if [[ "$line" =~ limit:[[:space:]]*['\"]([0-9]+[[:space:]]*[mMgG][bB])['\"] ]]; then
+      value_text="${BASH_REMATCH[1]}"
+      digits="$(printf '%s' "$value_text" | tr -cd '0-9')"
+      unit="$(printf '%s' "$value_text" | tr '[:upper:]' '[:lower:]' | tr -cd 'mg')"
+      [ -n "$digits" ] || continue
+      if [ "$unit" = 'g' ]; then
+        printf '%s' "$((digits * 1024))"
+      else
+        printf '%s' "$digits"
+      fi
+      return 0
+    fi
+  done <"$file_path"
+
+  printf '%s' ''
+}
+
+xmj_tavern_setting_body_parser_limit_text() {
+  local file_path="${1:-}"
+  local json_limit=''
+  local urlencoded_limit=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    printf '%s' '没找到 server-main.js'
+    return 0
+  fi
+
+  json_limit="$(xmj_tavern_setting_body_parser_limit_mb "$file_path" 'json')"
+  urlencoded_limit="$(xmj_tavern_setting_body_parser_limit_mb "$file_path" 'urlencoded')"
+
+  if [ -z "$json_limit" ] && [ -z "$urlencoded_limit" ]; then
+    printf '%s' '当前版本没读到 bodyParser limit'
+    return 0
+  fi
+
+  if [ -n "$json_limit" ] && [ "$json_limit" = "$urlencoded_limit" ]; then
+    printf 'json / urlencoded 都是 %s MB' "$json_limit"
+    return 0
+  fi
+
+  printf 'json %s MB / urlencoded %s MB' "${json_limit:-未读到}" "${urlencoded_limit:-未读到}"
+}
+
+xmj_tavern_setting_raise_body_parser_limits_if_needed() {
+  local file_path="${1:-}"
+  local target_mb="${2:-0}"
+  local temp_file=''
+  local line=''
+  local new_line=''
+  local value_text=''
+  local digits=''
+  local unit=''
+  local current_mb='0'
+  local updated_count='0'
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ] || ! xmj_tavern_setting_is_integer "$target_mb" || [ "$target_mb" -lt 1 ]; then
+    return 1
+  fi
+
+  temp_file="${file_path}.tmp.$$"
+  if ! : >"$temp_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    new_line="$line"
+
+    if { [[ "$line" == *"bodyParser.json("* ]] || [[ "$line" == *"bodyParser.urlencoded("* ]]; } \
+      && [[ "$line" =~ limit:[[:space:]]*['\"]([0-9]+[[:space:]]*[mMgG][bB])['\"] ]]; then
+      value_text="${BASH_REMATCH[1]}"
+      digits="$(printf '%s' "$value_text" | tr -cd '0-9')"
+      unit="$(printf '%s' "$value_text" | tr '[:upper:]' '[:lower:]' | tr -cd 'mg')"
+      current_mb="$digits"
+      if [ "$unit" = 'g' ]; then
+        current_mb="$((digits * 1024))"
+      fi
+
+      if [ -n "$digits" ] && [ "$current_mb" -lt "$target_mb" ]; then
+        new_line="${line/$value_text/${target_mb}mb}"
+        updated_count="$((updated_count + 1))"
+      fi
+    fi
+
+    if ! printf '%s\n' "$new_line" >>"$temp_file"; then
+      rm -f "$temp_file" 2>/dev/null || true
+      return 1
+    fi
+  done <"$file_path"
+
+  if [ "$updated_count" -lt 1 ]; then
+    rm -f "$temp_file" 2>/dev/null || true
+    printf '%s' '0'
+    return 0
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$file_path"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  printf '%s' "$updated_count"
+  return 0
+}
+
+xmj_tavern_setting_port_is_forbidden() {
+  local port_value="${1:-}"
+
+  if ! xmj_tavern_setting_is_integer "$port_value"; then
+    return 0
+  fi
+
+  if [ "$port_value" -lt 1024 ] || [ "$port_value" -gt 65535 ]; then
+    return 0
+  fi
+
+  if [ "$port_value" -eq 2049 ] || [ "$port_value" -eq 5000 ] || [ "$port_value" -eq 5357 ] || [ "$port_value" -eq 6000 ]; then
+    return 0
+  fi
+
+  if [ "$port_value" -ge 49152 ]; then
+    return 0
+  fi
+
+  if [ "$port_value" -ge 6665 ] && [ "$port_value" -le 6669 ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+xmj_tavern_setting_port_is_high_risk() {
+  local port_value="${1:-}"
+  local risk_port=''
+
+  for risk_port in 3000 3001 7000 7001 8000 8080 8484 8844 8888 8889 1080 3306 5432 6379 7890 7897 10808 27017; do
+    if [ "$port_value" = "$risk_port" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+xmj_tavern_setting_random_safe_port() {
+  local candidate='18080'
+  local attempt='0'
+
+  while [ "$attempt" -lt 64 ]; do
+    candidate="$((10000 + RANDOM % 39152))"
+    if ! xmj_tavern_setting_port_is_forbidden "$candidate" && ! xmj_tavern_setting_port_is_high_risk "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+    attempt="$((attempt + 1))"
+  done
+
+  printf '%s' "$candidate"
 }
 
 xmj_tavern_setting_file_chat_limit_key_label() {
@@ -1815,6 +2114,38 @@ xmj_tavern_setting_stutter_fix_status_text() {
   printf '当前：用户名 %s' "$user_name"
 }
 
+xmj_tavern_setting_chat_freeze_fix_status_text() {
+  local config_file=''
+  local settings_file=''
+  local lazy_value=''
+  local auto_load_value=''
+  local user_name=''
+
+  user_name="$(xmj_tavern_setting_user_name)"
+  config_file="$(xmj_tavern_setting_config_file)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到酒馆配置文件'
+    return 0
+  fi
+
+  if [ ! -f "$settings_file" ]; then
+    printf '当前：%s 的 settings.json 还没找到' "$user_name"
+    return 0
+  fi
+
+  lazy_value="$(xmj_tavern_setting_yaml_top_value "$config_file" 'lazyLoadCharacters')"
+  auto_load_value="$(xmj_tavern_setting_json_key_value "$settings_file" 'auto_load_chat')"
+
+  if [ "$lazy_value" = 'true' ] && [ "$auto_load_value" = 'false' ]; then
+    printf '当前：%s 已关自动加载聊天' "$user_name"
+    return 0
+  fi
+
+  printf '当前：%s 还没套用聊天保护' "$user_name"
+}
+
 xmj_tavern_setting_file_chat_limit_status_text() {
   local target=''
   local scope=''
@@ -1825,16 +2156,24 @@ xmj_tavern_setting_file_chat_limit_status_text() {
   local current_value=''
   local resolved_unit=''
   local key_label=''
+  local server_main_file=''
+  local parser_text=''
 
   config_file="$(xmj_tavern_setting_config_file)"
-  if [ -z "$config_file" ]; then
+  server_main_file="$(xmj_tavern_setting_server_main_file)"
+  if [ -z "$config_file" ] && [ -z "$server_main_file" ]; then
     printf '%s' '当前：没找到配置文件'
     return 0
   fi
 
   target="$(xmj_tavern_setting_file_chat_limit_target)"
   if [ -z "$target" ]; then
-    printf '%s' '当前：没匹配到已知上限键'
+    if [ -n "$server_main_file" ]; then
+      parser_text="$(xmj_tavern_setting_body_parser_limit_text "$server_main_file")"
+      printf '当前：%s' "$parser_text"
+    else
+      printf '%s' '当前：没匹配到已知上限键'
+    fi
     return 0
   fi
 
@@ -1850,7 +2189,12 @@ xmj_tavern_setting_memory_limit_status_text() {
   local memory_limit_mb="${XMJ_TAVERN_NODE_MEMORY_MB:-0}"
 
   if ! xmj_tavern_setting_is_integer "$memory_limit_mb" || [ "$memory_limit_mb" -lt 1 ]; then
-    printf '%s' '当前：走默认启动内存'
+    printf '%s' '当前：走默认启动内存（推荐先试 4096 MB）'
+    return 0
+  fi
+
+  if [ "$memory_limit_mb" -lt 1024 ]; then
+    printf '当前：启动时附加 %s MB（偏低）' "$memory_limit_mb"
     return 0
   fi
 
@@ -1875,11 +2219,48 @@ xmj_tavern_setting_port_conflict_status_text() {
   fi
 
   if [ "$tavern_port" = "$script_port" ]; then
+    if xmj_tavern_setting_port_is_high_risk "$script_port"; then
+      printf '当前：酒馆和面板都走 %s（冲突风险偏高）' "$script_port"
+      return 0
+    fi
     printf '当前：酒馆和面板都走 %s' "$script_port"
     return 0
   fi
 
   printf '当前：酒馆写 %s / 面板走 %s' "$tavern_port" "$script_port"
+}
+
+xmj_tavern_setting_beautify_freeze_fix_status_text() {
+  local user_name=''
+  local settings_file=''
+  local theme_value=''
+  local custom_css=''
+
+  user_name="$(xmj_tavern_setting_user_name)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  if [ ! -f "$settings_file" ]; then
+    printf '当前：%s 的 settings.json 还没找到' "$user_name"
+    return 0
+  fi
+
+  theme_value="$(xmj_tavern_setting_json_string_value "$settings_file" 'theme')"
+  custom_css="$(xmj_tavern_setting_json_string_value "$settings_file" 'custom_css')"
+  if [ -z "$custom_css" ]; then
+    custom_css="$(xmj_tavern_setting_json_string_value "$settings_file" 'customCss')"
+  fi
+
+  if [ "$theme_value" = 'Dark Lite' ] && [ -z "$custom_css" ]; then
+    printf '当前：%s 已是安全主题' "$user_name"
+    return 0
+  fi
+
+  if [ -n "$custom_css" ]; then
+    printf '当前：%s 还有自定义 CSS' "$user_name"
+    return 0
+  fi
+
+  printf '当前：%s 的主题是 %s' "$user_name" "${theme_value:-未读到}"
 }
 
 xmj_tavern_setting_update_stutter_user() {
@@ -1914,6 +2295,11 @@ xmj_tavern_setting_update_file_chat_limit() {
   local resolved_unit=''
   local stored_value=''
   local key_label=''
+  local server_main_file=''
+  local parser_json_limit=''
+  local parser_urlencoded_limit=''
+  local parser_updates='0'
+  local updated_config='0'
 
   case "$input_mb" in
     ''|*[!0-9]*)
@@ -1924,42 +2310,76 @@ xmj_tavern_setting_update_file_chat_limit() {
 
   if [ "$input_mb" -lt 1 ]; then
     xmj_font_set_notice 'warn' '文件聊天上限至少要是 1。'
-    return 1
+      return 1
   fi
 
   target="$(xmj_tavern_setting_file_chat_limit_target)"
-  if [ -z "$target" ]; then
-    xmj_font_set_notice 'warn' '没在当前酒馆配置里找到已知的文件聊天上限键，这一项暂时没动。'
+  server_main_file="$(xmj_tavern_setting_server_main_file)"
+  parser_json_limit="$(xmj_tavern_setting_body_parser_limit_mb "$server_main_file" 'json')"
+  parser_urlencoded_limit="$(xmj_tavern_setting_body_parser_limit_mb "$server_main_file" 'urlencoded')"
+
+  if [ -z "$target" ] && [ -z "$parser_json_limit" ] && [ -z "$parser_urlencoded_limit" ]; then
+    xmj_font_set_notice 'warn' '没在当前版本里找到可写的文件聊天上限位置；config 键和 bodyParser limit 都没匹配到。'
     return 1
   fi
 
-  IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
+  if [ -n "$target" ]; then
+    IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
 $target
 EOF
-  resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
-  stored_value="$(xmj_tavern_setting_size_value_for_write "$input_mb" "$resolved_unit")"
-  key_label="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key")"
+    resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
+    stored_value="$(xmj_tavern_setting_size_value_for_write "$input_mb" "$resolved_unit")"
+    key_label="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key")"
 
-  case "$scope" in
-    yaml_section)
-      if ! xmj_tavern_setting_set_yaml_section_value "$config_file" "$section" "$key" "$stored_value"; then
-        xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
+    case "$scope" in
+      yaml_section)
+        if ! xmj_tavern_setting_set_yaml_section_value "$config_file" "$section" "$key" "$stored_value"; then
+          xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
+          return 1
+        fi
+        ;;
+      yaml_top)
+        if ! xmj_tavern_setting_set_yaml_top_value "$config_file" "$key" "$stored_value"; then
+          xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
+          return 1
+        fi
+        ;;
+      *)
+        xmj_font_set_notice 'warn' '文件聊天上限这次没匹配到可写入位置。'
         return 1
+        ;;
+    esac
+
+    updated_config='1'
+  fi
+
+  if [ -n "$parser_json_limit" ] || [ -n "$parser_urlencoded_limit" ]; then
+    if ! parser_updates="$(xmj_tavern_setting_raise_body_parser_limits_if_needed "$server_main_file" "$input_mb")"; then
+      if [ "$updated_config" = '1' ]; then
+        xmj_font_set_notice 'warn' "配置键已经改了，但 bodyParser 没补成功：$(xmj_display_path "$server_main_file")"
+      else
+        xmj_font_set_notice 'warn' "bodyParser limit 没补成功：$(xmj_display_path "$server_main_file")"
       fi
-      ;;
-    yaml_top)
-      if ! xmj_tavern_setting_set_yaml_top_value "$config_file" "$key" "$stored_value"; then
-        xmj_font_set_notice 'warn' "文件聊天上限没写进去：$(xmj_display_path "$config_file")"
-        return 1
-      fi
-      ;;
-    *)
-      xmj_font_set_notice 'warn' '文件聊天上限这次没匹配到可写入位置。'
       return 1
-      ;;
-  esac
+    fi
+  fi
 
-  xmj_font_set_notice 'success' "已把 ${key_label} 改成 $(xmj_tavern_setting_size_display_text "$stored_value" "$resolved_unit")：$(xmj_display_path "$config_file")"
+  if [ "$updated_config" = '1' ] && [ "${parser_updates:-0}" -gt 0 ]; then
+    xmj_font_set_notice 'success' "已把 ${key_label} 改成 $(xmj_tavern_setting_size_display_text "$stored_value" "$resolved_unit")，bodyParser 也补到了 ${input_mb} MB。"
+    return 0
+  fi
+
+  if [ "$updated_config" = '1' ]; then
+    xmj_font_set_notice 'success' "已把 ${key_label} 改成 $(xmj_tavern_setting_size_display_text "$stored_value" "$resolved_unit")：$(xmj_display_path "$config_file")"
+    return 0
+  fi
+
+  if [ "${parser_updates:-0}" -gt 0 ]; then
+    xmj_font_set_notice 'success' "当前版本没匹配到上传上限键，已先把 bodyParser 补到 ${input_mb} MB：$(xmj_display_path "$server_main_file")"
+    return 0
+  fi
+
+  xmj_font_set_notice 'success' "当前版本没匹配到上传上限键，但 bodyParser 已经不低于 ${input_mb} MB。"
   return 0
 }
 
@@ -1973,6 +2393,11 @@ xmj_tavern_setting_update_memory_limit() {
       ;;
   esac
 
+  if [ "$memory_limit_mb" -gt 65536 ]; then
+    xmj_font_set_notice 'warn' '先别一次把启动内存拉得太离谱；建议从 2048 / 4096 / 6144 这几个值开始试。'
+    return 1
+  fi
+
   if [ "$memory_limit_mb" -eq 0 ]; then
     if ! xmj_config_upsert_value 'XMJ_TAVERN_NODE_MEMORY_MB' '0'; then
       xmj_font_set_notice 'warn' "默认启动内存没写回配置：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
@@ -1981,6 +2406,11 @@ xmj_tavern_setting_update_memory_limit() {
 
     xmj_font_set_notice 'success' '已恢复默认启动内存；下次 01 启动酒馆时生效。'
     return 0
+  fi
+
+  if [ "$memory_limit_mb" -lt 512 ]; then
+    xmj_font_set_notice 'warn' '低于 512 MB 基本帮不上忙；建议至少从 1024 MB 开始，常用值是 2048 或 4096。'
+    return 1
   fi
 
   if ! xmj_config_upsert_value 'XMJ_TAVERN_NODE_MEMORY_MB' "$memory_limit_mb"; then
@@ -1995,6 +2425,8 @@ xmj_tavern_setting_update_memory_limit() {
 xmj_tavern_setting_update_port_conflict() {
   local port_value="${1:-}"
   local config_file=''
+  local current_tavern_port=''
+  local current_script_port="${XMJ_TAVERN_PORT:-8000}"
 
   case "$port_value" in
     ''|*[!0-9]*)
@@ -2004,7 +2436,17 @@ xmj_tavern_setting_update_port_conflict() {
   esac
 
   if [ "$port_value" -lt 1 ] || [ "$port_value" -gt 65535 ]; then
-    xmj_font_set_notice 'warn' '端口只能在 1 到 65535 之间。'
+      xmj_font_set_notice 'warn' '端口只能在 1 到 65535 之间。'
+      return 1
+  fi
+
+  if xmj_tavern_setting_port_is_forbidden "$port_value"; then
+    xmj_font_set_notice 'warn' '这个端口不在建议范围内；优先用 10000 到 49151 之间的普通端口。'
+    return 1
+  fi
+
+  if xmj_tavern_setting_port_is_high_risk "$port_value"; then
+    xmj_font_set_notice 'warn' '这个端口属于高冲突段，容易和常见服务撞车；换个普通端口更稳。'
     return 1
   fi
 
@@ -2012,6 +2454,12 @@ xmj_tavern_setting_update_port_conflict() {
   if [ -z "$config_file" ]; then
     xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
     return 1
+  fi
+
+  current_tavern_port="$(xmj_tavern_setting_yaml_top_value "$config_file" 'port')"
+  if [ "$current_tavern_port" = "$port_value" ] && [ "$current_script_port" = "$port_value" ]; then
+    xmj_font_set_notice 'success' "酒馆和面板现在已经都在走 ${port_value}。"
+    return 0
   fi
 
   if ! xmj_tavern_setting_set_yaml_top_value "$config_file" 'port' "$port_value"; then
@@ -2080,10 +2528,12 @@ xmj_tavern_setting_apply_avatar_hd_fix() {
   return 0
 }
 
-xmj_tavern_setting_apply_stutter_fix() {
+xmj_tavern_setting_apply_chat_loading_guard() {
+  local mode="${1:-stutter_fix}"
   local config_file=''
   local settings_file=''
   local user_name=''
+  local success_text=''
 
   user_name="$(xmj_tavern_setting_user_name)"
   config_file="$(xmj_tavern_setting_config_file)"
@@ -2100,16 +2550,70 @@ xmj_tavern_setting_apply_stutter_fix() {
   fi
 
   if ! xmj_tavern_setting_set_yaml_top_value "$config_file" 'lazyLoadCharacters' 'true'; then
-    xmj_font_set_notice 'warn' "卡顿修复的第 1 步写入失败：$(xmj_display_path "$config_file")"
+    xmj_font_set_notice 'warn' "聊天保护的第 1 步写入失败：$(xmj_display_path "$config_file")"
     return 1
   fi
 
   if ! xmj_tavern_setting_set_json_bool_value "$settings_file" 'auto_load_chat' 'false'; then
-    xmj_font_set_notice 'warn' "卡顿修复的第 2 步写入失败：$(xmj_display_path "$settings_file")"
+    xmj_font_set_notice 'warn' "聊天保护的第 2 步写入失败：$(xmj_display_path "$settings_file")"
     return 1
   fi
 
-  xmj_font_set_notice 'success' "已完成卡顿修复，当前用户名：${user_name}；重开酒馆后再看效果。"
+  case "$mode" in
+    chat_freeze_fix)
+      success_text="已关掉自动加载聊天，并打开角色懒加载；当前用户名：${user_name}。"
+      ;;
+    *)
+      success_text="已完成卡顿修复，当前用户名：${user_name}；重开酒馆后再看效果。"
+      ;;
+  esac
+
+  xmj_font_set_notice 'success' "$success_text"
+  return 0
+}
+
+xmj_tavern_setting_apply_stutter_fix() {
+  xmj_tavern_setting_apply_chat_loading_guard 'stutter_fix'
+}
+
+xmj_tavern_setting_apply_chat_freeze_fix() {
+  xmj_tavern_setting_apply_chat_loading_guard 'chat_freeze_fix'
+}
+
+xmj_tavern_setting_apply_beautify_freeze_fix() {
+  local user_name=''
+  local settings_file=''
+  local theme_value=''
+  local custom_css_value=''
+
+  user_name="$(xmj_tavern_setting_user_name)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  if [ ! -f "$settings_file" ]; then
+    xmj_font_set_notice 'warn' "没找到这个用户的 settings.json：$(xmj_display_path "$settings_file")"
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_json_string_value "$settings_file" 'theme' 'Dark Lite'; then
+    xmj_font_set_notice 'warn' "安全主题没写进去：$(xmj_display_path "$settings_file")"
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_set_json_string_value "$settings_file" 'custom_css' ''; then
+    xmj_font_set_notice 'warn' "custom_css 没清空：$(xmj_display_path "$settings_file")"
+    return 1
+  fi
+
+  theme_value="$(xmj_tavern_setting_json_string_value "$settings_file" 'theme')"
+  custom_css_value="$(xmj_tavern_setting_json_string_value "$settings_file" 'custom_css')"
+
+  if [ "$theme_value" != 'Dark Lite' ] || [ -n "$custom_css_value" ]; then
+    xmj_font_set_notice 'warn' "美化保护没有完全落稳，先检查：$(xmj_display_path "$settings_file")"
+    return 1
+  fi
+
+  xmj_tavern_setting_set_json_string_value "$settings_file" 'customCss' '' >/dev/null 2>&1 || true
+  xmj_font_set_notice 'success' "已切回 Dark Lite 并清空自定义 CSS；当前用户名：${user_name}。"
   return 0
 }
 
@@ -2233,6 +2737,7 @@ xmj_handle_tavern_setting_action() {
           ;;
         2)
           xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_USER_RETURN_VIEW='stutter_fix'
           XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix_user'
           ;;
         *)
@@ -2244,14 +2749,14 @@ xmj_handle_tavern_setting_action() {
       case "$input" in
         0)
           xmj_font_clear_notice
-          XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix'
+          XMJ_TAVERN_SETTING_NEXT_VIEW="${XMJ_TAVERN_SETTING_USER_RETURN_VIEW:-stutter_fix}"
           ;;
         '')
           xmj_font_set_notice 'warn' '用户名不能为空。'
           ;;
         *)
           if xmj_tavern_setting_update_stutter_user "$input"; then
-            XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix'
+            XMJ_TAVERN_SETTING_NEXT_VIEW="${XMJ_TAVERN_SETTING_USER_RETURN_VIEW:-stutter_fix}"
           fi
           ;;
       esac
@@ -2318,8 +2823,20 @@ xmj_handle_tavern_setting_action() {
           xmj_font_clear_notice
           XMJ_TAVERN_SETTING_NEXT_VIEW='home'
           ;;
+        1)
+          if [ "$view" = 'chat_freeze_fix' ]; then
+            xmj_tavern_setting_apply_chat_freeze_fix
+          else
+            xmj_tavern_setting_apply_beautify_freeze_fix
+          fi
+          ;;
+        2)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_USER_RETURN_VIEW="$view"
+          XMJ_TAVERN_SETTING_NEXT_VIEW='stutter_fix_user'
+          ;;
         *)
-          xmj_font_set_notice 'warn' '这一页当前只支持输入 0 返回酒馆设置。'
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;

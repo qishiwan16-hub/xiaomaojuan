@@ -2032,8 +2032,11 @@ xmj_render_tavern_setting_page() {
     port_conflict)
       xmj_render_tavern_setting_port_conflict_page
       ;;
-    chat_freeze_fix|beautify_freeze_fix)
-      xmj_render_tavern_setting_placeholder_detail_page "$view"
+    chat_freeze_fix)
+      xmj_render_tavern_setting_chat_freeze_fix_page
+      ;;
+    beautify_freeze_fix)
+      xmj_render_tavern_setting_beautify_freeze_fix_page
       ;;
     backup_keep_count)
       xmj_render_tavern_setting_backup_keep_count_page
@@ -2139,6 +2142,12 @@ xmj_tavern_setting_status_text() {
       ;;
     port_conflict)
       xmj_tavern_setting_port_conflict_status_text
+      ;;
+    chat_freeze_fix)
+      xmj_tavern_setting_chat_freeze_fix_status_text
+      ;;
+    beautify_freeze_fix)
+      xmj_tavern_setting_beautify_freeze_fix_status_text
       ;;
     backup_keep_count)
       printf '当前：保留最新 %s 个' "$(xmj_backup_cleanup_keep_count)"
@@ -2407,6 +2416,205 @@ xmj_render_tavern_setting_placeholder_detail_page() {
   printf '\n'
   xmj_render_action_item '0' '返回酒馆设置'
   xmj_render_action_footer '输入 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_stutter_fix_user_page() {
+  local current_user=''
+  local default_user=''
+
+  current_user="$(xmj_tavern_setting_user_name)"
+  default_user="$(xmj_tavern_setting_default_user_name)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '修改用户名' 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里填的是酒馆 data 目录下的用户名文件夹' \
+    '猫猫会按这个名字去找对应的 settings.json。' \
+    "如果没有开多用户，直接用 ${default_user} 就好。"
+  printf '\n'
+  xmj_render_fact_line '当前用户名' "$current_user"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '直接输入用户名' '输入后会保存并回到上一级'
+  xmj_render_action_item '0' '返回上一级'
+  xmj_render_action_footer '直接输入用户名 / 0 返回上一级'
+}
+
+xmj_render_tavern_setting_file_chat_limit_page() {
+  local config_file=''
+  local server_main_file=''
+  local body_parser_limit=''
+  local target=''
+  local scope=''
+  local section=''
+  local key=''
+  local unit_hint=''
+  local current_value=''
+  local resolved_unit=''
+  local matched_key='当前版本没匹配到 config 键'
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  server_main_file="$(xmj_tavern_setting_server_main_file)"
+  body_parser_limit="$(xmj_tavern_setting_body_parser_limit_text "$server_main_file")"
+  target="$(xmj_tavern_setting_file_chat_limit_target)"
+
+  if [ -n "$target" ]; then
+    IFS='|' read -r scope config_file section key unit_hint current_value <<EOF
+$target
+EOF
+    resolved_unit="$(xmj_tavern_setting_size_unit_from_hint "$unit_hint" "$current_value")"
+    matched_key="$(xmj_tavern_setting_file_chat_limit_key_label "$scope" "$section" "$key") = $(xmj_tavern_setting_size_display_text "$current_value" "$resolved_unit")"
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'file_chat_limit')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会同时检查 config 里的上传上限键和 bodyParser 硬限制' \
+    '猫猫会先在当前 config.yaml 里找已经存在的那一项来改；如果 server-main.js 里的 bodyParser limit 比你想要的更低，也会顺手补上。' \
+    '这里输入的是 MB 数字；如果 config 键本身记的是 bytes，猫猫会自动帮你换算。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'file_chat_limit')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'file_chat_limit')"
+  xmj_render_fact_line '匹配到的 config 键' "$matched_key"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_fact_line 'bodyParser limit' "$body_parser_limit"
+  xmj_render_fact_line '代码文件' "$(xmj_display_path "${server_main_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成新的文件聊天上限（按 MB 输入）'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入新的上限数字 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_memory_limit_page() {
+  local memory_limit_mb="${XMJ_TAVERN_NODE_MEMORY_MB:-0}"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'memory_limit')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项改的是小猫卷启动酒馆时附加的 Node 内存上限' \
+    '猫猫会把数值写进 xiaomaojuan.conf 里的 XMJ_TAVERN_NODE_MEMORY_MB，01 启动酒馆时自动拼进 NODE_OPTIONS；这一项不直接去魔改 ST 核心源码。' \
+    '常用值可以先试 2048 / 4096 / 6144；输入 0 恢复默认启动内存，回车可以直接返回酒馆设置。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'memory_limit')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'memory_limit')"
+  xmj_render_fact_line '当前数值' "${memory_limit_mb} MB"
+  xmj_render_fact_line '推荐起点' '2048 / 4096 / 6144 MB'
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成新的内存上限（MB）'
+  xmj_render_action_item '0' '恢复默认启动内存'
+  xmj_render_action_item '回车' '返回酒馆设置'
+  xmj_render_action_footer '输入新的 MB 数字 / 0 恢复默认 / 回车返回酒馆设置'
+}
+
+xmj_render_tavern_setting_port_conflict_page() {
+  local config_file=''
+  local tavern_port=''
+  local script_port="${XMJ_TAVERN_PORT:-8000}"
+  local recommended_port=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  tavern_port="$(xmj_tavern_setting_yaml_top_value "$config_file" 'port')"
+  recommended_port="$(xmj_tavern_setting_random_safe_port)"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'port_conflict')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项会一起同步酒馆监听端口和小猫卷访问端口' \
+    '第 1 步会把酒馆 config.yaml 顶层的 port 改掉；第 2 步会把小猫卷自己的 XMJ_TAVERN_PORT 也同步成一样。' \
+    '推荐优先用 10000 到 49151 的普通端口；像 8000 / 8080 / 8888 这些常见端口容易撞车，猫猫会直接拦下来。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'port_conflict')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'port_conflict')"
+  xmj_render_fact_line '酒馆配置端口' "${tavern_port:-未读到}"
+  xmj_render_fact_line '面板访问端口' "$script_port"
+  xmj_render_fact_line '推荐范围' '10000 - 49151'
+  xmj_render_fact_line '建议端口' "$recommended_port"
+  xmj_render_fact_line '酒馆配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_fact_line '面板配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '端口数字' '直接改成新的端口'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入新的端口数字 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_chat_freeze_fix_page() {
+  local config_file=''
+  local user_name=''
+  local settings_file=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  user_name="$(xmj_tavern_setting_user_name)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'chat_freeze_fix')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项专门处理一进酒馆就被聊天自动加载卡住的情况' \
+    '猫猫会把当前用户 settings.json 里的 auto_load_chat 改成 false，再把 config.yaml 里的 lazyLoadCharacters 改成 true。' \
+    '这样下次重开酒馆时，不会再一进来就强行把上一次聊天拖起来；有问题的聊天可以等你进得去之后再手动处理。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'chat_freeze_fix')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'chat_freeze_fix')"
+  xmj_render_fact_line '当前用户名' "$user_name"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_fact_line '设置文件' "$(xmj_display_path "$settings_file")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '2' '修改用户名'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 2 改用户名 / 0 返回酒馆设置'
+}
+
+xmj_render_tavern_setting_beautify_freeze_fix_page() {
+  local user_name=''
+  local settings_file=''
+  local theme_value=''
+  local custom_css=''
+
+  user_name="$(xmj_tavern_setting_user_name)"
+  settings_file="$(xmj_tavern_setting_user_settings_file "$user_name")"
+  theme_value="$(xmj_tavern_setting_json_string_value "$settings_file" 'theme')"
+  custom_css="$(xmj_tavern_setting_json_string_value "$settings_file" 'custom_css')"
+  if [ -z "$custom_css" ]; then
+    custom_css="$(xmj_tavern_setting_json_string_value "$settings_file" 'customCss')"
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'beautify_freeze_fix')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这项专门处理主题或自定义 CSS 把酒馆界面卡死的情况' \
+    '猫猫会把当前用户 settings.json 里的 theme 改回 Dark Lite，并把 custom_css 清空。' \
+    '如果是某个主题包、残留美化或者一段坏掉的自定义 CSS 让你连设置页都点不进去，这一项就是在酒馆外面把它们先撤掉。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'beautify_freeze_fix')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'beautify_freeze_fix')"
+  xmj_render_fact_line '当前用户名' "$user_name"
+  xmj_render_fact_line '当前主题' "${theme_value:-未读到}"
+  xmj_render_fact_line 'custom_css' "${custom_css:+有内容}${custom_css:-空的}"
+  xmj_render_fact_line '设置文件' "$(xmj_display_path "$settings_file")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '切回安全主题'
+  xmj_render_action_item '2' '修改用户名'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 2 改用户名 / 0 返回酒馆设置'
 }
 
 xmj_render_tavern_setting_backup_keep_count_page() {
