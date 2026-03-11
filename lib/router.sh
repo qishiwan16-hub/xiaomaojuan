@@ -556,6 +556,263 @@ xmj_setting_refresh_script_repo_state() {
   return 0
 }
 
+xmj_setting_trim_text() {
+  local text="${1:-}"
+
+  text="${text//$'\r'/}"
+  text="${text#"${text%%[![:space:]]*}"}"
+  text="${text%"${text##*[![:space:]]}"}"
+  printf '%s' "$text"
+}
+
+xmj_setting_read_first_nonempty_line() {
+  local file_path="${1:-}"
+  local line=''
+  local trimmed=''
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed="$(xmj_setting_trim_text "$line")"
+    if [ -z "$trimmed" ]; then
+      continue
+    fi
+
+    printf '%s' "$trimmed"
+    return 0
+  done < "$file_path"
+
+  return 1
+}
+
+xmj_setting_script_version_file() {
+  printf '%s' "${XMJ_ROOT_DIR:-.}/VERSION"
+}
+
+xmj_setting_script_changelog_file() {
+  printf '%s' "${XMJ_ROOT_DIR:-.}/CHANGELOG.md"
+}
+
+xmj_setting_script_version_for_ref() {
+  local repo_path="${1:-}"
+  local ref_name="${2:-HEAD}"
+  local line=''
+  local trimmed=''
+  local describe_name=''
+  local commit_name=''
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    printf '%s' ''
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed="$(xmj_setting_trim_text "$line")"
+    if [ -z "$trimmed" ]; then
+      continue
+    fi
+
+    printf '%s' "$trimmed"
+    return 0
+  done < <(git -C "$repo_path" show "${ref_name}:VERSION" 2>/dev/null || true)
+
+  describe_name="$(git -C "$repo_path" describe --tags --always "$ref_name" 2>/dev/null || true)"
+  if [ -n "$describe_name" ]; then
+    printf '%s' "$describe_name"
+    return 0
+  fi
+
+  commit_name="$(git -C "$repo_path" rev-parse --short "$ref_name" 2>/dev/null || true)"
+  printf '%s' "$commit_name"
+}
+
+xmj_setting_script_changelog_for_ref() {
+  local repo_path="${1:-}"
+  local ref_name="${2:-HEAD}"
+  local line=''
+  local trimmed=''
+  local note=''
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    printf '%s' '暂无'
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed="$(xmj_setting_trim_text "$line")"
+    case "$trimmed" in
+      ''|'#'*|'```'*|'---'|'***')
+        continue
+        ;;
+    esac
+
+    printf '%s' "$trimmed"
+    return 0
+  done < <(git -C "$repo_path" show "${ref_name}:CHANGELOG.md" 2>/dev/null || true)
+
+  note="$(git -C "$repo_path" show -s --format=%s "$ref_name" 2>/dev/null || true)"
+  note="$(xmj_setting_trim_text "$note")"
+  if [ -n "$note" ]; then
+    printf '%s' "$note"
+    return 0
+  fi
+
+  printf '%s' '暂无'
+}
+
+xmj_setting_script_current_version_text() {
+  local version_file=''
+  local version_text=''
+
+  version_file="$(xmj_setting_script_version_file)"
+  version_text="$(xmj_setting_read_first_nonempty_line "$version_file" 2>/dev/null || true)"
+  if [ -n "$version_text" ]; then
+    printf '%s' "$version_text"
+    return 0
+  fi
+
+  xmj_setting_refresh_script_repo_state >/dev/null 2>&1 || true
+  printf '%s' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+}
+
+xmj_setting_script_current_changelog_text() {
+  local changelog_file=''
+  local line=''
+  local trimmed=''
+  local repo_path="${XMJ_ROOT_DIR:-.}"
+
+  changelog_file="$(xmj_setting_script_changelog_file)"
+  if [ -f "$changelog_file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      trimmed="$(xmj_setting_trim_text "$line")"
+      case "$trimmed" in
+        ''|'#'*|'```'*|'---'|'***')
+          continue
+          ;;
+      esac
+
+      printf '%s' "$trimmed"
+      return 0
+    done < "$changelog_file"
+  fi
+
+  printf '%s' "$(xmj_setting_script_changelog_for_ref "$repo_path" 'HEAD')"
+}
+
+xmj_setting_script_version_info_text() {
+  printf '当前：%s；更新：%s' \
+    "$(xmj_setting_script_current_version_text)" \
+    "$(xmj_setting_script_current_changelog_text)"
+}
+
+xmj_setting_refresh_script_update_status() {
+  local repo_path="${XMJ_ROOT_DIR:-}"
+  local upstream_ref=''
+  local remote_name='origin'
+  local remote_branch=''
+  local counts=''
+  local left_count='0'
+  local right_count='0'
+
+  XMJ_SETTING_SCRIPT_UPDATE_STATE='unknown'
+  XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='还没检查远端版本'
+  XMJ_SETTING_SCRIPT_UPDATE_CAN_APPLY='0'
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION='未检查'
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE='暂无'
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT=''
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_BRANCH=''
+
+  xmj_setting_refresh_script_repo_state
+
+  if [ "${XMJ_SETTING_SCRIPT_GIT_OK:-0}" != '1' ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='当前环境没检测到 Git'
+    return 1
+  fi
+
+  if [ "${XMJ_SETTING_SCRIPT_REPO_OK:-0}" != '1' ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='当前脚本目录不是 Git 仓库'
+    return 1
+  fi
+
+  if [ "${XMJ_SETTING_SCRIPT_BRANCH:-detached}" = 'detached' ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='当前仓库处于 detached HEAD，不能直接检查更新'
+    return 1
+  fi
+
+  upstream_ref="${XMJ_SETTING_SCRIPT_UPSTREAM:-}"
+  case "$upstream_ref" in
+    */*)
+      remote_name="${upstream_ref%%/*}"
+      remote_branch="${upstream_ref#*/}"
+      ;;
+    *)
+      remote_branch="${XMJ_SETTING_SCRIPT_BRANCH:-}"
+      ;;
+  esac
+
+  if [ -z "$remote_branch" ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='当前分支还没绑定可检查的远端'
+    return 1
+  fi
+
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_BRANCH="${remote_name}/${remote_branch}"
+
+  if ! git -C "$repo_path" fetch --quiet "$remote_name" "$remote_branch" >/dev/null 2>&1; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='check_failed'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='远端版本检查失败，请先确认网络或仓库权限'
+    XMJ_SETTING_SCRIPT_UPDATE_CAN_APPLY='1'
+    return 1
+  fi
+
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT="$(git -C "$repo_path" rev-parse --short FETCH_HEAD 2>/dev/null || true)"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION="$(xmj_setting_script_version_for_ref "$repo_path" 'FETCH_HEAD')"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE="$(xmj_setting_script_changelog_for_ref "$repo_path" 'FETCH_HEAD')"
+
+  counts="$(git -C "$repo_path" rev-list --left-right --count "HEAD...FETCH_HEAD" 2>/dev/null || true)"
+  left_count="${counts%%[[:space:]]*}"
+  right_count="${counts##*[[:space:]]}"
+
+  case "$left_count" in
+    ''|*[!0-9]*)
+      left_count='0'
+      ;;
+  esac
+  case "$right_count" in
+    ''|*[!0-9]*)
+      right_count='0'
+      ;;
+  esac
+
+  if [ "$left_count" = '0' ] && [ "$right_count" = '0' ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='latest'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='当前已经是最新版本'
+    return 0
+  fi
+
+  if [ "$left_count" = '0' ] && [ "$right_count" != '0' ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='behind'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="检测到远端有 ${right_count} 个新提交，可更新到 ${XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION:-未识别}"
+    XMJ_SETTING_SCRIPT_UPDATE_CAN_APPLY='1'
+    return 0
+  fi
+
+  if [ "$left_count" != '0' ] && [ "$right_count" = '0' ]; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='ahead'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="当前本地版本领先远端 ${left_count} 个提交"
+    return 0
+  fi
+
+  XMJ_SETTING_SCRIPT_UPDATE_STATE='diverged'
+  XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="当前分支和远端已分叉（本地 ${left_count} / 远端 ${right_count}）"
+  return 0
+}
+
 xmj_setting_script_worktree_text() {
   if [ "${XMJ_SETTING_SCRIPT_GIT_OK:-0}" != '1' ]; then
     printf '%s' '未检测到 Git'
@@ -745,6 +1002,27 @@ xmj_setting_run_script_update() {
   local log_file=''
   local restore_failed='0'
   local backup_hint=''
+
+  xmj_setting_refresh_script_update_status >/dev/null 2>&1 || true
+
+  case "${XMJ_SETTING_SCRIPT_UPDATE_STATE:-unknown}" in
+    latest)
+      xmj_font_set_notice 'info' '当前脚本已经是最新版本。'
+      return 0
+      ;;
+    ahead)
+      xmj_font_set_notice 'info' '当前本地版本已经领先远端，不需要直接更新。'
+      return 1
+      ;;
+    diverged)
+      xmj_font_set_notice 'warn' '当前分支和远端已经分叉，先处理分支状态后再更新。'
+      return 1
+      ;;
+    blocked)
+      xmj_font_set_notice 'warn' "${XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT:-当前状态不适合直接更新。}"
+      return 1
+      ;;
+  esac
 
   if ! xmj_require_script_password 'script_update'; then
     xmj_font_set_notice 'info' '这次脚本更新先取消啦。'
@@ -1173,10 +1451,31 @@ xmj_handle_script_setting_action() {
           XMJ_SETTING_NEXT_VIEW='home'
           ;;
         1)
-          xmj_setting_run_script_update
+          xmj_setting_refresh_script_update_status >/dev/null 2>&1 || true
+          case "${XMJ_SETTING_SCRIPT_UPDATE_STATE:-unknown}" in
+            latest)
+              xmj_font_set_notice 'info' '当前脚本已经是最新版本。'
+              ;;
+            ahead)
+              xmj_font_set_notice 'info' '当前本地版本已经领先远端，不需要直接更新。'
+              ;;
+            diverged)
+              xmj_font_set_notice 'warn' '当前分支和远端已经分叉，先处理分支状态后再更新。'
+              ;;
+            blocked)
+              xmj_font_set_notice 'warn' "${XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT:-当前状态不适合直接更新。}"
+              ;;
+            *)
+              xmj_setting_run_script_update
+              ;;
+          esac
           ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 0。'
+          if [ "${XMJ_SETTING_SCRIPT_UPDATE_CAN_APPLY:-0}" = '1' ]; then
+            xmj_font_set_notice 'warn' '仅支持输入 1 / 0。'
+          else
+            xmj_font_set_notice 'warn' '当前这一页只需要输入 0 返回设置中心。'
+          fi
           ;;
       esac
       ;;
