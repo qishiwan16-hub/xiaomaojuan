@@ -180,13 +180,11 @@ xmj_launch_extract_entry_url_from_log() {
     return 0
   fi
 
-  url="$(sed -n \
+  url="$(tr -d '\r' < "$log_file" 2>/dev/null | sed -n \
     -e 's/.*[Gg]o to:[[:space:]]*\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*酒馆入口已可访问：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*已从后台日志识别到入口：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*准备检测酒馆入口：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
-    "$log_file" 2>/dev/null | tail -n 1)"
+    -e 's/.*入口.*\(http[^[:space:]]*\).*/\1/p' \
+    -e 's/.*进入链接.*\(http[^[:space:]]*\).*/\1/p' \
+    | tail -n 1)"
   printf '%s' "$url"
 }
 
@@ -301,10 +299,10 @@ xmj_launch_detect_runtime_entry_url_from_log() {
     start_line='1'
   fi
 
-  url="$(sed -n "${start_line},\$p" "$file" 2>/dev/null | sed -n \
+  url="$(sed -n "${start_line},\$p" "$file" 2>/dev/null | tr -d '\r' | sed -n \
     -e 's/.*[Gg]o to:[[:space:]]*\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*已从后台日志识别到入口：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
+    -e 's/.*入口.*\(http[^[:space:]]*\).*/\1/p' \
+    -e 's/.*进入链接.*\(http[^[:space:]]*\).*/\1/p' \
     | tail -n 1)"
 
   XMJ_LAUNCH_READY_SCAN_LINE=$((total_lines + 1))
@@ -314,6 +312,56 @@ xmj_launch_detect_runtime_entry_url_from_log() {
     printf '%s' "$url"
     return 0
   fi
+
+  printf '%s' ''
+  return 1
+}
+
+xmj_launch_file_has_go_to_signal() {
+  local log_file="${1:-}"
+
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    return 1
+  fi
+
+  tr -d '\r' < "$log_file" 2>/dev/null | grep -aEq '[Gg]o to:[[:space:]]*http'
+}
+
+xmj_launch_detect_ready_entry_url() {
+  local detected_url=''
+  local fallback_url=''
+  local default_url=''
+  local file=''
+
+  detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
+  if [ -n "$detected_url" ]; then
+    printf '%s' "$detected_url"
+    return 0
+  fi
+
+  default_url="$(xmj_launch_normalize_runtime_url "${XMJ_LAUNCH_ENTRY_URL:-$(xmj_launch_entry_url)}" || true)"
+  for file in "${XMJ_LAUNCH_RUNTIME_FILE:-}" "${XMJ_LAUNCH_LOG_FILE:-}"; do
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+      continue
+    fi
+
+    fallback_url="$(xmj_launch_extract_entry_url_from_log "$file" || true)"
+    fallback_url="$(xmj_launch_normalize_runtime_url "$fallback_url" || true)"
+    if [ -n "$fallback_url" ]; then
+      printf '%s' "$fallback_url"
+      return 0
+    fi
+
+    if xmj_launch_file_has_go_to_signal "$file"; then
+      if [ -n "$default_url" ]; then
+        printf '%s' "$default_url"
+        return 0
+      fi
+
+      printf '%s' "$(xmj_launch_entry_url)"
+      return 0
+    fi
+  done
 
   printf '%s' ''
   return 1
@@ -1498,7 +1546,7 @@ xmj_launch_wait_for_running() {
       return 1
     fi
 
-    detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
+    detected_url="$(xmj_launch_detect_ready_entry_url || true)"
     if [ -n "$detected_url" ]; then
       if [ "$detected_url" != "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
         xmj_launch_log_line "已从后台日志识别到入口：${detected_url}"
