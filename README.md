@@ -1,5 +1,11 @@
 # 小猫卷
 
+当前版本：`1.0.0`
+
+发布分支：`main`
+
+更新日志：见 `CHANGELOG.md`
+
 小猫卷是一个运行在 **Termux** 里的 Bash 一键脚本项目，当前还处于**预览 / 框架阶段**。
 
 现阶段的重点不是提供完整业务能力，而是先把下面这些底座搭起来：
@@ -96,8 +102,15 @@ pkg install git nano
 ### 2. 克隆仓库
 
 ```bash
-git clone https://github.com/qishiwan16-hub/xiaomaojuan.git
+git clone -b main --single-branch https://github.com/qishiwan16-hub/xiaomaojuan.git
 cd xiaomaojuan
+```
+
+如果你之前拉的是别的分支，先切到 `main`：
+
+```bash
+git fetch origin main
+git switch main
 ```
 
 ### 3. 赋予执行权限
@@ -225,7 +238,7 @@ docs/config-guide.md
 ```bash
 pkg update
 pkg install git nano
-git clone https://github.com/qishiwan16-hub/xiaomaojuan.git
+git clone -b main --single-branch https://github.com/qishiwan16-hub/xiaomaojuan.git
 cd xiaomaojuan
 chmod +x xiaomaojuan.sh
 nano config/xiaomaojuan.conf

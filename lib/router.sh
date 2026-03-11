@@ -494,6 +494,7 @@ xmj_setting_refresh_script_repo_state() {
   local remote_url=''
   local upstream_ref=''
   local worktree_state=''
+  local release_version=''
 
   XMJ_SETTING_SCRIPT_GIT_OK='0'
   XMJ_SETTING_SCRIPT_REPO_OK='0'
@@ -528,6 +529,7 @@ xmj_setting_refresh_script_repo_state() {
   remote_url="$(git -C "$repo_path" remote get-url origin 2>/dev/null || true)"
   upstream_ref="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
   worktree_state="$(git -C "$repo_path" status --porcelain --untracked-files=no 2>/dev/null || true)"
+  release_version="$(xmj_setting_script_release_version)"
 
   XMJ_SETTING_SCRIPT_COMMIT="${commit_name:-未识别}"
   XMJ_SETTING_SCRIPT_TAG="$exact_tag"
@@ -543,6 +545,8 @@ xmj_setting_refresh_script_repo_state() {
 
   if [ -n "$exact_tag" ]; then
     XMJ_SETTING_SCRIPT_VERSION="$exact_tag"
+  elif [ -n "$release_version" ]; then
+    XMJ_SETTING_SCRIPT_VERSION="$release_version"
   elif [ -n "$describe_name" ]; then
     XMJ_SETTING_SCRIPT_VERSION="$describe_name"
   elif [ -n "$commit_name" ]; then
@@ -573,6 +577,60 @@ xmj_setting_script_worktree_text() {
   fi
 
   printf '%s' '工作区干净'
+}
+
+xmj_setting_script_release_branch() {
+  printf '%s' 'main'
+}
+
+xmj_setting_script_release_version_file() {
+  printf '%s' "${XMJ_ROOT_DIR:-.}/VERSION"
+}
+
+xmj_setting_script_release_version() {
+  local version_file=''
+  local version_text=''
+
+  version_file="$(xmj_setting_script_release_version_file)"
+  if [ -f "$version_file" ]; then
+    IFS= read -r version_text < "$version_file" || true
+    version_text="${version_text%$'\r'}"
+  fi
+
+  printf '%s' "$version_text"
+}
+
+xmj_setting_script_update_checkout_release_branch() {
+  local repo_path="${1:-}"
+  local log_file="${2:-/dev/null}"
+  local target_branch=''
+  local current_branch=''
+
+  target_branch="$(xmj_setting_script_release_branch)"
+  current_branch="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+  if ! git -C "$repo_path" fetch origin "$target_branch" >>"$log_file" 2>&1; then
+    return 1
+  fi
+
+  if ! git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
+    return 1
+  fi
+
+  if [ "$current_branch" != "$target_branch" ]; then
+    if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$target_branch"; then
+      if ! git -C "$repo_path" checkout "$target_branch" >>"$log_file" 2>&1; then
+        return 1
+      fi
+    else
+      if ! git -C "$repo_path" checkout -b "$target_branch" --track "origin/$target_branch" >>"$log_file" 2>&1; then
+        return 1
+      fi
+    fi
+  fi
+
+  git -C "$repo_path" branch --set-upstream-to "origin/$target_branch" "$target_branch" >>"$log_file" 2>&1 || true
+  return 0
 }
 
 xmj_setting_script_update_protected_config_relpath() {
@@ -763,13 +821,8 @@ xmj_setting_run_script_update() {
     return 1
   fi
 
-  if [ "${XMJ_SETTING_SCRIPT_BRANCH:-detached}" = 'detached' ]; then
-    xmj_font_set_notice 'warn' '当前仓库处于 detached HEAD，先切回正常分支再更新。'
-    return 1
-  fi
-
-  if [ "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}" = '未配置' ]; then
-    xmj_font_set_notice 'warn' '当前分支还没绑定上游仓库，猫猫暂时没法直接拉更新。'
+  if [ "${XMJ_SETTING_SCRIPT_REMOTE:-未配置}" = '未配置' ]; then
+    xmj_font_set_notice 'warn' '当前仓库还没配置 origin，猫猫暂时没法拉 main 分支更新。'
     return 1
   fi
 
@@ -796,6 +849,7 @@ xmj_setting_run_script_update() {
     printf '[info] 根目录：%s\n' "$repo_path"
     printf '[info] 当前分支：%s\n' "${XMJ_SETTING_SCRIPT_BRANCH:-detached}"
     printf '[info] 当前提交：%s\n' "$before_commit"
+    printf '[info] 目标分支：%s\n' "$(xmj_setting_script_release_branch)"
   } >>"$log_file" 2>&1
 
   if ! xmj_setting_script_update_protect_local_config "$repo_path" "$log_file"; then
@@ -803,7 +857,22 @@ xmj_setting_run_script_update() {
     return 1
   fi
 
-  if ! git -C "$repo_path" pull --ff-only >>"$log_file" 2>&1; then
+  if ! xmj_setting_script_update_checkout_release_branch "$repo_path" "$log_file"; then
+    if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+      restore_failed='1'
+      backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+    fi
+
+    if [ "$restore_failed" = '1' ]; then
+      xmj_font_set_notice 'warn' "脚本没能切到 main 分支，而且本地配置恢复失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+    else
+      xmj_font_set_notice 'warn' "脚本没能切到 main 分支，细节可看：$(xmj_display_path "$log_file")"
+    fi
+    xmj_setting_refresh_script_repo_state
+    return 1
+  fi
+
+  if ! git -C "$repo_path" pull --ff-only origin "$(xmj_setting_script_release_branch)" >>"$log_file" 2>&1; then
     if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
       restore_failed='1'
       backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"

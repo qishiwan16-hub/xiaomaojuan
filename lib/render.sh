@@ -2017,12 +2017,13 @@ xmj_render_setting_script_update_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'script_update')" 'script update' 'setting'
   printf '\n'
-  printf '  %b这里会在小猫卷仓库里执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b这里会先对齐到 origin/%s，再执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$(xmj_setting_script_release_branch)" "$XMJ_RESET"
   printf '  %b如果只有 config/xiaomaojuan.conf 有本地改动，猫猫会先临时护住它再更新。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b如果这次真的拉到了新代码，猫猫会自动帮你重开小猫卷。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '当前版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
   xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_fact_line '更新分支' "$(xmj_setting_script_release_branch)"
   xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
   xmj_render_fact_line '上游分支' "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}"
   xmj_render_fact_line '工作区' "$(xmj_setting_script_worktree_text)"
