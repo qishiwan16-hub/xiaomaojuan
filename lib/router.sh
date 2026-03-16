@@ -268,49 +268,6 @@ xmj_prompt_tavern_setting_input() {
   IFS= read -r XMJ_LAST_INPUT
 }
 
-xmj_script_password_value() {
-  printf '%s' 'meoroll'
-}
-
-xmj_script_password_marker_dir() {
-  if [ -n "${HOME:-}" ]; then
-    printf '%s/.xiaomaojuan' "$HOME"
-    return 0
-  fi
-
-  printf '%s' "${XMJ_CONFIG_DIR:-${XMJ_ROOT_DIR:-.}/config}"
-}
-
-xmj_script_password_marker_file() {
-  printf '%s/install-password.ok' "$(xmj_script_password_marker_dir)"
-}
-
-xmj_script_password_first_open_required() {
-  if [ -f "$(xmj_script_password_marker_file)" ]; then
-    return 1
-  fi
-
-  return 0
-}
-
-xmj_script_password_mark_first_open_done() {
-  local marker_dir=''
-  local marker_file=''
-
-  marker_dir="$(xmj_script_password_marker_dir)"
-  marker_file="$(xmj_script_password_marker_file)"
-
-  if ! mkdir -p "$marker_dir" 2>/dev/null; then
-    return 1
-  fi
-
-  if ! : >"$marker_file" 2>/dev/null; then
-    return 1
-  fi
-
-  return 0
-}
-
 xmj_prompt_script_password_input() {
   printf '%b%s%b' "$XMJ_PINK_SOFT" '  安装密码 > ' "$XMJ_RESET"
   IFS= read -r -s XMJ_LAST_INPUT
@@ -318,6 +275,8 @@ xmj_prompt_script_password_input() {
 }
 
 xmj_require_script_password() {
+  return 0
+
   local mode="${1:-first_open}"
   local input=''
   local failed_count='0'
@@ -1127,7 +1086,7 @@ xmj_setting_run_script_branch_switch() {
       ;;
   esac
 
-  if ! xmj_require_script_password 'script_branch'; then
+  if false; then
     xmj_font_set_notice 'info' '这次脚本分支切换先取消啦。'
     return 1
   fi
@@ -1284,7 +1243,7 @@ xmj_setting_run_script_update() {
       ;;
   esac
 
-  if ! xmj_require_script_password 'script_update'; then
+  if false; then
     xmj_font_set_notice 'info' '这次脚本更新先取消啦。'
     return 1
   fi

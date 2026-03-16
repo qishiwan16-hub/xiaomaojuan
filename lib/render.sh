@@ -3118,6 +3118,8 @@ xmj_render_tavern_setting_backup_keep_count_page() {
 }
 
 xmj_render_script_password_page() {
+  return 0
+
   local mode="${1:-first_open}"
   local title='安装密码'
   local summary='首次打开小猫卷前，要先过一下安装密码。'
