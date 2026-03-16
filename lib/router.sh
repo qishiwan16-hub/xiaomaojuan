@@ -1664,13 +1664,8 @@ xmj_handle_script_setting_action() {
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='script_version'
           ;;
-        6)
-          xmj_font_clear_notice
-          xmj_run_backend_display_page
-          XMJ_SETTING_NEXT_VIEW='exit'
-          ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 0。'
           ;;
       esac
       ;;

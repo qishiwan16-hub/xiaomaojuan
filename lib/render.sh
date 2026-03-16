@@ -1936,11 +1936,7 @@ xmj_render_about_status_page() {
 }
 
 xmj_render_setting_overview_page() {
-  local log_count='0'
-
   xmj_setting_refresh_script_repo_state
-  xmj_setting_refresh_log_files
-  log_count="${#XMJ_SETTING_LOG_FILES[@]}"
 
   xmj_clear_screen
   xmj_render_header
@@ -1957,8 +1953,6 @@ xmj_render_setting_overview_page() {
   xmj_render_setting_card '4 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   printf '\n'
   xmj_render_setting_card '5 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
-  printf '\n'
-  xmj_render_setting_card '6 · 后台显示' '' "当前：${log_count} 份后台日志"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入字体管理'
@@ -1966,9 +1960,8 @@ xmj_render_setting_overview_page() {
   xmj_render_action_item '3' '检查脚本更新'
   xmj_render_action_item '4' '切换脚本分支'
   xmj_render_action_item '5' '查看脚本版本'
-  xmj_render_action_item '6' '查看后台'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 0 就好喵'
 }
 
 xmj_render_setting_font_page() {
