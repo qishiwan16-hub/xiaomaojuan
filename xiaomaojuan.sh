@@ -25,10 +25,14 @@ source "$XMJ_ROOT_DIR/lib/version_switch.sh"
 source "$XMJ_ROOT_DIR/lib/launch.sh"
 # shellcheck source=lib/maintenance_override.sh
 source "$XMJ_ROOT_DIR/lib/maintenance_override.sh"
+# shellcheck source=lib/backup_override.sh
+source "$XMJ_ROOT_DIR/lib/backup_override.sh"
 # shellcheck source=lib/extend.sh
 source "$XMJ_ROOT_DIR/lib/extend.sh"
 # shellcheck source=lib/router.sh
 source "$XMJ_ROOT_DIR/lib/router.sh"
+# shellcheck source=lib/tavern_setting_override.sh
+source "$XMJ_ROOT_DIR/lib/tavern_setting_override.sh"
 
 main() {
   xmj_bootstrap_config || true

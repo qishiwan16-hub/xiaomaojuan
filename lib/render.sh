@@ -1767,7 +1767,7 @@ xmj_render_launch_running_screen() {
   printf '\n'
   xmj_render_setting_card \
     '运行中' \
-    '已经等到 Go to 后切进运行页，下面会先保留启动尾部，再继续显示运行期后台输出。' \
+    '已经等到 SillyTavern is listening on 这行后切进运行页，下面会先保留启动尾部，再继续显示运行期后台输出。' \
     '按 Ctrl+C 会结束这次启动的酒馆，并回到首页。'
   printf '\n'
   printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
