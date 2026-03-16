@@ -2051,3 +2051,31 @@ xmj_run_tavern_launch() {
   xmj_launch_restore_int_trap
   return 0
 }
+
+xmj_launch_runtime_stream_enabled() {
+  return 1
+}
+
+xmj_launch_print_log_lines() {
+  local start_line="${1:-1}"
+  local end_line="${2:-0}"
+  local file="${3:-}"
+  local line=''
+
+  if [ -z "$file" ]; then
+    file="$(xmj_launch_display_log_file)"
+  fi
+
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    return 0
+  fi
+
+  if [ "$end_line" -lt "$start_line" ]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    printf '%s\n' "$line"
+  done < <(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null)
+}
