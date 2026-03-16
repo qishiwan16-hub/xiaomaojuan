@@ -1161,7 +1161,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在可以直接查看酒馆后台，扩展脚本入口仍保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在改成直接关闭酒馆，并会补跑 pkill node 兜底。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -2151,7 +2151,7 @@ xmj_render_setting_logs_page() {
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
-  printf '  %b01 进入运行中后，运行期后台只会在当前页面实时直显，不会继续保留到 06。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
+  printf '  %b01 进入运行中后，运行期后台只会在当前页面实时直显；06 现在改成关闭酒馆，不再承担后台查看。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
   printf '  %b这里现在只看 launch 启动日志和最近记录，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '  %b更新日志和脚本更新日志不会在这里出现；这里只看启动期与最近后台记录。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b删单个和按保留数量清理也只处理后台日志，不会碰更新日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"

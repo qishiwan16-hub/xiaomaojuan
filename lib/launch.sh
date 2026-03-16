@@ -2056,6 +2056,71 @@ xmj_launch_runtime_stream_enabled() {
   return 1
 }
 
+xmj_launch_prepare_log_file() {
+  local stamp=''
+
+  if [ -z "${XMJ_LOG_DIR:-}" ]; then
+    XMJ_LOG_DIR="${XMJ_ROOT_DIR:-.}/logs"
+  fi
+
+  if ! mkdir -p "$XMJ_LOG_DIR" 2>/dev/null; then
+    return 1
+  fi
+
+  stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='manual'
+  fi
+
+  XMJ_LAUNCH_LOG_FILE="$XMJ_LOG_DIR/launch-$stamp.log"
+  if ! : >"$XMJ_LAUNCH_LOG_FILE" 2>/dev/null; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_RUNTIME_FILE="$XMJ_LAUNCH_LOG_FILE"
+  XMJ_LAUNCH_RUNTIME_PENDING_FILE=''
+  XMJ_LAUNCH_STREAM_PIPE=''
+  XMJ_LAUNCH_STREAM_PID=''
+  XMJ_LAUNCH_STREAM_READY_FILE=''
+  XMJ_LAUNCH_STREAM_FRONTEND_FILE=''
+  XMJ_LAUNCH_STREAM_DIRECT='0'
+  XMJ_LAUNCH_LOG_CURSOR='0'
+  XMJ_LAUNCH_RUNTIME_LOG_START='0'
+  XMJ_LAUNCH_READY_SCAN_LINE='1'
+
+  xmj_launch_log_line '启动状态日志已创建。'
+  xmj_launch_log_line "目标目录：${XMJ_SILLYTAVERN_PATH:-未设置}"
+  return 0
+}
+
+xmj_launch_runtime_output_target() {
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '%s' "${XMJ_LAUNCH_LOG_FILE}"
+    return 0
+  fi
+
+  printf '%s' '/dev/null'
+}
+
+xmj_launch_extract_runtime_file_from_log() {
+  local log_file="${1:-}"
+
+  printf '%s' "$log_file"
+}
+
+xmj_launch_display_log_file() {
+  printf '%s' "${XMJ_LAUNCH_LOG_FILE:-}"
+}
+
+xmj_launch_mark_runtime_log_start() {
+  local total_lines='0'
+
+  total_lines="$(xmj_launch_log_line_count "${XMJ_LAUNCH_LOG_FILE:-}")"
+  XMJ_LAUNCH_RUNTIME_LOG_START=$((total_lines + 1))
+  XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+  XMJ_LAUNCH_READY_SCAN_LINE="$XMJ_LAUNCH_RUNTIME_LOG_START"
+}
+
 xmj_launch_print_log_lines() {
   local start_line="${1:-1}"
   local end_line="${2:-0}"
@@ -2078,4 +2143,147 @@ xmj_launch_print_log_lines() {
     line="${line%$'\r'}"
     printf '%s\n' "$line"
   done < <(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null)
+}
+
+xmj_launch_any_node_process_running() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep node >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v ps >/dev/null 2>&1; then
+    ps 2>/dev/null | grep -E '(^|[[:space:]])node([[:space:]]|$)' >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
+xmj_launch_run_pkill_node() {
+  if ! command -v pkill >/dev/null 2>&1; then
+    return 127
+  fi
+
+  pkill node >/dev/null 2>&1 || true
+  sleep 1 2>/dev/null || true
+  return 0
+}
+
+xmj_launch_stop_process() {
+  local reason="${1:-manual}"
+  local step=''
+  local pkill_status='127'
+
+  XMJ_LAUNCH_STOP_NOTE=''
+  xmj_launch_log_line "收到停止请求：${reason}"
+
+  if xmj_launch_process_alive; then
+    xmj_launch_send_signal 'TERM' || true
+    for step in 1 2 3 4 5; do
+      if ! xmj_launch_process_alive; then
+        xmj_launch_wait_process >/dev/null 2>&1 || true
+        break
+      fi
+      sleep 1 || true
+    done
+
+    if xmj_launch_process_alive; then
+      xmj_launch_log_line '常规 TERM 后仍未结束，准备继续发送 KILL。'
+      xmj_launch_send_signal 'KILL' || true
+      for step in 1 2 3; do
+        if ! xmj_launch_process_alive; then
+          xmj_launch_wait_process >/dev/null 2>&1 || true
+          break
+        fi
+        sleep 1 || true
+      done
+    fi
+  else
+    xmj_launch_wait_process >/dev/null 2>&1 || true
+  fi
+
+  pkill_status='127'
+  if xmj_launch_run_pkill_node; then
+    pkill_status='0'
+    xmj_launch_log_line '已执行 pkill node 兜底清理。'
+    XMJ_LAUNCH_STOP_NOTE='已补跑 pkill node 兜底清理。'
+  else
+    pkill_status=$?
+    xmj_launch_log_line '当前环境没有 pkill，跳过 pkill node 兜底。'
+    XMJ_LAUNCH_STOP_NOTE='当前环境没有 pkill，未执行 pkill node 兜底。'
+  fi
+
+  for step in 1 2 3; do
+    if ! xmj_launch_process_alive && ! xmj_launch_any_node_process_running; then
+      xmj_launch_wait_process >/dev/null 2>&1 || true
+      if [ "$pkill_status" = '0' ]; then
+        xmj_launch_log_line '已确认 node 进程结束。'
+      else
+        xmj_launch_log_line '已确认酒馆进程结束。'
+      fi
+      return 0
+    fi
+    sleep 1 || true
+  done
+
+  xmj_launch_log_line '停止请求已发出，但还没确认 node 进程完全结束。'
+  return 1
+}
+
+xmj_run_tavern_close_page() {
+  local had_session='0'
+  local summary_text='酒馆已关闭'
+  local detail_text=''
+  local title_text='关闭完成'
+
+  xmj_launch_reset_state
+  XMJ_LAUNCH_STOP_NOTE=''
+
+  if xmj_launch_attach_latest_session; then
+    had_session='1'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['06']}" 'close tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card \
+    '正在关闭酒馆' \
+    '猫猫会先按当前记录到的 PID / 进程组尝试正常关闭，再补跑一次 pkill node 兜底。' \
+    '这个入口现在专门用于停服，不再显示后台输出。'
+  printf '\n'
+  if [ "$had_session" = '1' ] && [ -n "${XMJ_LAUNCH_PID:-}" ]; then
+    xmj_render_fact_line '最近 PID' "${XMJ_LAUNCH_PID}"
+  fi
+  if [ "$had_session" = '1' ] && [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '启动日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
+  fi
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+
+  if xmj_launch_stop_process 'menu_close'; then
+    detail_text='本次停止流程已经执行完成。'
+    if [ -n "${XMJ_LAUNCH_STOP_NOTE:-}" ]; then
+      detail_text="${detail_text} ${XMJ_LAUNCH_STOP_NOTE}"
+    fi
+  else
+    title_text='关闭未确认'
+    summary_text='停止请求已发出'
+    detail_text='猫猫已经尝试常规停止，并额外补跑了 pkill node，但还没确认 node 进程完全结束。'
+    if [ -n "${XMJ_LAUNCH_STOP_NOTE:-}" ]; then
+      detail_text="${detail_text} ${XMJ_LAUNCH_STOP_NOTE}"
+    fi
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['06']}" 'close tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card "$title_text" "$summary_text" "$detail_text"
+  if [ "$had_session" = '1' ] && [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '启动日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
+  fi
+  xmj_render_page_footer '按回车返回首页'
+  return 0
 }

@@ -72,7 +72,7 @@ xmj_prompt_log_display_input() {
 }
 
 xmj_run_log_display_page() {
-  xmj_run_backend_display_page
+  xmj_run_tavern_close_page
   return 0
 }
 
