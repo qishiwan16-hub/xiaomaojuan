@@ -1183,7 +1183,7 @@ xmj_render_tavern_setting_overview_page() {
   printf '  %b需要按某个 data 用户文件夹去改 settings.json 的几项，现在统一走 13 默认文件夹设置；设好后会一直保留，不会自动改回 default-user。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b想改酒馆聊天和 settings 备份文件的留存数量，就走 14 聊天文件备份。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b所有会改文件的设置都会先把对应文件收进备份目录：%s%b\n' "$XMJ_BLUE_SOFT" "$(xmj_display_path "$backup_root")" "$XMJ_RESET"
-  printf '  %b默认文件夹入口：13 · 默认文件夹设置；聊天备份入口：14 · 聊天文件备份%b\n' "$XMJ_LILAC" "$XMJ_RESET"
+  printf '  %b默认文件夹入口：13 · 默认文件夹设置；聊天备份入口：14 · 聊天文件备份%b\n' "$XMJ_LAVENDER" "$XMJ_RESET"
   printf '\n'
   xmj_render_setting_card '1 · 浏览器跳转' '' "$(xmj_tavern_setting_status_text 'browser_redirect')"
   printf '\n'
