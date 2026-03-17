@@ -168,6 +168,10 @@ XMJ_TAVERN_ENTRY_PATH="/"
 # 设为 0 表示不额外覆盖，走酒馆默认启动内存。
 XMJ_TAVERN_NODE_MEMORY_MB="0"
 
+# 酒馆设置里默认使用的 data 用户文件夹名。
+# 会影响卡顿修复、聊天加载卡死修复、美化卡死修复这几项读取的 settings.json。
+XMJ_TAVERN_SETTING_USER_NAME="default-user"
+
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -239,6 +243,7 @@ xmj_apply_config_defaults() {
   : "${XMJ_TAVERN_PORT:=8000}"
   : "${XMJ_TAVERN_ENTRY_PATH:=/}"
   : "${XMJ_TAVERN_NODE_MEMORY_MB:=0}"
+  : "${XMJ_TAVERN_SETTING_USER_NAME:=default-user}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
@@ -366,6 +371,7 @@ xmj_validate_config() {
   xmj_validate_port_value 'XMJ_TAVERN_PORT' '酒馆访问端口' '8000'
   xmj_normalize_web_path_value 'XMJ_TAVERN_ENTRY_PATH' '酒馆入口路径'
   xmj_validate_non_negative_int_value 'XMJ_TAVERN_NODE_MEMORY_MB' '酒馆 Node 内存上限' '0'
+  xmj_validate_required_text 'XMJ_TAVERN_SETTING_USER_NAME' '酒馆默认文件夹' 'default-user'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 
