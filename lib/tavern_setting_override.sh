@@ -386,6 +386,9 @@ xmj_tavern_setting_view_title() {
     backup_keep_count)
       printf '%s' '修改备份数量'
       ;;
+    chat_backup_count)
+      printf '%s' '聊天文件备份'
+      ;;
     user_folder|stutter_fix_user)
       printf '%s' '默认文件夹设置'
       ;;
@@ -431,6 +434,9 @@ xmj_tavern_setting_view_id() {
       ;;
     backup_keep_count)
       printf '%s' '20-9'
+      ;;
+    chat_backup_count)
+      printf '%s' '20-14'
       ;;
     user_folder|stutter_fix_user)
       printf '%s' '20-13'
@@ -490,6 +496,9 @@ xmj_tavern_setting_status_text() {
     backup_keep_count)
       printf '当前：保留最新 %s 个' "$(xmj_backup_cleanup_keep_count)"
       ;;
+    chat_backup_count)
+      xmj_tavern_setting_chat_backup_count_status_text
+      ;;
     user_folder|stutter_fix_user)
       xmj_tavern_setting_user_folder_status_text
       ;;
@@ -539,6 +548,9 @@ xmj_render_tavern_setting_page() {
     backup_keep_count)
       xmj_render_tavern_setting_backup_keep_count_page
       ;;
+    chat_backup_count)
+      xmj_render_tavern_setting_chat_backup_count_page
+      ;;
     user_folder|stutter_fix_user)
       xmj_render_tavern_setting_user_folder_page
       ;;
@@ -559,9 +571,10 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
   printf '\n'
-  printf '  %b酒馆设置现在一共收进 13 项，网络访问相关的内容已经拆成“安全修复”和“局域网链接”两条。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b酒馆设置现在一共收进 14 项，网络访问相关的内容已经拆成“安全修复”和“局域网链接”两条。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '  %b只想本机玩就走 10 安全修复；想让同一局域网里的手机、平板或电脑连进来，就走 12 局域网链接。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b需要按某个 data 用户文件夹去改 settings.json 的几项，现在统一走 13 默认文件夹设置；设好后会一直保留，不会自动改回 default-user。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b想改酒馆聊天和 settings 备份文件的留存数量，就走 14 聊天文件备份。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_setting_card '1 · 浏览器跳转' '' "$(xmj_tavern_setting_status_text 'browser_redirect')"
   printf '\n'
@@ -588,6 +601,8 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_setting_card '12 · 局域网链接' '' "$(xmj_tavern_setting_status_text 'lan_link')"
   printf '\n'
   xmj_render_setting_card '13 · 默认文件夹设置' '' "$(xmj_tavern_setting_status_text 'user_folder')"
+  printf '\n'
+  xmj_render_setting_card '14 · 聊天文件备份' '' "$(xmj_tavern_setting_status_text 'chat_backup_count')"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '浏览器跳转'
@@ -603,8 +618,9 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_action_item '11' '多用户登录'
   xmj_render_action_item '12' '局域网链接'
   xmj_render_action_item '13' '默认文件夹设置'
+  xmj_render_action_item '14' '聊天文件备份'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 13 / 0 就好啦'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 13 / 14 / 0 就好啦'
 }
 
 xmj_render_tavern_setting_security_guard_page() {
@@ -772,10 +788,15 @@ xmj_handle_tavern_setting_action() {
           ;;
         13)
           xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_USER_RETURN_VIEW='home'
           XMJ_TAVERN_SETTING_NEXT_VIEW='user_folder'
           ;;
+        14)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='chat_backup_count'
+          ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 13 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 13 / 14 / 0。'
           ;;
       esac
       ;;
@@ -819,8 +840,13 @@ xmj_handle_tavern_setting_action() {
         1)
           xmj_tavern_setting_apply_stutter_fix
           ;;
+        2)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_USER_RETURN_VIEW='stutter_fix'
+          XMJ_TAVERN_SETTING_NEXT_VIEW='user_folder'
+          ;;
         *)
-          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 0。默认文件夹请去 13 设置。'
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;
@@ -828,14 +854,14 @@ xmj_handle_tavern_setting_action() {
       case "$input" in
         0)
           xmj_font_clear_notice
-          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          XMJ_TAVERN_SETTING_NEXT_VIEW="${XMJ_TAVERN_SETTING_USER_RETURN_VIEW:-home}"
           ;;
         '')
           xmj_font_set_notice 'warn' '默认文件夹不能为空。'
           ;;
         *)
           if xmj_tavern_setting_update_stutter_user "$input"; then
-            XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+            XMJ_TAVERN_SETTING_NEXT_VIEW="${XMJ_TAVERN_SETTING_USER_RETURN_VIEW:-home}"
           fi
           ;;
       esac
@@ -851,6 +877,20 @@ xmj_handle_tavern_setting_action() {
           ;;
         *)
           xmj_tavern_setting_update_backup_keep_count "$input"
+          ;;
+      esac
+      ;;
+    chat_backup_count)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_NEXT_VIEW='home'
+          ;;
+        *[!0-9]*)
+          xmj_font_set_notice 'warn' '这里只支持输入正整数或 0。'
+          ;;
+        *)
+          xmj_tavern_setting_update_chat_backup_count "$input"
           ;;
       esac
       ;;
@@ -940,8 +980,13 @@ xmj_handle_tavern_setting_action() {
             xmj_tavern_setting_apply_beautify_freeze_fix
           fi
           ;;
+        2)
+          xmj_font_clear_notice
+          XMJ_TAVERN_SETTING_USER_RETURN_VIEW="$view"
+          XMJ_TAVERN_SETTING_NEXT_VIEW='user_folder'
+          ;;
         *)
-          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 0。默认文件夹请去 13 设置。'
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;
@@ -1133,9 +1178,12 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_header
   xmj_render_page_title "${XMJ_MENU_LABEL['20']}" 'tavern setting' 'setting'
   printf '\n'
-  printf '  %b酒馆设置现在一共收进 12 项，网络访问相关的内容已经拆成“安全修复”和“局域网链接”两条。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b酒馆设置现在一共收进 14 项，网络访问相关的内容已经拆成“安全修复”和“局域网链接”两条。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '  %b只想本机玩就走 10 安全修复；想让同一局域网里的手机、平板或电脑连进来，就走 12 局域网链接。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b需要按某个 data 用户文件夹去改 settings.json 的几项，现在统一走 13 默认文件夹设置；设好后会一直保留，不会自动改回 default-user。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b想改酒馆聊天和 settings 备份文件的留存数量，就走 14 聊天文件备份。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '  %b所有会改文件的设置都会先把对应文件收进备份目录：%s%b\n' "$XMJ_BLUE_SOFT" "$(xmj_display_path "$backup_root")" "$XMJ_RESET"
+  printf '  %b默认文件夹入口：13 · 默认文件夹设置；聊天备份入口：14 · 聊天文件备份%b\n' "$XMJ_LILAC" "$XMJ_RESET"
   printf '\n'
   xmj_render_setting_card '1 · 浏览器跳转' '' "$(xmj_tavern_setting_status_text 'browser_redirect')"
   printf '\n'
@@ -1160,6 +1208,10 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_setting_card '11 · 多用户登录' '' "$(xmj_tavern_setting_status_text 'multi_user_login')"
   printf '\n'
   xmj_render_setting_card '12 · 局域网链接' '' "$(xmj_tavern_setting_status_text 'lan_link')"
+  printf '\n'
+  xmj_render_setting_card '13 · 默认文件夹设置' '' "$(xmj_tavern_setting_status_text 'user_folder')"
+  printf '\n'
+  xmj_render_setting_card '14 · 聊天文件备份' '' "$(xmj_tavern_setting_status_text 'chat_backup_count')"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '浏览器跳转'
@@ -1174,8 +1226,10 @@ xmj_render_tavern_setting_overview_page() {
   xmj_render_action_item '10' '安全修复'
   xmj_render_action_item '11' '多用户登录'
   xmj_render_action_item '12' '局域网链接'
+  xmj_render_action_item '13' '默认文件夹设置'
+  xmj_render_action_item '14' '聊天文件备份'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 0 就好啦'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 13 / 14 / 0 就好啦'
 }
 
 xmj_tavern_setting_apply_browser_redirect_value() {
@@ -1573,6 +1627,180 @@ xmj_tavern_setting_apply_multi_user_login_mode() {
   fi
 
   xmj_font_set_notice 'success' "$(xmj_tavern_setting_append_backup_note "已开启多用户，并切到${mode_text}；重开酒馆后生效。")"
+  return 0
+}
+
+xmj_tavern_setting_text_append_line() {
+  local text="${1:-}"
+  local line="${2:-}"
+
+  if [ -n "$text" ]; then
+    printf '%s\n%s' "$text" "$line"
+    return 0
+  fi
+
+  printf '%s' "$line"
+}
+
+xmj_tavern_setting_chat_backup_count_value() {
+  local config_file="${1:-$(xmj_tavern_setting_config_file)}"
+  local backups_text=''
+  local line=''
+  local in_common='0'
+  local value=''
+
+  if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  backups_text="$(xmj_tavern_setting_yaml_section_text "$config_file" 'backups')"
+  if [ -z "$backups_text" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$in_common" = '1' ] && [[ "$line" =~ ^[[:space:]]{2}[^[:space:]#][^:]*:[[:space:]]* ]]; then
+      in_common='0'
+    fi
+
+    if [[ "$line" =~ ^[[:space:]]{2}common:[[:space:]]*($|#) ]]; then
+      in_common='1'
+      continue
+    fi
+
+    if [ "$in_common" = '1' ] && [[ "$line" =~ ^[[:space:]]{4}numberOfBackups:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]}"
+      value="${value%%#*}"
+      xmj_tavern_setting_trim_spaces "$value"
+      return 0
+    fi
+  done <<EOF
+$backups_text
+EOF
+
+  printf '%s' ''
+}
+
+xmj_tavern_setting_chat_backup_count_status_text() {
+  local config_file=''
+  local keep_count=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    printf '%s' '当前：没找到酒馆配置文件'
+    return 0
+  fi
+
+  keep_count="$(xmj_tavern_setting_chat_backup_count_value "$config_file")"
+  if xmj_tavern_setting_is_integer "$keep_count" && [ "$keep_count" -ge 1 ]; then
+    printf '当前：每个聊天 / 设置保留 %s 个备份' "$keep_count"
+    return 0
+  fi
+
+  printf '%s' '当前：未读到 numberOfBackups（酒馆默认通常是 50）'
+}
+
+xmj_tavern_setting_backups_block_with_chat_backup_count() {
+  local current_block="${1:-}"
+  local keep_count="${2:-}"
+  local result=''
+  local line=''
+  local in_common='0'
+  local common_found='0'
+  local key_written='0'
+
+  if [ -z "$current_block" ]; then
+    cat <<EOF
+backups:
+  common:
+    numberOfBackups: ${keep_count}
+EOF
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$in_common" = '1' ] && [[ "$line" =~ ^[[:space:]]{2}[^[:space:]#][^:]*:[[:space:]]* ]]; then
+      if [ "$key_written" != '1' ]; then
+        result="$(xmj_tavern_setting_text_append_line "$result" "    numberOfBackups: ${keep_count}")"
+        key_written='1'
+      fi
+      in_common='0'
+    fi
+
+    if [[ "$line" =~ ^[[:space:]]{2}common:[[:space:]]*($|#) ]]; then
+      common_found='1'
+      in_common='1'
+      key_written='0'
+      result="$(xmj_tavern_setting_text_append_line "$result" "$line")"
+      continue
+    fi
+
+    if [ "$in_common" = '1' ] && [[ "$line" =~ ^[[:space:]]{4}numberOfBackups:[[:space:]]* ]]; then
+      result="$(xmj_tavern_setting_text_append_line "$result" "    numberOfBackups: ${keep_count}")"
+      key_written='1'
+      continue
+    fi
+
+    result="$(xmj_tavern_setting_text_append_line "$result" "$line")"
+  done <<EOF
+$current_block
+EOF
+
+  if [ "$in_common" = '1' ] && [ "$key_written" != '1' ]; then
+    result="$(xmj_tavern_setting_text_append_line "$result" "    numberOfBackups: ${keep_count}")"
+  fi
+
+  if [ "$common_found" != '1' ]; then
+    result="$(xmj_tavern_setting_text_append_line "$result" '  common:')"
+    result="$(xmj_tavern_setting_text_append_line "$result" "    numberOfBackups: ${keep_count}")"
+  fi
+
+  printf '%s' "$result"
+}
+
+xmj_tavern_setting_update_chat_backup_count() {
+  local keep_count="${1:-}"
+  local config_file=''
+  local current_block=''
+  local new_block=''
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      xmj_font_set_notice 'warn' '这里只支持输入正整数。'
+      return 1
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    xmj_font_set_notice 'warn' '聊天文件备份数量至少要是 1。'
+    return 1
+  fi
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  if [ -z "$config_file" ]; then
+    xmj_font_set_notice 'warn' '没找到酒馆配置文件，先确认 SillyTavern 路径对不对。'
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_backup_targets 'chat-backup-count' "$config_file"; then
+    return 1
+  fi
+
+  current_block="$(xmj_tavern_setting_yaml_section_text "$config_file" 'backups')"
+  new_block="$(xmj_tavern_setting_backups_block_with_chat_backup_count "$current_block" "$keep_count")"
+  if [ -z "$new_block" ]; then
+    xmj_font_set_notice 'warn' "$(xmj_tavern_setting_append_backup_note "没法生成新的 backups 配置：$(xmj_display_path "$config_file")")"
+    return 1
+  fi
+
+  if ! xmj_tavern_setting_replace_yaml_section_block "$config_file" 'backups' "$new_block"; then
+    xmj_font_set_notice 'warn' "$(xmj_tavern_setting_append_backup_note "聊天文件备份数量没写进去：$(xmj_display_path "$config_file")")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "$(xmj_tavern_setting_append_backup_note "已把酒馆聊天 / settings 备份数量改成 ${keep_count}；对应键是 backups.common.numberOfBackups。")"
   return 0
 }
 
@@ -2084,6 +2312,39 @@ xmj_render_tavern_setting_user_folder_page() {
   xmj_render_action_footer '直接输入文件夹名 / 0 返回酒馆设置'
 }
 
+xmj_render_tavern_setting_chat_backup_count_page() {
+  local config_file=''
+  local current_count=''
+  local current_text=''
+
+  config_file="$(xmj_tavern_setting_config_file)"
+  current_count="$(xmj_tavern_setting_chat_backup_count_value "$config_file")"
+  if xmj_tavern_setting_is_integer "$current_count" && [ "$current_count" -ge 1 ]; then
+    current_text="$current_count"
+  else
+    current_text='未读到（酒馆默认通常是 50）'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_tavern_setting_view_title 'chat_backup_count')" 'tavern setting' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里改的是酒馆聊天文件和 settings 备份的留存数量' \
+    '猫猫会改 config.yaml 里的 backups.common.numberOfBackups；这个值越大，占空间越多，聊天记录大的时候尤其明显。' \
+    '直接输入新的正整数就会写入；多数情况下 3 到 10 就够用。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_tavern_setting_view_id 'chat_backup_count')"
+  xmj_render_fact_line '当前状态' "$(xmj_tavern_setting_status_text 'chat_backup_count')"
+  xmj_render_fact_line '当前数量' "$current_text"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${config_file:-未找到}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '正整数' '直接改成新的聊天备份保留数量'
+  xmj_render_action_item '0' '返回酒馆设置'
+  xmj_render_action_footer '输入新的保留数量 / 0 返回酒馆设置'
+}
+
 xmj_render_tavern_setting_stutter_fix_page() {
   local config_file=''
   local user_name=''
@@ -2110,8 +2371,9 @@ xmj_render_tavern_setting_stutter_fix_page() {
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '2' '前往默认文件夹设置'
   xmj_render_action_item '0' '返回酒馆设置'
-  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 2 前往默认文件夹设置 / 0 返回酒馆设置'
 }
 
 xmj_render_tavern_setting_chat_freeze_fix_page() {
@@ -2140,8 +2402,9 @@ xmj_render_tavern_setting_chat_freeze_fix_page() {
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '立即执行修复'
+  xmj_render_action_item '2' '前往默认文件夹设置'
   xmj_render_action_item '0' '返回酒馆设置'
-  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 2 前往默认文件夹设置 / 0 返回酒馆设置'
 }
 
 xmj_render_tavern_setting_beautify_freeze_fix_page() {
@@ -2176,6 +2439,7 @@ xmj_render_tavern_setting_beautify_freeze_fix_page() {
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '切回安全主题'
+  xmj_render_action_item '2' '前往默认文件夹设置'
   xmj_render_action_item '0' '返回酒馆设置'
-  xmj_render_action_footer '输入 1 执行修复 / 0 返回酒馆设置'
+  xmj_render_action_footer '输入 1 执行修复 / 2 前往默认文件夹设置 / 0 返回酒馆设置'
 }
