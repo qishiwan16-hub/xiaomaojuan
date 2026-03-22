@@ -338,6 +338,10 @@ xmj_keepalive_audio_auto_release_status_text() {
   xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:-0}"
 }
 
+xmj_log_auto_cleanup_on_launch_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH:-0}"
+}
+
 xmj_keepalive_capability_text() {
   if xmj_keepalive_wake_lock_supported; then
     printf '%s' '已就绪'
@@ -590,6 +594,32 @@ xmj_keepalive_set_auto_audio_release_flag() {
   return 0
 }
 
+xmj_log_set_auto_cleanup_on_launch_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '启动时自动清理旧后台日志只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH' "$enabled"; then
+    xmj_font_set_notice 'warn' "启动时自动清理旧后台日志写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}启动时自动清理旧后台日志。"
+  return 0
+}
+
 xmj_keepalive_apply_wake_lock() {
   local owner="${1:-manual}"
   local with_notice="${2:-0}"
@@ -764,7 +794,7 @@ xmj_keepalive_start_audio_loop() {
   if ! xmj_keepalive_audio_supported; then
     xmj_launch_log_line '未检测到 termux-media-player，无法开启静音音频循环。'
     if [ "$with_notice" = '1' ]; then
-      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；先安装 termux-api 包，并确认已安装 Termux:API 应用。'
+      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；可自行到 https://github.com/termux/termux-api 下载 Termux:API 应用，并参考 https://github.com/termux/termux-packages/tree/master/packages/termux-api-package 安装 termux-api 包；装好后回来确认，再重新启动 Termux 或脚本。'
     fi
     return 127
   fi
@@ -803,7 +833,7 @@ xmj_keepalive_start_audio_loop() {
   if [ "$status" -ne 0 ]; then
     xmj_launch_log_line "开启静音音频失败：${output:-未返回输出}"
     if [ "$with_notice" = '1' ]; then
-      xmj_font_set_notice 'warn' '静音音频启动失败；请确认 termux-api 包和 Termux:API 应用都已就绪。'
+      xmj_font_set_notice 'warn' '静音音频启动失败；如果还没装依赖，可自行到 https://github.com/termux/termux-api 下载 Termux:API 应用，并参考 https://github.com/termux/termux-packages/tree/master/packages/termux-api-package 安装 termux-api 包；装好后回来确认，再重新启动 Termux 或脚本。'
     fi
     return "$status"
   fi
@@ -887,7 +917,7 @@ xmj_keepalive_stop_audio_loop() {
   if ! xmj_keepalive_audio_supported; then
     xmj_launch_log_line '未检测到 termux-media-player，无法停止静音音频循环。'
     if [ "$with_notice" = '1' ]; then
-      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；现在没法直接停止静音音频。'
+      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；如果要补齐能力，可自行到 https://github.com/termux/termux-api 下载 Termux:API 应用，并参考 https://github.com/termux/termux-packages/tree/master/packages/termux-api-package 安装 termux-api 包；装好后回来确认，再重新启动 Termux 或脚本。'
     fi
     return 127
   fi
@@ -2949,6 +2979,82 @@ xmj_launch_runtime_stream_enabled() {
   return 1
 }
 
+xmj_launch_cleanup_old_logs_on_launch() {
+  local current_file="${1:-}"
+  local keep_count="${XMJ_LOG_KEEP_COUNT:-20}"
+  local keep_old_count='0'
+  local log_dir=''
+  local file=''
+  local total='0'
+  local index='0'
+  local removed='0'
+  local failed='0'
+
+  declare -a log_files=()
+
+  if [ "${XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH:-1}" != '1' ]; then
+    return 0
+  fi
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      keep_count='20'
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    keep_count='1'
+  fi
+
+  keep_old_count=$((keep_count - 1))
+  if [ "$keep_old_count" -lt 0 ]; then
+    keep_old_count='0'
+  fi
+
+  log_dir="${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+  if [ ! -d "$log_dir" ]; then
+    return 0
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if [ -n "$current_file" ] && [ "$file" = "$current_file" ]; then
+      continue
+    fi
+    log_files+=("$file")
+  done < <(ls -1t "$log_dir"/launch-*.log 2>/dev/null || true)
+
+  total="${#log_files[@]}"
+  if [ "$total" -le "$keep_old_count" ]; then
+    return 0
+  fi
+
+  for ((index = keep_old_count; index < total; index += 1)); do
+    file="${log_files[$index]}"
+    [ -n "$file" ] || continue
+    if [ ! -f "$file" ]; then
+      continue
+    fi
+
+    if rm -f "$file" 2>/dev/null; then
+      removed=$((removed + 1))
+    else
+      failed=$((failed + 1))
+      xmj_launch_log_line "启动前自动清理旧后台日志失败：$(xmj_display_path "$file")"
+    fi
+  done
+
+  if [ "$removed" -gt 0 ]; then
+    xmj_launch_log_line "启动前已自动清理 ${removed} 份旧后台日志，当前策略保留最新 ${keep_count} 份。"
+  fi
+
+  if [ "$failed" -gt 0 ]; then
+    xmj_launch_log_line "启动前自动清理旧后台日志时有 ${failed} 份处理失败。"
+  fi
+
+  return 0
+}
+
 xmj_launch_prepare_log_file() {
   local stamp=''
 
@@ -2982,6 +3088,7 @@ xmj_launch_prepare_log_file() {
   XMJ_LAUNCH_READY_SCAN_LINE='1'
 
   xmj_launch_log_line '启动状态日志已创建。'
+  xmj_launch_cleanup_old_logs_on_launch "${XMJ_LAUNCH_LOG_FILE:-}"
   xmj_launch_log_line "目标目录：${XMJ_SILLYTAVERN_PATH:-未设置}"
   return 0
 }

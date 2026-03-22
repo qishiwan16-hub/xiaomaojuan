@@ -1627,8 +1627,12 @@ xmj_handle_script_setting_action() {
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='script_version'
           ;;
+        7)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
+          ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 0。'
           ;;
       esac
       ;;
@@ -1808,12 +1812,16 @@ xmj_handle_script_setting_action() {
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='logs_keep_count'
           ;;
+        c|C)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs_auto_cleanup'
+          ;;
         r|R)
           xmj_font_clear_notice
           xmj_setting_refresh_log_files
           ;;
         *[!0-9]*)
-          xmj_font_set_notice 'warn' '仅支持输入后台序号、d、a、k、r 或 0。'
+          xmj_font_set_notice 'warn' '仅支持输入后台序号、d、a、k、c、r 或 0。'
           ;;
         *)
           xmj_setting_refresh_log_files
@@ -1842,6 +1850,27 @@ xmj_handle_script_setting_action() {
           if xmj_setting_update_log_keep_count "$input"; then
             XMJ_SETTING_NEXT_VIEW='logs'
           fi
+          ;;
+      esac
+      ;;
+    logs_auto_cleanup)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
+          ;;
+        1)
+          if xmj_log_set_auto_cleanup_on_launch_flag '1'; then
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+        2)
+          if xmj_log_set_auto_cleanup_on_launch_flag '0'; then
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;

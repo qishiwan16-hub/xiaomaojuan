@@ -1247,10 +1247,13 @@ xmj_setting_view_title() {
       printf '%s' '脚本版本'
       ;;
     logs)
-      printf '%s' '后台显示'
+      printf '%s' '日志管理'
       ;;
     logs_keep_count)
       printf '%s' '日志保留数量'
+      ;;
+    logs_auto_cleanup)
+      printf '%s' '启动清理开关'
       ;;
     logs_delete_confirm)
       printf '%s' '删除日志确认'
@@ -1291,6 +1294,9 @@ xmj_setting_view_id() {
       ;;
     logs_keep_count)
       printf '%s' '19-7-1'
+      ;;
+    logs_auto_cleanup)
+      printf '%s' '19-7-4'
       ;;
     logs_delete_confirm)
       printf '%s' '19-7-2'
@@ -1480,6 +1486,9 @@ xmj_render_setting_center_page() {
       ;;
     logs_keep_count)
       xmj_render_setting_logs_keep_count_page
+      ;;
+    logs_auto_cleanup)
+      xmj_render_setting_logs_auto_cleanup_page
       ;;
     logs_delete_confirm)
       xmj_render_setting_logs_delete_confirm_page
@@ -1964,6 +1973,8 @@ xmj_render_setting_overview_page() {
   xmj_render_setting_card '5 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   printf '\n'
   xmj_render_setting_card '6 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  printf '\n'
+  xmj_render_setting_card '7 · 日志管理' '' "启动清理：$(xmj_log_auto_cleanup_on_launch_status_text)；保留：$(xmj_setting_log_keep_count) 份"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入字体管理'
@@ -1972,8 +1983,9 @@ xmj_render_setting_overview_page() {
   xmj_render_action_item '4' '检查脚本更新'
   xmj_render_action_item '5' '切换脚本分支'
   xmj_render_action_item '6' '查看脚本版本'
+  xmj_render_action_item '7' '进入日志管理'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 0 就好喵'
 }
 
 xmj_render_setting_font_page() {
@@ -2055,7 +2067,10 @@ xmj_render_setting_keepalive_page() {
     xmj_render_fact_line '唤醒锁缺少什么' '先装 termux-api 包，并安装 Termux:API 应用'
   fi
   if ! xmj_keepalive_audio_supported; then
-    xmj_render_fact_line '音频缺少什么' '先装 termux-api 包，并安装 Termux:API 应用'
+    xmj_render_fact_line '音频缺少什么' '需要 termux-api 包 + Termux:API 应用'
+    xmj_render_fact_line '音频应用 GitHub' 'https://github.com/termux/termux-api'
+    xmj_render_fact_line '音频命令包说明' 'https://github.com/termux/termux-packages/tree/master/packages/termux-api-package'
+    xmj_render_fact_line '装好后怎么做' '下载安装后回到这里确认，再重新启动 Termux / 脚本'
   fi
   xmj_render_notice_line
   printf '\n'
@@ -2204,14 +2219,15 @@ xmj_render_setting_logs_page() {
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
-  printf '  %b01 进入运行中后，运行期后台只会在当前页面实时直显；06 现在改成关闭酒馆，不再承担后台查看。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
-  printf '  %b这里现在只看 launch 启动日志和最近记录，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b更新日志和脚本更新日志不会在这里出现；这里只看启动期与最近后台记录。%b\n' "$XMJ_MIST" "$XMJ_RESET"
-  printf '  %b删单个和按保留数量清理也只处理后台日志，不会碰更新日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里集中放日志查看、删除、手动清理，还有启动时自动整理旧后台日志。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b当前页面只看 launch 启动日志和最近记录，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b更新日志和脚本更新日志不会在这里出现；这里只处理 launch-*.log。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b启动自动清理如果开启，会按保留数量整理旧日志，但不会删除本次刚创建的日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
   xmj_render_fact_line '后台数量' "${#XMJ_SETTING_LOG_FILES[@]}"
   xmj_render_fact_line '保留策略' "保留最新 $(xmj_setting_log_keep_count) 份"
+  xmj_render_fact_line '启动清理' "$(xmj_log_auto_cleanup_on_launch_status_text)"
 
   if [ "$display_count" -gt 0 ]; then
     xmj_render_fact_line '当前查看' "$selected_name"
@@ -2240,12 +2256,13 @@ xmj_render_setting_logs_page() {
     xmj_render_action_item 'a' '按保留数量清理旧后台'
   fi
   xmj_render_action_item 'k' '修改后台保留数量'
+  xmj_render_action_item 'c' '修改启动自动清理开关'
   xmj_render_action_item 'r' '刷新后台列表'
   xmj_render_action_item '0' '返回设置中心'
   if [ "$display_count" -gt 0 ]; then
-    xmj_render_action_footer '输入后台序号 / d / a / k / r / 0 就好喵'
+    xmj_render_action_footer '输入后台序号 / d / a / k / c / r / 0 就好喵'
   else
-    xmj_render_action_footer '输入 k / r / 0 就好喵'
+    xmj_render_action_footer '输入 k / c / r / 0 就好喵'
   fi
 }
 
@@ -2267,6 +2284,28 @@ xmj_render_setting_logs_keep_count_page() {
   xmj_render_action_item '正整数' '直接改成新的后台保留数量'
   xmj_render_action_item '0' '返回后台显示'
   xmj_render_action_footer '输入新的保留数量 / 0 返回后台显示'
+}
+
+xmj_render_setting_logs_auto_cleanup_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'logs_auto_cleanup')" 'log viewer' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里改的是每次启动前要不要自动整理旧后台日志' \
+    '开启后会按当前保留数量处理旧的 launch-*.log。' \
+    '不会删除本次刚创建的日志；想完全不自动整理，就直接关闭。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_auto_cleanup')"
+  xmj_render_fact_line '当前状态' "$(xmj_log_auto_cleanup_on_launch_status_text)"
+  xmj_render_fact_line '保留策略' "保留最新 $(xmj_setting_log_keep_count) 份"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '开启启动时自动清理旧后台日志'
+  xmj_render_action_item '2' '关闭启动时自动清理旧后台日志'
+  xmj_render_action_item '0' '返回日志管理'
+  xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
 }
 
 xmj_render_setting_logs_delete_confirm_page() {
