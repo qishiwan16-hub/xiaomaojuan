@@ -153,6 +153,11 @@ XMJ_LOG_DIR="logs"
 # 设为正整数；在日志查看页里可以按这个数量执行清理。
 XMJ_LOG_KEEP_COUNT="20"
 
+# 启动时是否自动按保留数量清理旧后台日志。
+# 只会整理旧的 launch-*.log，不会删除本次刚创建的日志。
+# 可选值：0 / 1
+XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH="1"
+
 # 自动清理备份时保留的数量。
 # 设为正整数；值越小，自动清理时删掉的旧备份越多。
 XMJ_BACKUP_KEEP_COUNT="5"
@@ -167,6 +172,26 @@ XMJ_TAVERN_ENTRY_PATH="/"
 # 启动酒馆时额外附加的 Node 内存上限，单位 MB。
 # 设为 0 表示不额外覆盖，走酒馆默认启动内存。
 XMJ_TAVERN_NODE_MEMORY_MB="0"
+
+# 酒馆设置里默认使用的 data 用户文件夹名。
+# 会影响卡顿修复、聊天加载卡死修复、美化卡死修复这几项读取的 settings.json。
+XMJ_TAVERN_SETTING_USER_NAME="default-user"
+
+# Termux 保活：启动酒馆成功后，是否自动申请唤醒锁。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK="1"
+
+# Termux 保活：酒馆停止后，是否自动释放脚本自动申请的唤醒锁。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK="1"
+
+# Termux 保活：启动酒馆成功后，是否自动开启静音音频循环。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP="0"
+
+# Termux 保活：酒馆停止后，是否自动停止脚本自动开启的静音音频循环。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP="1"
 
 # 主题模式。
 # 可选值：pastel / moonlight
@@ -235,10 +260,16 @@ xmj_apply_config_defaults() {
   : "${XMJ_BACKUP_KEEP_COUNT:=5}"
   : "${XMJ_LOG_DIR:=logs}"
   : "${XMJ_LOG_KEEP_COUNT:=20}"
+  : "${XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH:=1}"
   : "${XMJ_TAVERN_HOST:=127.0.0.1}"
   : "${XMJ_TAVERN_PORT:=8000}"
   : "${XMJ_TAVERN_ENTRY_PATH:=/}"
   : "${XMJ_TAVERN_NODE_MEMORY_MB:=0}"
+  : "${XMJ_TAVERN_SETTING_USER_NAME:=default-user}"
+  : "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:=1}"
+  : "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:=1}"
+  : "${XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP:=0}"
+  : "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:=1}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
@@ -295,6 +326,24 @@ xmj_validate_non_negative_int_value() {
 
   case "$current_value" in
     ''|*[!0-9]*)
+      printf -v "$var_name" '%s' "$fallback"
+      xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
+      return 0
+      ;;
+  esac
+}
+
+xmj_validate_bool_flag_value() {
+  local var_name="${1:-}"
+  local label="${2:-开关}"
+  local fallback="${3:-0}"
+  local current_value="${!var_name-}"
+
+  case "$current_value" in
+    0|1)
+      return 0
+      ;;
+    *)
       printf -v "$var_name" '%s' "$fallback"
       xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
       return 0
@@ -362,10 +411,16 @@ xmj_validate_config() {
   xmj_validate_positive_int_value 'XMJ_BACKUP_KEEP_COUNT' '自动清理备份保留数量' '5' '1'
   xmj_validate_required_text 'XMJ_LOG_DIR' '日志目录' 'logs'
   xmj_validate_positive_int_value 'XMJ_LOG_KEEP_COUNT' '日志保留数量' '20' '1'
+  xmj_validate_bool_flag_value 'XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH' '启动时自动清理旧后台日志' '1'
   xmj_validate_required_text 'XMJ_TAVERN_HOST' '酒馆访问主机' '127.0.0.1'
   xmj_validate_port_value 'XMJ_TAVERN_PORT' '酒馆访问端口' '8000'
   xmj_normalize_web_path_value 'XMJ_TAVERN_ENTRY_PATH' '酒馆入口路径'
   xmj_validate_non_negative_int_value 'XMJ_TAVERN_NODE_MEMORY_MB' '酒馆 Node 内存上限' '0'
+  xmj_validate_required_text 'XMJ_TAVERN_SETTING_USER_NAME' '酒馆默认文件夹' 'default-user'
+  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK' '启动后自动申请唤醒锁' '1'
+  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK' '停服后自动释放唤醒锁' '1'
+  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP' '启动后自动开启静音音频循环' '0'
+  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP' '停服后自动停止静音音频循环' '1'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 

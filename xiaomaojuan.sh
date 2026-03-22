@@ -25,10 +25,14 @@ source "$XMJ_ROOT_DIR/lib/version_switch.sh"
 source "$XMJ_ROOT_DIR/lib/launch.sh"
 # shellcheck source=lib/maintenance_override.sh
 source "$XMJ_ROOT_DIR/lib/maintenance_override.sh"
+# shellcheck source=lib/backup_override.sh
+source "$XMJ_ROOT_DIR/lib/backup_override.sh"
 # shellcheck source=lib/extend.sh
 source "$XMJ_ROOT_DIR/lib/extend.sh"
 # shellcheck source=lib/router.sh
 source "$XMJ_ROOT_DIR/lib/router.sh"
+# shellcheck source=lib/tavern_setting_override.sh
+source "$XMJ_ROOT_DIR/lib/tavern_setting_override.sh"
 
 main() {
   xmj_bootstrap_config || true
@@ -39,13 +43,6 @@ main() {
   if [ "${XMJ_CONFIG_READY:-0}" != '1' ]; then
     xmj_render_startup_failure
     return 1
-  fi
-
-  if xmj_script_password_first_open_required; then
-    if ! xmj_require_script_password 'first_open'; then
-      xmj_exit_panel
-      return 1
-    fi
   fi
 
   xmj_run_panel

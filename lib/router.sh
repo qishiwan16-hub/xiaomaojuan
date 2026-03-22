@@ -72,7 +72,7 @@ xmj_prompt_log_display_input() {
 }
 
 xmj_run_log_display_page() {
-  xmj_run_backend_display_page
+  xmj_run_tavern_close_page
   return 0
 }
 
@@ -268,49 +268,6 @@ xmj_prompt_tavern_setting_input() {
   IFS= read -r XMJ_LAST_INPUT
 }
 
-xmj_script_password_value() {
-  printf '%s' 'meoroll'
-}
-
-xmj_script_password_marker_dir() {
-  if [ -n "${HOME:-}" ]; then
-    printf '%s/.xiaomaojuan' "$HOME"
-    return 0
-  fi
-
-  printf '%s' "${XMJ_CONFIG_DIR:-${XMJ_ROOT_DIR:-.}/config}"
-}
-
-xmj_script_password_marker_file() {
-  printf '%s/install-password.ok' "$(xmj_script_password_marker_dir)"
-}
-
-xmj_script_password_first_open_required() {
-  if [ -f "$(xmj_script_password_marker_file)" ]; then
-    return 1
-  fi
-
-  return 0
-}
-
-xmj_script_password_mark_first_open_done() {
-  local marker_dir=''
-  local marker_file=''
-
-  marker_dir="$(xmj_script_password_marker_dir)"
-  marker_file="$(xmj_script_password_marker_file)"
-
-  if ! mkdir -p "$marker_dir" 2>/dev/null; then
-    return 1
-  fi
-
-  if ! : >"$marker_file" 2>/dev/null; then
-    return 1
-  fi
-
-  return 0
-}
-
 xmj_prompt_script_password_input() {
   printf '%b%s%b' "$XMJ_PINK_SOFT" '  安装密码 > ' "$XMJ_RESET"
   IFS= read -r -s XMJ_LAST_INPUT
@@ -318,6 +275,8 @@ xmj_prompt_script_password_input() {
 }
 
 xmj_require_script_password() {
+  return 0
+
   local mode="${1:-first_open}"
   local input=''
   local failed_count='0'
@@ -556,7 +515,6 @@ xmj_setting_refresh_script_repo_state() {
   local remote_url=''
   local upstream_ref=''
   local worktree_state=''
-  local release_version=''
 
   XMJ_SETTING_SCRIPT_GIT_OK='0'
   XMJ_SETTING_SCRIPT_REPO_OK='0'
@@ -587,11 +545,10 @@ xmj_setting_refresh_script_repo_state() {
   commit_name="$(git -C "$repo_path" rev-parse --short HEAD 2>/dev/null || true)"
   branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   describe_name="$(git -C "$repo_path" describe --tags --always --dirty 2>/dev/null || true)"
-  exact_tag="$(git -C "$repo_path" describe --tags --exact-match 2>/dev/null || true)"
+  exact_tag="$(git -C "$repo_path" tag --points-at HEAD 2>/dev/null | head -n 1 || true)"
   remote_url="$(git -C "$repo_path" remote get-url origin 2>/dev/null || true)"
   upstream_ref="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
   worktree_state="$(git -C "$repo_path" status --porcelain --untracked-files=no 2>/dev/null || true)"
-  release_version="$(xmj_setting_script_release_version)"
 
   XMJ_SETTING_SCRIPT_COMMIT="${commit_name:-未识别}"
   XMJ_SETTING_SCRIPT_TAG="$exact_tag"
@@ -607,8 +564,6 @@ xmj_setting_refresh_script_repo_state() {
 
   if [ -n "$exact_tag" ]; then
     XMJ_SETTING_SCRIPT_VERSION="$exact_tag"
-  elif [ -n "$release_version" ]; then
-    XMJ_SETTING_SCRIPT_VERSION="$release_version"
   elif [ -n "$describe_name" ]; then
     XMJ_SETTING_SCRIPT_VERSION="$describe_name"
   elif [ -n "$commit_name" ]; then
@@ -778,6 +733,8 @@ xmj_setting_refresh_script_update_status() {
   local upstream_ref=''
   local remote_name='origin'
   local remote_branch=''
+  local remote_ref=''
+  local fetch_refspec=''
   local counts=''
   local left_count='0'
   local right_count='0'
@@ -827,20 +784,34 @@ xmj_setting_refresh_script_update_status() {
     return 1
   fi
 
+  if ! git -C "$repo_path" remote get-url "$remote_name" >/dev/null 2>&1; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="当前仓库没配置远端 ${remote_name}，暂时不能检查更新"
+    return 1
+  fi
+
+  remote_ref="refs/remotes/$remote_name/$remote_branch"
+  fetch_refspec="+refs/heads/$remote_branch:${remote_ref}"
   XMJ_SETTING_SCRIPT_UPDATE_REMOTE_BRANCH="${remote_name}/${remote_branch}"
 
-  if ! git -C "$repo_path" fetch --quiet "$remote_name" "$remote_branch" >/dev/null 2>&1; then
+  if ! git -C "$repo_path" fetch --quiet --prune "$remote_name" "$fetch_refspec" >/dev/null 2>&1; then
     XMJ_SETTING_SCRIPT_UPDATE_STATE='check_failed'
     XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT='远端版本检查失败，请先确认网络或仓库权限'
     XMJ_SETTING_SCRIPT_UPDATE_CAN_APPLY='1'
     return 1
   fi
 
-  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT="$(git -C "$repo_path" rev-parse --short FETCH_HEAD 2>/dev/null || true)"
-  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION="$(xmj_setting_script_version_for_ref "$repo_path" 'FETCH_HEAD')"
-  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE="$(xmj_setting_script_changelog_for_ref "$repo_path" 'FETCH_HEAD')"
+  if ! xmj_setting_script_branch_exists_remote_on "$repo_path" "$remote_name" "$remote_branch"; then
+    XMJ_SETTING_SCRIPT_UPDATE_STATE='blocked'
+    XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT="远端分支 ${remote_name}/${remote_branch} 不存在，暂时不能检查更新"
+    return 1
+  fi
 
-  counts="$(git -C "$repo_path" rev-list --left-right --count "HEAD...FETCH_HEAD" 2>/dev/null || true)"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_COMMIT="$(git -C "$repo_path" rev-parse --short "$remote_ref" 2>/dev/null || true)"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_VERSION="$(xmj_setting_script_version_for_ref "$repo_path" "$remote_ref")"
+  XMJ_SETTING_SCRIPT_UPDATE_REMOTE_NOTE="$(xmj_setting_script_changelog_for_ref "$repo_path" "$remote_ref")"
+
+  counts="$(git -C "$repo_path" rev-list --left-right --count "HEAD...$remote_ref" 2>/dev/null || true)"
   left_count="${counts%%[[:space:]]*}"
   right_count="${counts##*[[:space:]]}"
 
@@ -898,60 +869,6 @@ xmj_setting_script_worktree_text() {
   printf '%s' '工作区干净'
 }
 
-xmj_setting_script_release_branch() {
-  printf '%s' 'main'
-}
-
-xmj_setting_script_release_version_file() {
-  printf '%s' "${XMJ_ROOT_DIR:-.}/VERSION"
-}
-
-xmj_setting_script_release_version() {
-  local version_file=''
-  local version_text=''
-
-  version_file="$(xmj_setting_script_release_version_file)"
-  if [ -f "$version_file" ]; then
-    IFS= read -r version_text < "$version_file" || true
-    version_text="${version_text%$'\r'}"
-  fi
-
-  printf '%s' "$version_text"
-}
-
-xmj_setting_script_update_checkout_release_branch() {
-  local repo_path="${1:-}"
-  local log_file="${2:-/dev/null}"
-  local target_branch=''
-  local current_branch=''
-
-  target_branch="$(xmj_setting_script_release_branch)"
-  current_branch="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-
-  if ! git -C "$repo_path" fetch origin "$target_branch" >>"$log_file" 2>&1; then
-    return 1
-  fi
-
-  if ! git -C "$repo_path" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
-    return 1
-  fi
-
-  if [ "$current_branch" != "$target_branch" ]; then
-    if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$target_branch"; then
-      if ! git -C "$repo_path" checkout "$target_branch" >>"$log_file" 2>&1; then
-        return 1
-      fi
-    else
-      if ! git -C "$repo_path" checkout -b "$target_branch" --track "origin/$target_branch" >>"$log_file" 2>&1; then
-        return 1
-      fi
-    fi
-  fi
-
-  git -C "$repo_path" branch --set-upstream-to "origin/$target_branch" "$target_branch" >>"$log_file" 2>&1 || true
-  return 0
-}
-
 xmj_setting_script_update_protected_config_relpath() {
   printf '%s' 'config/xiaomaojuan.conf'
 }
@@ -973,6 +890,7 @@ xmj_setting_script_update_config_backup_path() {
 xmj_setting_script_update_protect_local_config() {
   local repo_path="${1:-}"
   local log_file="${2:-/dev/null}"
+  local action_label="${3:-更新脚本}"
   local relpath=''
   local status_line=''
   local path=''
@@ -1015,7 +933,7 @@ xmj_setting_script_update_protect_local_config() {
 
   if [ "$has_other_dirty" = '1' ]; then
     printf '[warn] 检测到除了 %s 之外还有别的本地改动，本次不自动更新。\n' "$relpath" >>"$log_file"
-    xmj_font_set_notice 'warn' "除了 ${relpath} 之外还有别的本地改动，先处理完再更新脚本。"
+    xmj_font_set_notice 'warn' "除了 ${relpath} 之外还有别的本地改动，先处理完再${action_label}。"
     return 1
   fi
 
@@ -1030,10 +948,10 @@ xmj_setting_script_update_protect_local_config() {
     return 1
   fi
 
-  stash_message="xmj-script-update-config-${stamp}-$$"
+  stash_message="xmj-script-config-${stamp}-$$"
   if ! git -C "$repo_path" stash push --quiet --message "$stash_message" -- "$relpath" >>"$log_file" 2>&1; then
     rm -f "$temp_file" 2>/dev/null || true
-    xmj_font_set_notice 'warn' '临时保护本地配置失败，这次脚本更新先停一下。'
+    xmj_font_set_notice 'warn' "临时保护本地配置失败，这次${action_label}先停一下。"
     return 1
   fi
 
@@ -1057,7 +975,7 @@ xmj_setting_script_update_protect_local_config() {
     printf '[warn] 已尝试暂存本地配置，但 %s 仍然不是干净状态。\n' "$relpath" >>"$log_file"
     xmj_setting_script_update_release_protected_config "$repo_path" "$log_file"
     rm -f "$temp_file" 2>/dev/null || true
-    xmj_font_set_notice 'warn' '本地配置没有成功让开更新流程，这次脚本更新先停一下。'
+    xmj_font_set_notice 'warn' "本地配置没有成功让开流程，这次${action_label}先停一下。"
     return 1
   fi
 
@@ -1066,6 +984,40 @@ xmj_setting_script_update_protect_local_config() {
   XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_STASH="$stash_ref"
   printf '[info] 检测到本地 %s 改动，已先临时保护后继续更新。\n' "$relpath" >>"$log_file"
   return 0
+}
+
+xmj_setting_script_branch_exists_local() {
+  local repo_path="${1:-}"
+  local branch_name="${2:-}"
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ] || [ -z "$branch_name" ]; then
+    return 1
+  fi
+
+  git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch_name"
+}
+
+xmj_setting_script_branch_exists_remote() {
+  local repo_path="${1:-}"
+  local branch_name="${2:-}"
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ] || [ -z "$branch_name" ]; then
+    return 1
+  fi
+
+  xmj_setting_script_branch_exists_remote_on "$repo_path" 'origin' "$branch_name"
+}
+
+xmj_setting_script_branch_exists_remote_on() {
+  local repo_path="${1:-}"
+  local remote_name="${2:-origin}"
+  local branch_name="${3:-}"
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ] || [ -z "$branch_name" ] || [ -z "$remote_name" ]; then
+    return 1
+  fi
+
+  git -C "$repo_path" show-ref --verify --quiet "refs/remotes/$remote_name/$branch_name"
 }
 
 xmj_setting_script_update_release_protected_config() {
@@ -1114,6 +1066,153 @@ xmj_setting_script_update_restore_local_config() {
   return 0
 }
 
+xmj_setting_run_script_branch_switch() {
+  local target_branch="${1:-}"
+  local repo_path="${XMJ_ROOT_DIR:-}"
+  local before_branch=''
+  local before_commit=''
+  local after_branch=''
+  local after_commit=''
+  local stamp=''
+  local log_file=''
+  local backup_hint=''
+
+  case "$target_branch" in
+    main|test)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '这里现在只支持切到 main 或 test。'
+      return 1
+      ;;
+  esac
+
+  if false; then
+    xmj_font_set_notice 'info' '这次脚本分支切换先取消啦。'
+    return 1
+  fi
+
+  xmj_setting_refresh_script_repo_state
+
+  if [ "${XMJ_SETTING_SCRIPT_GIT_OK:-0}" != '1' ]; then
+    xmj_font_set_notice 'warn' '当前环境没检测到 Git，脚本分支暂时切不了。'
+    return 1
+  fi
+
+  if [ "${XMJ_SETTING_SCRIPT_REPO_OK:-0}" != '1' ]; then
+    xmj_font_set_notice 'warn' '脚本目录当前不是 Git 仓库，没法直接切换分支。'
+    return 1
+  fi
+
+  before_branch="${XMJ_SETTING_SCRIPT_BRANCH:-detached}"
+  before_commit="${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  if [ "$before_branch" = "$target_branch" ]; then
+    xmj_font_set_notice 'info' "当前已经在 ${target_branch} 分支。"
+    return 0
+  fi
+
+  stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='manual'
+  fi
+
+  if ! mkdir -p "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}" 2>/dev/null; then
+    xmj_font_set_notice 'warn' '日志目录没准备好，这次分支切换先停一下。'
+    return 1
+  fi
+
+  log_file="${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}/script-branch-${stamp}.log"
+  if ! : >"$log_file" 2>/dev/null; then
+    xmj_font_set_notice 'warn' "脚本分支切换日志创建失败：$log_file"
+    return 1
+  fi
+
+  {
+    printf '[%s] 开始切换脚本分支。\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '%s' 'unknown-time')"
+    printf '[info] 根目录：%s\n' "$repo_path"
+    printf '[info] 当前分支：%s\n' "$before_branch"
+    printf '[info] 当前提交：%s\n' "$before_commit"
+    printf '[info] 目标分支：%s\n' "$target_branch"
+  } >>"$log_file" 2>&1
+
+  if ! xmj_setting_script_update_protect_local_config "$repo_path" "$log_file" '切换脚本分支'; then
+    xmj_setting_refresh_script_repo_state
+    return 1
+  fi
+
+  if ! xmj_setting_script_branch_exists_local "$repo_path" "$target_branch"; then
+    if ! xmj_setting_script_branch_exists_remote "$repo_path" "$target_branch"; then
+      printf '[info] 本地未发现 origin/%s，先尝试抓取远端分支。\n' "$target_branch" >>"$log_file"
+      if ! git -C "$repo_path" fetch --quiet origin >>"$log_file" 2>&1; then
+        if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+          backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+          xmj_font_set_notice 'warn' "远端分支抓取失败，而且本地配置恢复也失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+        else
+          xmj_font_set_notice 'warn' "远端分支抓取失败，先确认网络或仓库权限；细节可看：$(xmj_display_path "$log_file")"
+        fi
+        xmj_setting_refresh_script_repo_state
+        return 1
+      fi
+    fi
+
+    if ! xmj_setting_script_branch_exists_remote "$repo_path" "$target_branch"; then
+      if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+        backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+        xmj_font_set_notice 'warn' "远端没找到 ${target_branch} 分支，而且本地配置恢复失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+      else
+        xmj_font_set_notice 'warn' "远端没找到 ${target_branch} 分支，先确认仓库里已经推送了这个分支。"
+      fi
+      xmj_setting_refresh_script_repo_state
+      return 1
+    fi
+
+    if ! git -C "$repo_path" checkout -b "$target_branch" "origin/$target_branch" >>"$log_file" 2>&1; then
+      if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+        backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+        xmj_font_set_notice 'warn' "新分支创建失败，而且本地配置恢复也失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+      else
+        xmj_font_set_notice 'warn' "切到 ${target_branch} 分支失败；细节可看：$(xmj_display_path "$log_file")"
+      fi
+      xmj_setting_refresh_script_repo_state
+      return 1
+    fi
+  else
+    if ! git -C "$repo_path" checkout "$target_branch" >>"$log_file" 2>&1; then
+      if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+        backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+        xmj_font_set_notice 'warn' "切换本地分支失败，而且本地配置恢复也失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+      else
+        xmj_font_set_notice 'warn' "切到 ${target_branch} 分支失败；细节可看：$(xmj_display_path "$log_file")"
+      fi
+      xmj_setting_refresh_script_repo_state
+      return 1
+    fi
+  fi
+
+  if xmj_setting_script_branch_exists_remote "$repo_path" "$target_branch"; then
+    git -C "$repo_path" branch --set-upstream-to "origin/$target_branch" "$target_branch" >>"$log_file" 2>&1 || true
+  fi
+
+  if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
+    backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
+    xmj_font_set_notice 'warn' "脚本分支已经切过去了，但本地配置恢复失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
+    xmj_setting_refresh_script_repo_state
+    return 1
+  fi
+
+  xmj_setting_refresh_script_repo_state
+  after_branch="${XMJ_SETTING_SCRIPT_BRANCH:-detached}"
+  after_commit="${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+
+  if [ "$after_branch" = "$target_branch" ]; then
+    xmj_font_set_notice 'success' "脚本已经切到 ${target_branch} 分支（${after_commit}），猫猫马上帮你自动重开小猫卷。"
+    xmj_restart_script_process 'script_branch'
+    return 0
+  fi
+
+  xmj_font_set_notice 'warn' "分支切换结果不符合预期，当前看到的是 ${after_branch}；细节可看：$(xmj_display_path "$log_file")"
+  return 1
+}
+
 xmj_setting_run_script_update() {
   local repo_path="${XMJ_ROOT_DIR:-}"
   local before_commit=''
@@ -1144,7 +1243,7 @@ xmj_setting_run_script_update() {
       ;;
   esac
 
-  if ! xmj_require_script_password 'script_update'; then
+  if false; then
     xmj_font_set_notice 'info' '这次脚本更新先取消啦。'
     return 1
   fi
@@ -1161,8 +1260,13 @@ xmj_setting_run_script_update() {
     return 1
   fi
 
-  if [ "${XMJ_SETTING_SCRIPT_REMOTE:-未配置}" = '未配置' ]; then
-    xmj_font_set_notice 'warn' '当前仓库还没配置 origin，猫猫暂时没法拉 main 分支更新。'
+  if [ "${XMJ_SETTING_SCRIPT_BRANCH:-detached}" = 'detached' ]; then
+    xmj_font_set_notice 'warn' '当前仓库处于 detached HEAD，先切回正常分支再更新。'
+    return 1
+  fi
+
+  if [ "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}" = '未配置' ]; then
+    xmj_font_set_notice 'warn' '当前分支还没绑定上游仓库，猫猫暂时没法直接拉更新。'
     return 1
   fi
 
@@ -1189,30 +1293,14 @@ xmj_setting_run_script_update() {
     printf '[info] 根目录：%s\n' "$repo_path"
     printf '[info] 当前分支：%s\n' "${XMJ_SETTING_SCRIPT_BRANCH:-detached}"
     printf '[info] 当前提交：%s\n' "$before_commit"
-    printf '[info] 目标分支：%s\n' "$(xmj_setting_script_release_branch)"
   } >>"$log_file" 2>&1
 
-  if ! xmj_setting_script_update_protect_local_config "$repo_path" "$log_file"; then
+  if ! xmj_setting_script_update_protect_local_config "$repo_path" "$log_file" '更新脚本'; then
     xmj_setting_refresh_script_repo_state
     return 1
   fi
 
-  if ! xmj_setting_script_update_checkout_release_branch "$repo_path" "$log_file"; then
-    if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
-      restore_failed='1'
-      backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
-    fi
-
-    if [ "$restore_failed" = '1' ]; then
-      xmj_font_set_notice 'warn' "脚本没能切到 main 分支，而且本地配置恢复失败了；细节先看：$(xmj_display_path "$log_file")${backup_hint:+，备份还在：$(xmj_display_path "$backup_hint")}"
-    else
-      xmj_font_set_notice 'warn' "脚本没能切到 main 分支，细节可看：$(xmj_display_path "$log_file")"
-    fi
-    xmj_setting_refresh_script_repo_state
-    return 1
-  fi
-
-  if ! git -C "$repo_path" pull --ff-only origin "$(xmj_setting_script_release_branch)" >>"$log_file" 2>&1; then
+  if ! git -C "$repo_path" pull --ff-only >>"$log_file" 2>&1; then
     if ! xmj_setting_script_update_restore_local_config "$repo_path" "$log_file"; then
       restore_failed='1'
       backup_hint="${XMJ_SETTING_SCRIPT_UPDATE_PROTECTED_FILE:-}"
@@ -1255,6 +1343,9 @@ xmj_restart_script_process() {
   case "$mode" in
     script_update)
       summary_text='脚本更新已经完成，猫猫现在直接帮你重开小猫卷。'
+      ;;
+    script_branch)
+      summary_text='脚本分支已经切换完成，猫猫现在直接帮你重开小猫卷。'
       ;;
   esac
 
@@ -1522,19 +1613,26 @@ xmj_handle_script_setting_action() {
           ;;
         3)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='script_update'
+          XMJ_SETTING_NEXT_VIEW='keepalive'
           ;;
         4)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='script_version'
+          XMJ_SETTING_NEXT_VIEW='script_update'
           ;;
         5)
           xmj_font_clear_notice
-          xmj_run_backend_display_page
-          XMJ_SETTING_NEXT_VIEW='exit'
+          XMJ_SETTING_NEXT_VIEW='script_branch'
+          ;;
+        6)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='script_version'
+          ;;
+        7)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
           ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 0。'
           ;;
       esac
       ;;
@@ -1552,6 +1650,53 @@ xmj_handle_script_setting_action() {
           ;;
         *)
           xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 0。'
+          ;;
+      esac
+      ;;
+    keepalive)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_keepalive_set_auto_apply_flag '1'
+          ;;
+        2)
+          xmj_keepalive_set_auto_apply_flag '0'
+          ;;
+        3)
+          xmj_keepalive_set_auto_release_flag '1'
+          ;;
+        4)
+          xmj_keepalive_set_auto_release_flag '0'
+          ;;
+        5)
+          xmj_keepalive_request_manual_apply
+          ;;
+        6)
+          xmj_keepalive_request_manual_release
+          ;;
+        7)
+          xmj_keepalive_set_auto_audio_apply_flag '1'
+          ;;
+        8)
+          xmj_keepalive_set_auto_audio_apply_flag '0'
+          ;;
+        9)
+          xmj_keepalive_set_auto_audio_release_flag '1'
+          ;;
+        10)
+          xmj_keepalive_set_auto_audio_release_flag '0'
+          ;;
+        11)
+          xmj_keepalive_request_manual_audio_start
+          ;;
+        12)
+          xmj_keepalive_request_manual_audio_stop
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 0。'
           ;;
       esac
       ;;
@@ -1610,6 +1755,23 @@ xmj_handle_script_setting_action() {
           ;;
       esac
       ;;
+    script_branch)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_setting_run_script_branch_switch 'main'
+          ;;
+        2)
+          xmj_setting_run_script_branch_switch 'test'
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这里只支持输入 1 / 2 / 0。'
+          ;;
+      esac
+      ;;
     script_version)
       case "$input" in
         ''|0)
@@ -1650,12 +1812,16 @@ xmj_handle_script_setting_action() {
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='logs_keep_count'
           ;;
+        c|C)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs_auto_cleanup'
+          ;;
         r|R)
           xmj_font_clear_notice
           xmj_setting_refresh_log_files
           ;;
         *[!0-9]*)
-          xmj_font_set_notice 'warn' '仅支持输入后台序号、d、a、k、r 或 0。'
+          xmj_font_set_notice 'warn' '仅支持输入后台序号、d、a、k、c、r 或 0。'
           ;;
         *)
           xmj_setting_refresh_log_files
@@ -1684,6 +1850,27 @@ xmj_handle_script_setting_action() {
           if xmj_setting_update_log_keep_count "$input"; then
             XMJ_SETTING_NEXT_VIEW='logs'
           fi
+          ;;
+      esac
+      ;;
+    logs_auto_cleanup)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='logs'
+          ;;
+        1)
+          if xmj_log_set_auto_cleanup_on_launch_flag '1'; then
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+        2)
+          if xmj_log_set_auto_cleanup_on_launch_flag '0'; then
+            XMJ_SETTING_NEXT_VIEW='logs'
+          fi
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '这一页只支持输入 1 / 2 / 0。'
           ;;
       esac
       ;;

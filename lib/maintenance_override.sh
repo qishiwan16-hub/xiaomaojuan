@@ -39,13 +39,13 @@ xmj_maintenance_create_archive() {
       cd "$repo_path" || exit 1
       printf '%s\n' "${items[@]}" \
         | LC_ALL=C sort \
-        | zip -1rq "$archive_file" -@
+        | zip -0rq "$archive_file" -@
     ) >>"$shell_log" 2>&1
     if [ $? -ne 0 ]; then
       return 1
     fi
 
-    zip -1qj "$archive_file" "$meta_file" >>"$shell_log" 2>&1
+    zip -0qj "$archive_file" "$meta_file" >>"$shell_log" 2>&1
     return $?
   fi
 
@@ -63,7 +63,7 @@ repo_path, archive_file, meta_file, *items = sys.argv[1:]
 if not os.path.isdir(repo_path) or not os.path.isfile(meta_file):
     raise SystemExit(1)
 
-with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_STORED) as zf:
     zf.write(meta_file, os.path.basename(meta_file))
     for item in items:
         item_path = os.path.join(repo_path, item)
@@ -122,6 +122,8 @@ xmj_maintenance_create_backup() {
   local temp_root=''
   local item=''
   local meta_file=''
+  local archive_total_bytes='0'
+  local archive_pid=''
   local joined_items=''
   local joined_missing=''
   local current_version=''
@@ -223,12 +225,15 @@ xmj_maintenance_create_backup() {
     return 1
   fi
 
-  xmj_maintenance_log "$logger_name" "开始为${op_name}自动打包备份。"
-  xmj_backup_start_busy '生成备份中'
-
   meta_file="$temp_root/$(xmj_maintenance_backup_meta_name)"
+  archive_total_bytes="$(xmj_backup_estimate_input_bytes "$meta_file" "$repo_path" "${items[@]}")"
 
-  if ! xmj_maintenance_create_archive "$repo_path" "$archive_file" "$shell_log" "$meta_file" "${items[@]}"; then
+  xmj_maintenance_log "$logger_name" "开始为${op_name}自动打包备份。"
+  xmj_backup_start_busy '生成备份中' "$archive_file" "$archive_total_bytes" "$joined_items"
+
+  xmj_maintenance_create_archive "$repo_path" "$archive_file" "$shell_log" "$meta_file" "${items[@]}" &
+  archive_pid="$!"
+  if ! xmj_backup_wait_archive_job "$archive_pid" '生成备份中'; then
     xmj_backup_stop_busy
     rm -rf "$temp_root" 2>/dev/null || true
     XMJ_MAINT_LAST_ERROR='生成备份压缩包失败，可温和查看日志。'
@@ -254,7 +259,6 @@ xmj_maintenance_create_backup() {
   fi
   return 0
 }
-
 xmj_maintenance_restore_backup() {
   local repo_path="${1:-}"
   local logger_name="${2:-}"
@@ -987,6 +991,11 @@ xmj_maintenance_backup_dir() {
 
 declare -ga XMJ_BACKUP_ARCHIVE_FILES=()
 declare -ga XMJ_BACKUP_ARCHIVE_SCOPES=()
+XMJ_BACKUP_BUSY_ARCHIVE_FILE=''
+XMJ_BACKUP_BUSY_TOTAL_BYTES='0'
+XMJ_BACKUP_BUSY_CURRENT_BYTES='0'
+XMJ_BACKUP_BUSY_PERCENT='0'
+XMJ_BACKUP_BUSY_DETAIL=''
 
 xmj_backup_busy_tip() {
   case "${1:-备份处理中}" in
@@ -1008,11 +1017,201 @@ xmj_backup_busy_tip() {
   esac
 }
 
+xmj_backup_normalize_bytes() {
+  local bytes="${1:-0}"
+
+  bytes="${bytes//[[:space:]]/}"
+  case "$bytes" in
+    ''|*[!0-9]*)
+      bytes='0'
+      ;;
+  esac
+
+  printf '%s' "$bytes"
+}
+
+xmj_backup_bytes_text() {
+  local bytes='0'
+
+  bytes="$(xmj_backup_normalize_bytes "${1:-0}")"
+  if [ "$bytes" -ge 1073741824 ]; then
+    printf '%s GB' "$(((bytes + 1073741823) / 1073741824))"
+    return 0
+  fi
+
+  if [ "$bytes" -ge 1048576 ]; then
+    printf '%s MB' "$(((bytes + 1048575) / 1048576))"
+    return 0
+  fi
+
+  if [ "$bytes" -ge 1024 ]; then
+    printf '%s KB' "$(((bytes + 1023) / 1024))"
+    return 0
+  fi
+
+  printf '%s B' "$bytes"
+}
+
+xmj_backup_file_size_bytes() {
+  local file_path="${1:-}"
+  local bytes='0'
+
+  if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  bytes="$(wc -c <"$file_path" 2>/dev/null || true)"
+  printf '%s' "$(xmj_backup_normalize_bytes "$bytes")"
+}
+
+xmj_backup_path_size_bytes() {
+  local path_value="${1:-}"
+  local blocks='0'
+
+  if [ -z "$path_value" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  if [ -f "$path_value" ]; then
+    xmj_backup_file_size_bytes "$path_value"
+    return 0
+  fi
+
+  if [ ! -d "$path_value" ]; then
+    printf '%s' '0'
+    return 0
+  fi
+
+  blocks="$(du -sk "$path_value" 2>/dev/null | awk 'NR==1 {print $1}')"
+  blocks="$(xmj_backup_normalize_bytes "$blocks")"
+  printf '%s' "$((blocks * 1024))"
+}
+
+xmj_backup_estimate_input_bytes() {
+  local meta_file="${1:-}"
+  local repo_path="${2:-}"
+  local total_bytes='0'
+  local item=''
+  local item_bytes='0'
+
+  shift 2
+  total_bytes="$(xmj_backup_file_size_bytes "$meta_file")"
+
+  for item in "$@"; do
+    item_bytes="$(xmj_backup_path_size_bytes "$repo_path/$item")"
+    total_bytes=$((total_bytes + item_bytes))
+  done
+
+  if [ "$total_bytes" -lt 1024 ]; then
+    total_bytes='1024'
+  fi
+
+  total_bytes=$((total_bytes + (total_bytes / 20) + 65536))
+  printf '%s' "$total_bytes"
+}
+
+xmj_backup_progress_bar_text() {
+  local percent='0'
+  local width="${2:-24}"
+  local filled='0'
+  local index='0'
+  local bar=''
+
+  percent="$(xmj_backup_normalize_bytes "${1:-0}")"
+  if [ "$percent" -gt 100 ]; then
+    percent='100'
+  fi
+
+  if [ "$width" -le 0 ]; then
+    width='24'
+  fi
+
+  filled=$((percent * width / 100))
+  for ((index = 0; index < width; index += 1)); do
+    if [ "$index" -lt "$filled" ]; then
+      bar="${bar}#"
+    else
+      bar="${bar}-"
+    fi
+  done
+
+  printf '%s' "$bar"
+}
+
+xmj_backup_refresh_busy_progress() {
+  local mode="${1:-running}"
+  local total_bytes='0'
+  local current_bytes='0'
+  local percent='0'
+
+  total_bytes="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_TOTAL_BYTES:-0}")"
+  current_bytes="$(xmj_backup_file_size_bytes "${XMJ_BACKUP_BUSY_ARCHIVE_FILE:-}")"
+
+  if [ "$total_bytes" -le 0 ]; then
+    total_bytes='0'
+    percent='0'
+  else
+    if [ "$current_bytes" -gt "$total_bytes" ]; then
+      current_bytes="$total_bytes"
+    fi
+    percent=$((current_bytes * 100 / total_bytes))
+  fi
+
+  if [ "$mode" = 'done' ] && [ "$total_bytes" -gt 0 ]; then
+    current_bytes="$total_bytes"
+    percent='100'
+  elif [ "$percent" -ge 100 ]; then
+    percent='99'
+  fi
+
+  XMJ_BACKUP_BUSY_CURRENT_BYTES="$current_bytes"
+  XMJ_BACKUP_BUSY_PERCENT="$percent"
+}
+
+xmj_backup_wait_archive_job() {
+  local job_pid="${1:-}"
+  local action_text="${2:-备份处理中}"
+  local status='0'
+  local last_percent='-1'
+
+  if [ -z "$job_pid" ]; then
+    return 1
+  fi
+
+  while kill -0 "$job_pid" 2>/dev/null; do
+    xmj_backup_refresh_busy_progress 'running'
+    if [ "${XMJ_BACKUP_BUSY_PERCENT:-0}" != "$last_percent" ]; then
+      xmj_render_backup_busy_frame "$action_text"
+      last_percent="${XMJ_BACKUP_BUSY_PERCENT:-0}"
+    fi
+    sleep 1 || true
+  done
+
+  wait "$job_pid"
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    xmj_backup_refresh_busy_progress 'done'
+    xmj_render_backup_busy_frame "$action_text"
+  fi
+
+  return "$status"
+}
+
 xmj_render_backup_busy_frame() {
   local action_text="${1:-备份处理中}"
   local detail_text=''
+  local total_bytes='0'
+  local current_bytes='0'
+  local percent='0'
+  local progress_bar=''
 
   detail_text="$(xmj_backup_busy_tip "$action_text")"
+  total_bytes="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_TOTAL_BYTES:-0}")"
+  current_bytes="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_CURRENT_BYTES:-0}")"
+  percent="$(xmj_backup_normalize_bytes "${XMJ_BACKUP_BUSY_PERCENT:-0}")"
+  progress_bar="$(xmj_backup_progress_bar_text "$percent" '28')"
 
   xmj_clear_screen
   xmj_render_header
@@ -1020,21 +1219,38 @@ xmj_render_backup_busy_frame() {
   printf '\n'
   xmj_render_setting_card "$action_text" '命令细节已隐藏，猫猫正在安静处理。' "$detail_text"
   printf '\n'
-  printf '  %b(ฅ́˘ฅ̀)♡ %s%b\n' "$XMJ_PINK" "$action_text" "$XMJ_RESET"
+  printf '  %b(archive)%b %b%s%b\n' "$XMJ_PINK" "$XMJ_RESET" "$XMJ_WHITE" "$action_text" "$XMJ_RESET"
+  if [ "$total_bytes" -gt 0 ]; then
+    printf '  %b[%s]%b %b%s%%%b\n' "$XMJ_BLUE_SOFT" "$progress_bar" "$XMJ_RESET" "$XMJ_WHITE" "$percent" "$XMJ_RESET"
+    xmj_render_fact_line '当前进度' "$(xmj_backup_bytes_text "$current_bytes") / $(xmj_backup_bytes_text "$total_bytes")"
+  fi
+  if [ -n "${XMJ_BACKUP_BUSY_DETAIL:-}" ]; then
+    xmj_render_fact_line '处理范围' "${XMJ_BACKUP_BUSY_DETAIL}"
+  fi
   printf '\n'
-  xmj_rule_line "$XMJ_BORDER" '─' 68
+  xmj_rule_line "$XMJ_BORDER" '-' 68
 }
 
 xmj_backup_start_busy() {
   local action_text="${1:-备份处理中}"
 
+  XMJ_BACKUP_BUSY_ARCHIVE_FILE="${2:-}"
+  XMJ_BACKUP_BUSY_TOTAL_BYTES="$(xmj_backup_normalize_bytes "${3:-0}")"
+  XMJ_BACKUP_BUSY_CURRENT_BYTES='0'
+  XMJ_BACKUP_BUSY_PERCENT='0'
+  XMJ_BACKUP_BUSY_DETAIL="${4:-}"
+
   xmj_render_backup_busy_frame "$action_text"
 }
 
 xmj_backup_stop_busy() {
+  XMJ_BACKUP_BUSY_ARCHIVE_FILE=''
+  XMJ_BACKUP_BUSY_TOTAL_BYTES='0'
+  XMJ_BACKUP_BUSY_CURRENT_BYTES='0'
+  XMJ_BACKUP_BUSY_PERCENT='0'
+  XMJ_BACKUP_BUSY_DETAIL=''
   return 0
 }
-
 xmj_backup_notice_color() {
   case "${1:-info}" in
     warn)
@@ -1939,6 +2155,368 @@ xmj_render_backup_cleanup_confirm_page() {
   xmj_render_action_item 'y' '确认执行这次清理'
   xmj_render_action_item '0' '取消并返回上一页'
   xmj_render_action_footer '输入 y / 0。'
+}
+
+XMJ_MAINT_BACKUP_FLOW_RESULT=''
+XMJ_MAINT_BACKUP_SELECTED_SCOPE=''
+XMJ_BACKUP_SELECT_DATA='0'
+XMJ_BACKUP_SELECT_THIRD_PARTY='0'
+XMJ_BACKUP_SELECT_CONFIG='0'
+XMJ_BACKUP_SELECT_ALL='0'
+XMJ_BACKUP_PROGRESS_TITLE=''
+XMJ_BACKUP_PROGRESS_STAGE='prepare'
+XMJ_BACKUP_PROGRESS_FAILED_STAGE=''
+XMJ_BACKUP_PROGRESS_PERCENT='0'
+XMJ_BACKUP_PROGRESS_DETAIL=''
+XMJ_BACKUP_PROGRESS_SCOPE=''
+XMJ_BACKUP_PROGRESS_CURRENT_ITEM=''
+XMJ_BACKUP_PROGRESS_CURRENT_STEP='0'
+XMJ_BACKUP_PROGRESS_TOTAL_STEPS='0'
+
+xmj_maintenance_clear_state() {
+  XMJ_MAINT_BACKUP_DIR=''
+  XMJ_MAINT_BACKUP_FILE=''
+  XMJ_MAINT_BACKUP_NAME=''
+  XMJ_MAINT_BACKUP_NOTE=''
+  XMJ_MAINT_BACKUP_RESTORE_NOTE=''
+  XMJ_MAINT_BACKUP_ITEMS=''
+  XMJ_MAINT_BACKUP_MISSING_ITEMS=''
+  XMJ_MAINT_BACKUP_SCOPE='full'
+  XMJ_MAINT_BACKUP_COMPAT_MODE='0'
+  XMJ_MAINT_BACKUP_COMPAT_NOTE=''
+  XMJ_MAINT_HISTORY_FILE=''
+  XMJ_MAINT_LAST_ERROR=''
+  XMJ_MAINT_BACKUP_FLOW_RESULT=''
+  XMJ_MAINT_BACKUP_SELECTED_SCOPE=''
+  XMJ_BACKUP_SELECT_DATA='0'
+  XMJ_BACKUP_SELECT_THIRD_PARTY='0'
+  XMJ_BACKUP_SELECT_CONFIG='0'
+  XMJ_BACKUP_SELECT_ALL='0'
+}
+
+xmj_backup_scope_option_label() {
+  case "${1:-}" in
+    data)
+      printf '%s' 'data'
+      ;;
+    public/scripts/extensions/third-party)
+      printf '%s' 'sillytavern/public/scripts/extensions/third-party'
+      ;;
+    config.yaml)
+      printf '%s' 'config.yaml'
+      ;;
+    all)
+      printf '%s' '全选（以上三项）'
+      ;;
+    *)
+      printf '%s' "${1:-未选择}"
+      ;;
+  esac
+}
+
+xmj_backup_scope_mark() {
+  if [ "${1:-0}" = '1' ]; then
+    printf '%s' '[x]'
+    return 0
+  fi
+
+  printf '%s' '[ ]'
+}
+
+xmj_backup_refresh_all_toggle() {
+  if [ "${XMJ_BACKUP_SELECT_DATA:-0}" = '1' ] \
+    && [ "${XMJ_BACKUP_SELECT_THIRD_PARTY:-0}" = '1' ] \
+    && [ "${XMJ_BACKUP_SELECT_CONFIG:-0}" = '1' ]; then
+    XMJ_BACKUP_SELECT_ALL='1'
+    return 0
+  fi
+
+  XMJ_BACKUP_SELECT_ALL='0'
+}
+
+xmj_backup_reset_scope_selection() {
+  XMJ_BACKUP_SELECT_DATA='0'
+  XMJ_BACKUP_SELECT_THIRD_PARTY='0'
+  XMJ_BACKUP_SELECT_CONFIG='0'
+  XMJ_BACKUP_SELECT_ALL='0'
+}
+
+xmj_backup_apply_default_scope_selection() {
+  local compat_reason=''
+
+  xmj_backup_reset_scope_selection
+  compat_reason="$(xmj_maintenance_data_only_backup_reason "${1:-}" "${2:-}")"
+  if [ -n "$compat_reason" ]; then
+    XMJ_BACKUP_SELECT_DATA='1'
+    xmj_backup_refresh_all_toggle
+    return 0
+  fi
+
+  XMJ_BACKUP_SELECT_DATA='1'
+  XMJ_BACKUP_SELECT_THIRD_PARTY='1'
+  XMJ_BACKUP_SELECT_CONFIG='1'
+  xmj_backup_refresh_all_toggle
+}
+
+xmj_backup_scope_item_exists_text() {
+  local repo_path="${1:-}"
+  local item="${2:-}"
+
+  if [ -n "$repo_path" ] && { [ -d "$repo_path/$item" ] || [ -f "$repo_path/$item" ]; }; then
+    printf '%s' '已发现'
+    return 0
+  fi
+
+  printf '%s' '当前未发现'
+}
+
+xmj_backup_selected_item_lines() {
+  if [ "${XMJ_BACKUP_SELECT_DATA:-0}" = '1' ]; then
+    printf '%s\n' 'data'
+  fi
+  if [ "${XMJ_BACKUP_SELECT_THIRD_PARTY:-0}" = '1' ]; then
+    printf '%s\n' 'public/scripts/extensions/third-party'
+  fi
+  if [ "${XMJ_BACKUP_SELECT_CONFIG:-0}" = '1' ]; then
+    printf '%s\n' 'config.yaml'
+  fi
+}
+
+xmj_backup_selected_scope_text() {
+  local -a labels=()
+  local item=''
+
+  while IFS= read -r item || [ -n "$item" ]; do
+    if [ -z "$item" ]; then
+      continue
+    fi
+    labels+=("$(xmj_backup_scope_option_label "$item")")
+  done < <(xmj_backup_selected_item_lines)
+
+  if [ "${#labels[@]}" -eq 0 ]; then
+    printf '%s' '未选择'
+    return 0
+  fi
+
+  xmj_backup_join_scope_labels "${labels[@]}"
+}
+
+xmj_backup_scope_kind_from_items() {
+  if [ "$#" -eq 1 ] && [ "${1:-}" = 'data' ]; then
+    printf '%s' 'data-only'
+    return 0
+  fi
+
+  if [ "$#" -eq 3 ]; then
+    printf '%s' 'full'
+    return 0
+  fi
+
+  printf '%s' 'custom'
+}
+
+xmj_backup_toggle_scope_token() {
+  case "${1:-}" in
+    1|data)
+      if [ "${XMJ_BACKUP_SELECT_DATA:-0}" = '1' ]; then
+        XMJ_BACKUP_SELECT_DATA='0'
+      else
+        XMJ_BACKUP_SELECT_DATA='1'
+      fi
+      ;;
+    2|third|third-party)
+      if [ "${XMJ_BACKUP_SELECT_THIRD_PARTY:-0}" = '1' ]; then
+        XMJ_BACKUP_SELECT_THIRD_PARTY='0'
+      else
+        XMJ_BACKUP_SELECT_THIRD_PARTY='1'
+      fi
+      ;;
+    3|config|config.yaml)
+      if [ "${XMJ_BACKUP_SELECT_CONFIG:-0}" = '1' ]; then
+        XMJ_BACKUP_SELECT_CONFIG='0'
+      else
+        XMJ_BACKUP_SELECT_CONFIG='1'
+      fi
+      ;;
+    4|a|all)
+      if [ "${XMJ_BACKUP_SELECT_ALL:-0}" = '1' ]; then
+        xmj_backup_reset_scope_selection
+      else
+        XMJ_BACKUP_SELECT_DATA='1'
+        XMJ_BACKUP_SELECT_THIRD_PARTY='1'
+        XMJ_BACKUP_SELECT_CONFIG='1'
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  xmj_backup_refresh_all_toggle
+}
+
+xmj_backup_parse_scope_input() {
+  local raw_input="${1:-}"
+  local normalized=''
+  local compact=''
+  local token=''
+  local index='0'
+
+  XMJ_BACKUP_SCOPE_ACTION=''
+  normalized="${raw_input,,}"
+
+  case "$normalized" in
+    y|yes)
+      XMJ_BACKUP_SCOPE_ACTION='confirm'
+      return 0
+      ;;
+    s|skip)
+      XMJ_BACKUP_SCOPE_ACTION='skip'
+      return 0
+      ;;
+    0)
+      XMJ_BACKUP_SCOPE_ACTION='cancel'
+      return 0
+      ;;
+  esac
+
+  normalized="${normalized//,/ }"
+  normalized="${normalized//+/ }"
+  normalized="${normalized//\// }"
+  compact="${normalized//[[:space:]]/}"
+  if [ -n "$compact" ] && [[ "$compact" =~ ^[1-4]+$ ]]; then
+    for ((index = 0; index < ${#compact}; index += 1)); do
+      token="${compact:index:1}"
+      if ! xmj_backup_toggle_scope_token "$token"; then
+        return 1
+      fi
+    done
+    XMJ_BACKUP_SCOPE_ACTION='toggle'
+    return 0
+  fi
+
+  if [ -z "$normalized" ]; then
+    return 1
+  fi
+
+  for token in $normalized; do
+    if ! xmj_backup_toggle_scope_token "$token"; then
+      return 1
+    fi
+  done
+
+  XMJ_BACKUP_SCOPE_ACTION='toggle'
+}
+
+xmj_backup_prompt_scope_input() {
+  if [ "${1:-0}" = '1' ]; then
+    printf '%b%s%b' "$XMJ_PINK_SOFT" '  输入 1 / 2 / 3 / 4 / y / s / 0 > ' "$XMJ_RESET"
+  else
+    printf '%b%s%b' "$XMJ_PINK_SOFT" '  输入 1 / 2 / 3 / 4 / y / 0 > ' "$XMJ_RESET"
+  fi
+  IFS= read -r XMJ_LAST_INPUT
+}
+
+xmj_render_backup_scope_page() {
+  local repo_path="${1:-}"
+  local op_name="${2:-创建备份}"
+  local current_version="${3:-}"
+  local target_version="${4:-}"
+  local allow_skip="${5:-0}"
+  local compat_reason=''
+
+  compat_reason="$(xmj_maintenance_data_only_backup_reason "$current_version" "$target_version")"
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title '备份范围' 'backup scope' 'backup'
+  printf '\n'
+
+  if [ -n "$compat_reason" ]; then
+    xmj_render_setting_card \
+      "$op_name" \
+      "${compat_reason}，这里会先让你选择这次要打进 zip 的内容。" \
+      "默认先勾选 data；如果你确认需要，也可以继续勾选 third-party 或 config.yaml。"
+  else
+    xmj_render_setting_card \
+      "$op_name" \
+      '这里会先确认这次要进入 zip 压缩包的备份范围。' \
+      '只会打包你当前勾选的内容，未勾选的部分不会进入这次备份。'
+  fi
+
+  printf '\n'
+  xmj_render_fact_line '备份目录' "$(xmj_display_path "$(xmj_maintenance_backup_dir)")"
+  xmj_render_fact_line '压缩格式' '.zip'
+  xmj_render_fact_line '当前选择' "$(xmj_backup_selected_scope_text)"
+
+  if [ -n "$compat_reason" ]; then
+    printf '\n'
+    printf '  %b%s%b\n' "$XMJ_WARN" "$(xmj_maintenance_cross_version_notice)" "$XMJ_RESET"
+  fi
+
+  xmj_render_backup_notice
+  printf '\n'
+  printf '  %b♡ 备份项%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_action_item '1' "$(xmj_backup_scope_mark "$XMJ_BACKUP_SELECT_DATA") data · $(xmj_backup_scope_item_exists_text "$repo_path" 'data')"
+  xmj_render_action_item '2' "$(xmj_backup_scope_mark "$XMJ_BACKUP_SELECT_THIRD_PARTY") sillytavern/public/scripts/extensions/third-party · $(xmj_backup_scope_item_exists_text "$repo_path" 'public/scripts/extensions/third-party')"
+  xmj_render_action_item '3' "$(xmj_backup_scope_mark "$XMJ_BACKUP_SELECT_CONFIG") config.yaml · $(xmj_backup_scope_item_exists_text "$repo_path" 'config.yaml')"
+  xmj_render_action_item '4' "$(xmj_backup_scope_mark "$XMJ_BACKUP_SELECT_ALL") 全选（以上三项）"
+  printf '\n'
+  xmj_render_action_item 'y' '确认这次备份范围并继续'
+  if [ "$allow_skip" = '1' ]; then
+    xmj_render_action_item 's' '跳过备份并继续当前操作'
+  fi
+  xmj_render_action_item '0' '取消并返回上一页'
+  xmj_render_action_footer '可以反复输入 1 / 2 / 3 / 4 调整范围；输入 1 2、1,2 或 123 也能一次切多项。'
+}
+
+xmj_backup_run_scope_picker() {
+  local repo_path="${1:-}"
+  local op_name="${2:-创建备份}"
+  local current_version="${3:-}"
+  local target_version="${4:-}"
+  local allow_skip="${5:-0}"
+  local input=''
+
+  xmj_backup_clear_notice
+  xmj_backup_apply_default_scope_selection "$current_version" "$target_version"
+
+  while true; do
+    xmj_render_backup_scope_page "$repo_path" "$op_name" "$current_version" "$target_version" "$allow_skip"
+    xmj_backup_prompt_scope_input "$allow_skip"
+    input="${XMJ_LAST_INPUT:-}"
+
+    if ! xmj_backup_parse_scope_input "$input"; then
+      xmj_backup_set_notice 'warn' '这里只支持输入 1 / 2 / 3 / 4 / y / 0。'
+      continue
+    fi
+
+    case "${XMJ_BACKUP_SCOPE_ACTION:-}" in
+      confirm)
+        if [ "$(xmj_backup_selected_scope_text)" = '未选择' ]; then
+          xmj_backup_set_notice 'warn' '至少勾选一项备份内容后，才能继续生成压缩包。'
+          continue
+        fi
+        XMJ_MAINT_BACKUP_FLOW_RESULT='selected'
+        XMJ_MAINT_BACKUP_SELECTED_SCOPE="$(xmj_backup_selected_scope_text)"
+        return 0
+        ;;
+      skip)
+        if [ "$allow_skip" != '1' ]; then
+          xmj_backup_set_notice 'warn' '这个入口需要先确认备份范围，不能直接跳过备份。'
+          continue
+        fi
+        XMJ_MAINT_BACKUP_FLOW_RESULT='skipped'
+        XMJ_MAINT_BACKUP_NOTE='这次按你的选择跳过了备份。'
+        XMJ_MAINT_BACKUP_SELECTED_SCOPE='未选择'
+        return 0
+        ;;
+      cancel)
+        XMJ_MAINT_BACKUP_FLOW_RESULT='cancelled'
+        return 2
+        ;;
+    esac
+  done
 }
 
 xmj_render_backup_cleanup_result() {

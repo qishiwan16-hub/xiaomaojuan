@@ -11,6 +11,8 @@ xmj_launch_timestamp() {
 
 xmj_launch_reset_state() {
   XMJ_LAUNCH_LOG_FILE=''
+  XMJ_LAUNCH_RUNTIME_FILE=''
+  XMJ_LAUNCH_RUNTIME_PENDING_FILE=''
   XMJ_LAUNCH_LOG_CURSOR='0'
   XMJ_LAUNCH_RUNTIME_LOG_START='0'
   XMJ_LAUNCH_READY_SCAN_LINE='1'
@@ -38,6 +40,11 @@ xmj_launch_reset_state() {
   XMJ_LAUNCH_RUNNING_NOTICE_SHOWN='0'
   XMJ_LAUNCH_ATTACHED_MODE='0'
   XMJ_LAUNCH_PREVIOUS_INT_TRAP=''
+  XMJ_LAUNCH_STREAM_PIPE=''
+  XMJ_LAUNCH_STREAM_PID=''
+  XMJ_LAUNCH_STREAM_READY_FILE=''
+  XMJ_LAUNCH_STREAM_FRONTEND_FILE=''
+  XMJ_LAUNCH_STREAM_DIRECT='0'
 }
 
 xmj_launch_log_line() {
@@ -48,6 +55,1055 @@ xmj_launch_log_line() {
   fi
 
   printf '[%s] %s\n' "$(xmj_launch_timestamp)" "$line" >>"$XMJ_LAUNCH_LOG_FILE"
+}
+
+xmj_keepalive_state_file() {
+  printf '%s/keepalive.state' "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+}
+
+xmj_keepalive_audio_dir() {
+  printf '%s/keepalive-audio' "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+}
+
+xmj_keepalive_audio_file() {
+  printf '%s/silence-loop.wav' "$(xmj_keepalive_audio_dir)"
+}
+
+xmj_keepalive_emit_le16() {
+  local value="${1:-0}"
+
+  printf '%b' "$(printf '\\%03o\\%03o' "$((value & 255))" "$(((value >> 8) & 255))")"
+}
+
+xmj_keepalive_emit_le32() {
+  local value="${1:-0}"
+
+  printf '%b' "$(printf '\\%03o\\%03o\\%03o\\%03o' \
+    "$((value & 255))" \
+    "$(((value >> 8) & 255))" \
+    "$(((value >> 16) & 255))" \
+    "$(((value >> 24) & 255))")"
+}
+
+xmj_keepalive_prepare_audio_file() {
+  local audio_dir=''
+  local audio_file=''
+  local temp_file=''
+  local sample_rate='8000'
+  local sample_seconds='30'
+  local data_size='0'
+  local riff_size='0'
+
+  audio_dir="$(xmj_keepalive_audio_dir)"
+  audio_file="$(xmj_keepalive_audio_file)"
+  if [ -s "$audio_file" ]; then
+    printf '%s' "$audio_file"
+    return 0
+  fi
+
+  if [ ! -d "$audio_dir" ] && ! mkdir -p "$audio_dir" 2>/dev/null; then
+    return 1
+  fi
+
+  data_size=$((sample_rate * sample_seconds))
+  riff_size=$((36 + data_size))
+  temp_file="${audio_file}.tmp.$$"
+
+  if ! {
+    printf '%s' 'RIFF'
+    xmj_keepalive_emit_le32 "$riff_size"
+    printf '%s' 'WAVEfmt '
+    xmj_keepalive_emit_le32 '16'
+    xmj_keepalive_emit_le16 '1'
+    xmj_keepalive_emit_le16 '1'
+    xmj_keepalive_emit_le32 "$sample_rate"
+    xmj_keepalive_emit_le32 "$sample_rate"
+    xmj_keepalive_emit_le16 '1'
+    xmj_keepalive_emit_le16 '8'
+    printf '%s' 'data'
+    xmj_keepalive_emit_le32 "$data_size"
+  } >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! dd if=/dev/zero bs=1 count="$data_size" 2>/dev/null | tr '\000' '\200' >>"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$audio_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  printf '%s' "$audio_file"
+}
+
+xmj_keepalive_reset_runtime_state_vars() {
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+}
+
+xmj_keepalive_load_runtime_state() {
+  local state_file=''
+  local load_status='0'
+
+  xmj_keepalive_reset_runtime_state_vars
+  state_file="$(xmj_keepalive_state_file)"
+
+  if [ ! -f "$state_file" ]; then
+    return 0
+  fi
+
+  set +u
+  # shellcheck disable=SC1090
+  source "$state_file" 2>/dev/null || load_status=$?
+  set -u
+
+  if [ "$load_status" -ne 0 ]; then
+    xmj_keepalive_reset_runtime_state_vars
+    return 1
+  fi
+
+  case "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" in
+    active|idle)
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" in
+    auto|manual|'')
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" in
+    active|idle)
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE='idle'
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" in
+    auto|manual|'')
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=''
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" in
+    ''|*[!0-9]*)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}" in
+    ''|*[!A-Za-z0-9_-]*)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+      ;;
+  esac
+
+  if [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" ] || [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}" ]; then
+    XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+    XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+  fi
+
+  return 0
+}
+
+xmj_keepalive_persist_runtime_state() {
+  local state_file=''
+  local state_dir=''
+  local temp_file=''
+
+  state_file="$(xmj_keepalive_state_file)"
+  state_dir="$(dirname "$state_file")"
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" = 'idle' ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" ] \
+    && [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" = 'idle' ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}" ]; then
+    rm -f "$state_file" 2>/dev/null || true
+    return 0
+  fi
+
+  if [ -n "$state_dir" ] && [ ! -d "$state_dir" ]; then
+    if ! mkdir -p "$state_dir" 2>/dev/null; then
+      return 1
+    fi
+  fi
+
+  temp_file="${state_file}.tmp.$$"
+  if ! {
+    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_STATE=%q\n' "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=%q\n' "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}"
+  } >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$state_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_keepalive_write_runtime_state() {
+  local state="${1:-idle}"
+  local owner="${2:-}"
+
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE="$state"
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER="$owner"
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_clear_runtime_state() {
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_write_audio_runtime_state() {
+  local state="${1:-idle}"
+  local owner="${2:-}"
+  local loop_pid="${3:-}"
+  local loop_marker="${4:-}"
+
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE="$state"
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER="$owner"
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID="$loop_pid"
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER="$loop_marker"
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_clear_audio_runtime_state() {
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_wake_lock_supported() {
+  command -v termux-wake-lock >/dev/null 2>&1 && command -v termux-wake-unlock >/dev/null 2>&1
+}
+
+xmj_keepalive_audio_supported() {
+  command -v termux-media-player >/dev/null 2>&1
+}
+
+xmj_keepalive_bool_status_text() {
+  case "${1:-0}" in
+    1)
+      printf '%s' '已开启'
+      ;;
+    *)
+      printf '%s' '已关闭'
+      ;;
+  esac
+}
+
+xmj_keepalive_auto_apply_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:-0}"
+}
+
+xmj_keepalive_auto_release_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:-0}"
+}
+
+xmj_keepalive_audio_auto_apply_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP:-0}"
+}
+
+xmj_keepalive_audio_auto_release_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:-0}"
+}
+
+xmj_log_auto_cleanup_on_launch_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH:-0}"
+}
+
+xmj_keepalive_capability_text() {
+  if xmj_keepalive_wake_lock_supported; then
+    printf '%s' '已就绪'
+    return 0
+  fi
+
+  printf '%s' '未就绪'
+}
+
+xmj_keepalive_audio_capability_text() {
+  if xmj_keepalive_audio_supported; then
+    printf '%s' '已就绪'
+    return 0
+  fi
+
+  printf '%s' '未就绪'
+}
+
+xmj_keepalive_build_audio_loop_marker() {
+  local stamp=''
+  local salt='0'
+
+  stamp="$(date '+%Y%m%d%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='unknown'
+  fi
+
+  salt="${RANDOM:-0}"
+  printf 'xmj-audio-loop-%s-%s-%s' "$stamp" "$$" "$salt"
+}
+
+xmj_keepalive_audio_loop_pid_matches() {
+  local pid="${1:-}"
+  local marker="${2:-}"
+  local command_line=''
+
+  case "$pid" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+
+  case "$marker" in
+    ''|*[!A-Za-z0-9_-]*)
+      return 1
+      ;;
+  esac
+
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+
+  if [ -r "/proc/$pid/cmdline" ]; then
+    command_line="$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+  elif command -v ps >/dev/null 2>&1; then
+    command_line="$(ps -o args= -p "$pid" 2>/dev/null || true)"
+  fi
+
+  case "$command_line" in
+    *termux-media-player*)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$command_line" in
+    *"$marker"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+xmj_keepalive_audio_loop_process_alive() {
+  xmj_keepalive_audio_loop_pid_matches \
+    "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" \
+    "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}"
+}
+
+xmj_keepalive_audio_playing_now() {
+  local output=''
+
+  if ! xmj_keepalive_audio_supported; then
+    return 1
+  fi
+
+  output="$(termux-media-player info 2>/dev/null || true)"
+  case "$output" in
+    *'"playing":true'*|*'"playing": true'*|*'"isPlaying":true'*|*'"isPlaying": true'*|*'"status":"playing"'*|*'"status": "playing"'*|*'"status":"PLAYING"'*|*'"status": "PLAYING"'*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+xmj_keepalive_runtime_status_text() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  case "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}:${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" in
+    active:auto)
+      printf '%s' '按记录：脚本自动申请中'
+      ;;
+    active:manual)
+      printf '%s' '按记录：手动申请中'
+      ;;
+    *)
+      if xmj_keepalive_wake_lock_supported; then
+        printf '%s' '当前未记录'
+      else
+        printf '%s' '当前环境不可用'
+      fi
+      ;;
+  esac
+}
+
+xmj_keepalive_audio_runtime_status_text() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}:${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" in
+    active:auto)
+      if xmj_keepalive_audio_loop_process_alive || xmj_keepalive_audio_playing_now; then
+        printf '%s' '按记录：脚本自动循环中'
+      else
+        printf '%s' '按记录：自动循环待恢复'
+      fi
+      ;;
+    active:manual)
+      if xmj_keepalive_audio_loop_process_alive || xmj_keepalive_audio_playing_now; then
+        printf '%s' '按记录：手动循环中'
+      else
+        printf '%s' '按记录：手动循环待恢复'
+      fi
+      ;;
+    *)
+      if xmj_keepalive_audio_supported; then
+        printf '%s' '当前未记录'
+      else
+        printf '%s' '当前环境不可用'
+      fi
+      ;;
+  esac
+}
+
+xmj_keepalive_set_auto_apply_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '启动后自动申请唤醒锁只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK' "$enabled"; then
+    xmj_font_set_notice 'warn' "启动后自动申请唤醒锁写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}启动后自动申请唤醒锁。"
+  return 0
+}
+
+xmj_keepalive_set_auto_release_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '停服后自动释放唤醒锁只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK' "$enabled"; then
+    xmj_font_set_notice 'warn' "停服后自动释放唤醒锁写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}停服后自动释放唤醒锁。"
+  return 0
+}
+
+xmj_keepalive_set_auto_audio_apply_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '启动后自动开启静音音频循环只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP' "$enabled"; then
+    xmj_font_set_notice 'warn' "启动后自动开启静音音频循环写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}启动后自动开启静音音频循环。"
+  return 0
+}
+
+xmj_keepalive_set_auto_audio_release_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '停服后自动停止静音音频循环只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP' "$enabled"; then
+    xmj_font_set_notice 'warn' "停服后自动停止静音音频循环写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}停服后自动停止静音音频循环。"
+  return 0
+}
+
+xmj_log_set_auto_cleanup_on_launch_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '启动时自动清理旧后台日志只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH' "$enabled"; then
+    xmj_font_set_notice 'warn' "启动时自动清理旧后台日志写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}启动时自动清理旧后台日志。"
+  return 0
+}
+
+xmj_keepalive_apply_wake_lock() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local output=''
+  local status='0'
+  local owner_text='手动'
+
+  if ! xmj_keepalive_wake_lock_supported; then
+    xmj_launch_log_line '未检测到 termux-wake-lock / termux-wake-unlock，无法申请唤醒锁。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到唤醒锁命令；先安装 termux-api 包，并确认已安装 Termux:API 应用。'
+    fi
+    return 127
+  fi
+
+  output="$(termux-wake-lock 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "申请唤醒锁失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '申请唤醒锁失败；请确认 termux-api 包和 Termux:API 应用都已就绪。'
+    fi
+    return "$status"
+  fi
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  if ! xmj_keepalive_write_runtime_state 'active' "$owner"; then
+    xmj_launch_log_line '唤醒锁已申请，但状态文件写入失败。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '唤醒锁已经申请，但状态记录没写稳；建议稍后再看一次保活设置。'
+    fi
+    return 0
+  fi
+
+  xmj_launch_log_line "已${owner_text}申请 Termux 唤醒锁。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已申请 Termux 唤醒锁。'
+  fi
+  return 0
+}
+
+xmj_keepalive_release_wake_lock() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local output=''
+  local status='0'
+  local owner_text='手动'
+
+  if ! xmj_keepalive_wake_lock_supported; then
+    xmj_launch_log_line '未检测到 termux-wake-unlock，无法释放唤醒锁。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到唤醒锁命令；现在没法直接释放。'
+    fi
+    return 127
+  fi
+
+  output="$(termux-wake-unlock 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "释放唤醒锁失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '释放唤醒锁失败；请确认当前 Termux API 能力可用。'
+    fi
+    return "$status"
+  fi
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  if ! xmj_keepalive_clear_runtime_state; then
+    xmj_launch_log_line '唤醒锁已释放，但状态文件清理失败。'
+  fi
+
+  xmj_launch_log_line "已${owner_text}释放 Termux 唤醒锁。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已释放 Termux 唤醒锁。'
+  fi
+  return 0
+}
+
+xmj_keepalive_request_manual_apply() {
+  xmj_keepalive_apply_wake_lock 'manual' '1'
+}
+
+xmj_keepalive_request_manual_release() {
+  xmj_keepalive_release_wake_lock 'manual' '1'
+}
+
+xmj_keepalive_spawn_audio_loop_guard() {
+  local audio_file="${1:-}"
+  local loop_marker="${2:-}"
+  local loop_pid=''
+
+  if [ -z "$audio_file" ] || [ ! -f "$audio_file" ]; then
+    return 1
+  fi
+
+  case "$loop_marker" in
+    ''|*[!A-Za-z0-9_-]*)
+      return 1
+      ;;
+  esac
+
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh -c '
+      marker="$1"
+      audio_file="$2"
+      if [ -z "$marker" ] || [ -z "$audio_file" ]; then
+        exit 1
+      fi
+      while :; do
+        info="$(termux-media-player info 2>/dev/null || true)"
+        case "$info" in
+          *"\"playing\":true"*|*"\"playing\": true"*|*"\"isPlaying\":true"*|*"\"isPlaying\": true"*|*"\"status\":\"playing\""*|*"\"status\": \"playing\""*|*"\"status\":\"PLAYING\""*|*"\"status\": \"PLAYING\""*)
+            ;;
+          *)
+            termux-media-player play "$audio_file" >/dev/null 2>&1 || true
+            ;;
+        esac
+        sleep 5 2>/dev/null || true
+      done
+    ' sh "$loop_marker" "$audio_file" >/dev/null 2>&1 < /dev/null &
+  else
+    sh -c '
+      marker="$1"
+      audio_file="$2"
+      if [ -z "$marker" ] || [ -z "$audio_file" ]; then
+        exit 1
+      fi
+      while :; do
+        info="$(termux-media-player info 2>/dev/null || true)"
+        case "$info" in
+          *"\"playing\":true"*|*"\"playing\": true"*|*"\"isPlaying\":true"*|*"\"isPlaying\": true"*|*"\"status\":\"playing\""*|*"\"status\": \"playing\""*|*"\"status\":\"PLAYING\""*|*"\"status\": \"PLAYING\""*)
+            ;;
+          *)
+            termux-media-player play "$audio_file" >/dev/null 2>&1 || true
+            ;;
+        esac
+        sleep 5 2>/dev/null || true
+      done
+    ' sh "$loop_marker" "$audio_file" >/dev/null 2>&1 < /dev/null &
+  fi
+
+  loop_pid="$!"
+  case "$loop_pid" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+
+  printf '%s' "$loop_pid"
+}
+
+xmj_keepalive_start_audio_loop() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local audio_file=''
+  local loop_pid=''
+  local loop_marker=''
+  local active_loop_pid=''
+  local active_loop_marker=''
+  local output=''
+  local status='0'
+  local owner_text='手动'
+
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if ! xmj_keepalive_audio_supported; then
+    xmj_launch_log_line '未检测到 termux-media-player，无法开启静音音频循环。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；可自行到 https://github.com/termux/termux-api 下载 Termux:API 应用，并参考 https://github.com/termux/termux-packages/tree/master/packages/termux-api-package 安装 termux-api 包；装好后回来确认，再重新启动 Termux 或脚本。'
+    fi
+    return 127
+  fi
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  if xmj_keepalive_audio_loop_process_alive; then
+    active_loop_pid="${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}"
+    active_loop_marker="${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}"
+  fi
+
+  if [ -n "$active_loop_pid" ] || xmj_keepalive_audio_playing_now; then
+    if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" "$active_loop_pid" "$active_loop_marker"; then
+      xmj_launch_log_line '静音音频循环已存在，但状态文件写入失败。'
+    fi
+    xmj_launch_log_line "静音音频循环已在运行，当前按${owner_text}持有。"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'success' '静音音频循环已经在运行，已更新当前持有方式。'
+    fi
+    return 0
+  fi
+
+  audio_file="$(xmj_keepalive_prepare_audio_file 2>/dev/null || true)"
+  if [ -z "$audio_file" ] || [ ! -f "$audio_file" ]; then
+    xmj_launch_log_line '静音音频文件准备失败，无法开启音频循环。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频资源没准备好，这次无法开启音频保活。'
+    fi
+    return 1
+  fi
+
+  output="$(termux-media-player play "$audio_file" 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "开启静音音频失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频启动失败；如果还没装依赖，可自行到 https://github.com/termux/termux-api 下载 Termux:API 应用，并参考 https://github.com/termux/termux-packages/tree/master/packages/termux-api-package 安装 termux-api 包；装好后回来确认，再重新启动 Termux 或脚本。'
+    fi
+    return "$status"
+  fi
+
+  loop_marker="$(xmj_keepalive_build_audio_loop_marker)"
+  loop_pid="$(xmj_keepalive_spawn_audio_loop_guard "$audio_file" "$loop_marker" 2>/dev/null || true)"
+  case "$loop_pid" in
+    ''|*[!0-9]*)
+      loop_marker=''
+      if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" '' ''; then
+        xmj_launch_log_line '静音音频已启动，但状态文件写入失败。'
+      fi
+      xmj_launch_log_line '静音音频已启动，但循环守护进程未成功挂上。'
+      if [ "$with_notice" = '1' ]; then
+        xmj_font_set_notice 'warn' '静音音频已经开始播放，但循环守护没挂上，保活强度会弱一些。'
+      fi
+      return 0
+      ;;
+  esac
+
+  if ! xmj_keepalive_audio_loop_pid_matches "$loop_pid" "$loop_marker"; then
+    loop_pid=''
+    loop_marker=''
+  fi
+
+  if [ -z "$loop_pid" ]; then
+    if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" '' ''; then
+      xmj_launch_log_line '静音音频已启动，但状态文件写入失败。'
+    fi
+    xmj_launch_log_line '静音音频已启动，但循环守护进程校验失败。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频已经开始播放，但循环守护校验失败，保活强度会弱一些。'
+    fi
+    return 0
+  fi
+
+  if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" "$loop_pid" "$loop_marker"; then
+    xmj_launch_log_line '静音音频循环已启动，但状态文件写入失败。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频已经启动，但状态记录没写稳；建议稍后再看一次保活设置。'
+    fi
+    return 0
+  fi
+
+  xmj_launch_log_line "已${owner_text}开启静音音频循环。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已开启静音音频循环。'
+  fi
+  return 0
+}
+
+xmj_keepalive_stop_audio_loop() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local output=''
+  local status='0'
+  local owner_text='手动'
+  local loop_pid=''
+
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  loop_pid="${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}"
+  case "$loop_pid" in
+    ''|*[!0-9]*)
+      ;;
+    *)
+      if xmj_keepalive_audio_loop_process_alive; then
+        kill "$loop_pid" 2>/dev/null || true
+        sleep 1 2>/dev/null || true
+        if xmj_keepalive_audio_loop_process_alive; then
+          kill -9 "$loop_pid" 2>/dev/null || true
+        fi
+      fi
+      ;;
+  esac
+
+  if ! xmj_keepalive_audio_supported; then
+    xmj_launch_log_line '未检测到 termux-media-player，无法停止静音音频循环。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；如果要补齐能力，可自行到 https://github.com/termux/termux-api 下载 Termux:API 应用，并参考 https://github.com/termux/termux-packages/tree/master/packages/termux-api-package 安装 termux-api 包；装好后回来确认，再重新启动 Termux 或脚本。'
+    fi
+    return 127
+  fi
+
+  output="$(termux-media-player stop 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "停止静音音频失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '停止静音音频失败；请确认当前 Termux API 能力可用。'
+    fi
+    return "$status"
+  fi
+
+  if ! xmj_keepalive_clear_audio_runtime_state; then
+    xmj_launch_log_line '静音音频已停止，但状态文件清理失败。'
+  fi
+
+  xmj_launch_log_line "已${owner_text}停止静音音频循环。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已停止静音音频循环。'
+  fi
+  return 0
+}
+
+xmj_keepalive_request_manual_audio_start() {
+  xmj_keepalive_start_audio_loop 'manual' '1'
+}
+
+xmj_keepalive_request_manual_audio_stop() {
+  xmj_keepalive_stop_audio_loop 'manual' '1'
+}
+
+xmj_keepalive_auto_apply_wake_lock_after_launch() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：启动后不自动申请唤醒锁。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" = 'active' ] && [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" = 'manual' ]; then
+    xmj_launch_log_line '检测到已有手动唤醒锁记录，本次启动后不改成自动持有。'
+    return 0
+  fi
+
+  xmj_keepalive_apply_wake_lock 'auto' '0'
+}
+
+xmj_keepalive_auto_release_wake_lock_after_stop() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：停服后不自动释放唤醒锁。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" != 'active' ] || [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" != 'auto' ]; then
+    xmj_launch_log_line '当前没有脚本自动申请的唤醒锁记录，跳过自动释放。'
+    return 0
+  fi
+
+  xmj_keepalive_release_wake_lock 'auto' '0'
+}
+
+xmj_keepalive_auto_apply_audio_loop_after_launch() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：启动后不自动开启静音音频循环。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" = 'active' ] && [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" = 'manual' ]; then
+    if xmj_keepalive_audio_loop_process_alive || xmj_keepalive_audio_playing_now; then
+      xmj_launch_log_line '检测到已有手动静音音频记录，本次启动后不改成自动持有。'
+      return 0
+    fi
+  fi
+
+  xmj_keepalive_start_audio_loop 'auto' '0'
+}
+
+xmj_keepalive_auto_release_audio_loop_after_stop() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：停服后不自动停止静音音频循环。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" != 'active' ] || [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" != 'auto' ]; then
+    xmj_launch_log_line '当前没有脚本自动开启的静音音频记录，跳过自动停止。'
+    return 0
+  fi
+
+  xmj_keepalive_stop_audio_loop 'auto' '0'
+}
+
+xmj_keepalive_auto_apply_after_launch() {
+  xmj_keepalive_auto_apply_wake_lock_after_launch || true
+  xmj_keepalive_auto_apply_audio_loop_after_launch || true
+  return 0
+}
+
+xmj_keepalive_auto_release_after_stop() {
+  xmj_keepalive_auto_release_wake_lock_after_stop || true
+  xmj_keepalive_auto_release_audio_loop_after_stop || true
+  return 0
+}
+
+xmj_launch_runtime_stream_enabled() {
+  if [ "${XMJ_LAUNCH_STREAM_DIRECT:-0}" != '1' ]; then
+    return 1
+  fi
+
+  if [ -z "${XMJ_LAUNCH_STREAM_PIPE:-}" ] || [ ! -p "${XMJ_LAUNCH_STREAM_PIPE:-}" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+xmj_launch_runtime_output_target() {
+  if xmj_launch_runtime_stream_enabled \
+    && [ -n "${XMJ_LAUNCH_STREAM_PID:-}" ] \
+    && kill -0 "${XMJ_LAUNCH_STREAM_PID}" 2>/dev/null; then
+    printf '%s' "${XMJ_LAUNCH_STREAM_PIPE}"
+    return 0
+  fi
+
+  printf '%s' "${XMJ_LAUNCH_RUNTIME_FILE:-$XMJ_LAUNCH_LOG_FILE}"
+}
+
+xmj_launch_flush_pending_runtime_output() {
+  if [ -z "${XMJ_LAUNCH_RUNTIME_PENDING_FILE:-}" ] || [ ! -s "${XMJ_LAUNCH_RUNTIME_PENDING_FILE:-}" ]; then
+    return 0
+  fi
+
+  cat "${XMJ_LAUNCH_RUNTIME_PENDING_FILE}" 2>/dev/null || true
+  : >"${XMJ_LAUNCH_RUNTIME_PENDING_FILE}" 2>/dev/null || true
+}
+
+xmj_launch_enable_frontend_stream_output() {
+  if ! xmj_launch_runtime_stream_enabled; then
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_STREAM_FRONTEND_FILE:-}" ]; then
+    : >"${XMJ_LAUNCH_STREAM_FRONTEND_FILE}" 2>/dev/null || true
+  fi
+
+  xmj_launch_flush_pending_runtime_output
+}
+
+xmj_launch_start_runtime_stream_forwarder() {
+  if ! xmj_launch_runtime_stream_enabled; then
+    XMJ_LAUNCH_STREAM_PID=''
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_STREAM_PID:-}" ] && kill -0 "${XMJ_LAUNCH_STREAM_PID}" 2>/dev/null; then
+    return 0
+  fi
+
+  (
+    local line=''
+
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+
+      if [ ! -f "${XMJ_LAUNCH_STREAM_READY_FILE:-}" ]; then
+        printf '%s\n' "$line" >>"${XMJ_LAUNCH_RUNTIME_FILE}"
+        continue
+      fi
+
+      if [ ! -f "${XMJ_LAUNCH_STREAM_FRONTEND_FILE:-}" ]; then
+        printf '%s\n' "$line" >>"${XMJ_LAUNCH_RUNTIME_PENDING_FILE}"
+        continue
+      fi
+
+      printf '%s\n' "$line"
+    done < "${XMJ_LAUNCH_STREAM_PIPE}"
+  ) &
+
+  XMJ_LAUNCH_STREAM_PID="$!"
 }
 
 xmj_launch_prepare_log_file() {
@@ -71,8 +1127,33 @@ xmj_launch_prepare_log_file() {
     return 1
   fi
 
+  XMJ_LAUNCH_RUNTIME_FILE="$XMJ_LOG_DIR/runtime-$stamp.log"
+  if ! : >"$XMJ_LAUNCH_RUNTIME_FILE" 2>/dev/null; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_RUNTIME_PENDING_FILE="$XMJ_LOG_DIR/runtime-$stamp.pending"
+  if ! : >"$XMJ_LAUNCH_RUNTIME_PENDING_FILE" 2>/dev/null; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_STREAM_READY_FILE="$XMJ_LOG_DIR/runtime-$stamp.ready"
+  XMJ_LAUNCH_STREAM_FRONTEND_FILE="$XMJ_LOG_DIR/runtime-$stamp.frontend"
+  rm -f "${XMJ_LAUNCH_STREAM_READY_FILE}" "${XMJ_LAUNCH_STREAM_FRONTEND_FILE}" 2>/dev/null || true
+
+  if command -v mkfifo >/dev/null 2>&1; then
+    XMJ_LAUNCH_STREAM_PIPE="$XMJ_LOG_DIR/runtime-$stamp.pipe"
+    rm -f "${XMJ_LAUNCH_STREAM_PIPE}" 2>/dev/null || true
+    if mkfifo "${XMJ_LAUNCH_STREAM_PIPE}" 2>/dev/null; then
+      XMJ_LAUNCH_STREAM_DIRECT='1'
+    else
+      XMJ_LAUNCH_STREAM_PIPE=''
+    fi
+  fi
+
   xmj_launch_log_line '小猫卷启动日志已创建。'
   xmj_launch_log_line "目标目录：${XMJ_SILLYTAVERN_PATH:-未设置}"
+  xmj_launch_log_line "运行输出文件：${XMJ_LAUNCH_RUNTIME_FILE}"
   return 0
 }
 
@@ -173,14 +1254,28 @@ xmj_launch_extract_entry_url_from_log() {
     return 0
   fi
 
-  url="$(sed -n \
-    -e 's/.*[Gg]o to:[[:space:]]*\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*酒馆入口已可访问：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*已从后台日志识别到入口：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*准备检测酒馆入口：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
-    "$log_file" 2>/dev/null | tail -n 1)"
+  url="$(xmj_launch_sanitize_log_stream < "$log_file" 2>/dev/null | xmj_launch_extract_listening_url_from_stream || true)"
+  if [ -z "$url" ]; then
+    url="$(xmj_launch_sanitize_log_stream < "$log_file" 2>/dev/null | sed -n \
+      -e 's/.*[Gg]o to:[[:space:]]*\(http[^[:space:]]*\).*/\1/p' \
+      -e 's/.*入口.*\(http[^[:space:]]*\).*/\1/p' \
+      -e 's/.*进入链接.*\(http[^[:space:]]*\).*/\1/p' \
+      | tail -n 1)"
+  fi
   printf '%s' "$url"
+}
+
+xmj_launch_extract_runtime_file_from_log() {
+  local log_file="${1:-}"
+  local runtime_file=''
+
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    printf '%s' ''
+    return 0
+  fi
+
+  runtime_file="$(sed -n 's/.*运行输出文件：\(.*\)$/\1/p' "$log_file" 2>/dev/null | tail -n 1)"
+  printf '%s' "$runtime_file"
 }
 
 xmj_launch_runtime_marker_text() {
@@ -192,6 +1287,7 @@ xmj_launch_extract_runtime_log_start() {
   local marker_line=''
   local marker_text=''
   local success_line=''
+  local runtime_start=''
 
   if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
     printf '%s' '0'
@@ -201,11 +1297,23 @@ xmj_launch_extract_runtime_log_start() {
   marker_text="$(xmj_launch_runtime_marker_text)"
   marker_line="$(grep -nF "$marker_text" "$log_file" 2>/dev/null | tail -n 1)"
   marker_line="${marker_line%%:*}"
+  runtime_start="$(sed -n 's/.*运行输出起始行：\([0-9][0-9]*\)$/\1/p' "$log_file" 2>/dev/null | tail -n 1)"
+
+  case "$runtime_start" in
+    ''|*[!0-9]*)
+      ;;
+    *)
+      printf '%s' "$runtime_start"
+      return 0
+      ;;
+  esac
 
   case "$marker_line" in
     ''|*[!0-9]*)
       success_line="$(sed -n \
+        -e '/SillyTavern is listening on /=' \
         -e '/[Gg]o to:[[:space:]]*http/=' \
+        -e '/后台日志已显示酒馆监听地址，按监听行判定进入运行阶段。/=' \
         -e '/后台日志已显示酒馆入口，按日志判定进入运行阶段。/=' \
         -e '/酒馆入口已可访问：/=' \
         -e '/酒馆进程已进入运行阶段。/=' \
@@ -244,8 +1352,39 @@ xmj_launch_normalize_runtime_url() {
   printf '%s' "$url"
 }
 
+xmj_launch_sanitize_log_stream() {
+  tr -d '\r' | sed $'s/\x1B\\[[0-9;?]*[ -/]*[@-~]//g'
+}
+
+xmj_launch_extract_listening_url_from_stream() {
+  local line=''
+  local address=''
+  local url=''
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ SillyTavern[[:space:]]is[[:space:]]listening[[:space:]]on[[:space:]](IPv[46]:[[:space:]]*)?([^[:space:]]+) ]]; then
+      address="${BASH_REMATCH[2]}"
+
+      if [[ "$address" =~ ^\[([0-9A-Fa-f:.]+)\]:([0-9]+)$ ]]; then
+        url="http://[${BASH_REMATCH[1]}]:${BASH_REMATCH[2]}/"
+      elif [[ "$address" =~ ^([^:]+):([0-9]+)$ ]]; then
+        url="http://${BASH_REMATCH[1]}:${BASH_REMATCH[2]}/"
+      fi
+    fi
+  done
+
+  url="$(xmj_launch_normalize_runtime_url "$url" || true)"
+  if [ -n "$url" ]; then
+    printf '%s' "$url"
+    return 0
+  fi
+
+  printf '%s' ''
+  return 1
+}
+
 xmj_launch_detect_runtime_entry_url_from_log() {
-  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local file="${XMJ_LAUNCH_RUNTIME_FILE:-${XMJ_LAUNCH_LOG_FILE:-}}"
   local start_line="${XMJ_LAUNCH_READY_SCAN_LINE:-1}"
   local total_lines='0'
   local url=''
@@ -255,7 +1394,7 @@ xmj_launch_detect_runtime_entry_url_from_log() {
     return 1
   fi
 
-  total_lines="$(xmj_launch_log_line_count)"
+  total_lines="$(xmj_launch_log_line_count "$file")"
   case "$start_line" in
     ''|*[!0-9]*)
       start_line='1'
@@ -270,19 +1409,64 @@ xmj_launch_detect_runtime_entry_url_from_log() {
     start_line='1'
   fi
 
-  url="$(sed -n "${start_line},\$p" "$file" 2>/dev/null | sed -n \
-    -e 's/.*[Gg]o to:[[:space:]]*\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*已从后台日志识别到入口：\(http[^[:space:]]*\).*/\1/p' \
-    -e 's/.*进入链接：\(http[^[:space:]]*\).*/\1/p' \
-    | tail -n 1)"
+  url="$(sed -n "${start_line},\$p" "$file" 2>/dev/null | xmj_launch_sanitize_log_stream | xmj_launch_extract_listening_url_from_stream || true)"
 
   XMJ_LAUNCH_READY_SCAN_LINE=$((total_lines + 1))
-  url="$(xmj_launch_normalize_runtime_url "$url" || true)"
 
   if [ -n "$url" ]; then
     printf '%s' "$url"
     return 0
   fi
+
+  printf '%s' ''
+  return 1
+}
+
+xmj_launch_file_has_go_to_signal() {
+  local log_file="${1:-}"
+
+  if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+    return 1
+  fi
+
+  tr -d '\r' < "$log_file" 2>/dev/null | grep -aEq '[Gg]o to:[[:space:]]*http'
+}
+
+xmj_launch_detect_ready_entry_url() {
+  local detected_url=''
+  local fallback_url=''
+  local default_url=''
+  local file=''
+
+  detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
+  if [ -n "$detected_url" ]; then
+    printf '%s' "$detected_url"
+    return 0
+  fi
+
+  default_url="$(xmj_launch_normalize_runtime_url "${XMJ_LAUNCH_ENTRY_URL:-$(xmj_launch_entry_url)}" || true)"
+  for file in "${XMJ_LAUNCH_RUNTIME_FILE:-}" "${XMJ_LAUNCH_LOG_FILE:-}"; do
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+      continue
+    fi
+
+    fallback_url="$(xmj_launch_extract_entry_url_from_log "$file" || true)"
+    fallback_url="$(xmj_launch_normalize_runtime_url "$fallback_url" || true)"
+    if [ -n "$fallback_url" ]; then
+      printf '%s' "$fallback_url"
+      return 0
+    fi
+
+    if xmj_launch_file_has_go_to_signal "$file"; then
+      if [ -n "$default_url" ]; then
+        printf '%s' "$default_url"
+        return 0
+      fi
+
+      printf '%s' "$(xmj_launch_entry_url)"
+      return 0
+    fi
+  done
 
   printf '%s' ''
   return 1
@@ -351,11 +1535,16 @@ xmj_launch_attach_latest_session() {
   fi
 
   XMJ_LAUNCH_LOG_FILE="$log_file"
+  XMJ_LAUNCH_RUNTIME_FILE="$(xmj_launch_extract_runtime_file_from_log "$log_file")"
   XMJ_LAUNCH_PID="$(xmj_launch_extract_pid_from_log "$log_file")"
   XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_extract_entry_url_from_log "$log_file")"
   XMJ_LAUNCH_RUNTIME_LOG_START="$(xmj_launch_extract_runtime_log_start "$log_file")"
   XMJ_LAUNCH_USE_PGID="$(xmj_launch_extract_use_pgid_from_log "$log_file")"
   XMJ_LAUNCH_ATTACHED_MODE='1'
+
+  if [ -z "${XMJ_LAUNCH_ENTRY_URL:-}" ] && [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
+    XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_extract_entry_url_from_log "$XMJ_LAUNCH_RUNTIME_FILE")"
+  fi
 
   if [ -z "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
     XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
@@ -367,10 +1556,14 @@ xmj_launch_attach_latest_session() {
 xmj_launch_mark_runtime_log_start() {
   local total_lines='0'
 
-  xmj_launch_log_line "$(xmj_launch_runtime_marker_text)"
-  total_lines="$(xmj_launch_log_line_count)"
+  total_lines="$(xmj_launch_log_line_count "${XMJ_LAUNCH_RUNTIME_FILE:-}")"
   XMJ_LAUNCH_RUNTIME_LOG_START=$((total_lines + 1))
-  XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+  XMJ_LAUNCH_LOG_CURSOR='0'
+  if [ -n "${XMJ_LAUNCH_STREAM_READY_FILE:-}" ]; then
+    : >"${XMJ_LAUNCH_STREAM_READY_FILE}" 2>/dev/null || true
+  fi
+  xmj_launch_log_line "运行输出起始行：${XMJ_LAUNCH_RUNTIME_LOG_START}"
+  xmj_launch_log_line '运行输出已切换到前台直显，不再继续写入启动日志。'
 }
 
 xmj_launch_can_probe_url() {
@@ -401,6 +1594,48 @@ xmj_launch_endpoint_available() {
     wget -q -T 2 -O /dev/null "$url" >/dev/null 2>&1
     return $?
   fi
+
+  return 1
+}
+
+xmj_launch_session_running() {
+  if [ -n "${XMJ_LAUNCH_PID:-}" ] && xmj_launch_process_alive; then
+    return 0
+  fi
+
+  if [ -n "${XMJ_LAUNCH_ENTRY_URL:-}" ] \
+    && xmj_launch_can_probe_url \
+    && xmj_launch_endpoint_available "${XMJ_LAUNCH_ENTRY_URL}"; then
+    return 0
+  fi
+
+  return 1
+}
+
+xmj_launch_confirm_ready_state() {
+  local url="${1:-${XMJ_LAUNCH_ENTRY_URL:-}}"
+  local attempt='0'
+
+  if [ -z "$url" ]; then
+    return 1
+  fi
+
+  if ! xmj_launch_can_probe_url; then
+    xmj_launch_process_alive
+    return $?
+  fi
+
+  for attempt in 1 2 3 4 5; do
+    if xmj_launch_endpoint_available "$url"; then
+      return 0
+    fi
+
+    if ! xmj_launch_process_alive; then
+      return 1
+    fi
+
+    sleep 1 || true
+  done
 
   return 1
 }
@@ -437,7 +1672,7 @@ xmj_launch_update_tavern_state() {
   commit_name="$(git -C "$repo_path" rev-parse --short HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
   branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
   describe_name="$(git -C "$repo_path" describe --tags --always --dirty 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
-  exact_tag="$(git -C "$repo_path" describe --tags --exact-match 2>>"$XMJ_LAUNCH_LOG_FILE" || true)"
+  exact_tag="$(git -C "$repo_path" tag --points-at HEAD 2>>"$XMJ_LAUNCH_LOG_FILE" | head -n 1 || true)"
 
   XMJ_LAUNCH_TAVERN_COMMIT="${commit_name:-unknown}"
   XMJ_LAUNCH_TAVERN_TAG="$exact_tag"
@@ -760,6 +1995,7 @@ xmj_launch_try_recover_dependency_import_assertion_failure() {
   local node_version=''
   local node_major=''
   local legacy_file=''
+  local scope=''
 
   if [ "${XMJ_LAUNCH_IMPORT_ASSERT_RETRY:-0}" = '1' ]; then
     return 1
@@ -783,25 +2019,48 @@ xmj_launch_try_recover_dependency_import_assertion_failure() {
     return 1
   fi
 
-  legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
-  if [ -z "$legacy_file" ]; then
-    return 1
-  fi
+  for scope in repo dependencies; do
+    case "$scope" in
+      repo)
+        legacy_file="$(xmj_launch_find_legacy_import_assertion_file)"
+        if [ -z "$legacy_file" ]; then
+          continue
+        fi
+        xmj_launch_log_line "启动失败后在仓库目录检测到旧 import assert 语法：${legacy_file}"
+        if ! xmj_launch_auto_fix_import_assertions; then
+          return 1
+        fi
+        legacy_file="$(xmj_launch_find_legacy_import_assertion_file)"
+        if [ -n "$legacy_file" ]; then
+          xmj_launch_log_line "仓库目录里仍残留旧 import assert 语法：${legacy_file}"
+          return 1
+        fi
+        XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
+        xmj_launch_log_line '已完成仓库目录旧 import assert 自动修复，准备重新启动酒馆。'
+        return 0
+        ;;
+      *)
+        legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
+        if [ -z "$legacy_file" ]; then
+          continue
+        fi
+        xmj_launch_log_line "启动失败后在依赖目录检测到旧 import assert 语法：${legacy_file}"
+        if ! xmj_launch_auto_fix_dependency_import_assertions; then
+          return 1
+        fi
+        legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
+        if [ -n "$legacy_file" ]; then
+          xmj_launch_log_line "依赖目录里仍残留旧 import assert 语法：${legacy_file}"
+          return 1
+        fi
+        XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
+        xmj_launch_log_line '已完成依赖目录旧 import assert 自动修复，准备重新启动酒馆。'
+        return 0
+        ;;
+    esac
+  done
 
-  xmj_launch_log_line "启动失败后在依赖目录检测到旧 import assert 语法：${legacy_file}"
-  if ! xmj_launch_auto_fix_dependency_import_assertions; then
-    return 1
-  fi
-
-  legacy_file="$(xmj_launch_find_dependency_legacy_import_assertion_file)"
-  if [ -n "$legacy_file" ]; then
-    xmj_launch_log_line "依赖目录里仍残留旧 import assert 语法：${legacy_file}"
-    return 1
-  fi
-
-  XMJ_LAUNCH_IMPORT_ASSERT_RETRY='1'
-  xmj_launch_log_line '已完成依赖目录旧 import assert 自动修复，准备重新启动酒馆。'
-  return 0
+  return 1
 }
 
 xmj_launch_check_node_runtime() {
@@ -858,9 +2117,6 @@ xmj_launch_check_environment() {
   if ! xmj_launch_check_node_runtime; then
     return 1
   fi
-  if ! xmj_launch_check_import_assertion_compat; then
-    return 1
-  fi
   xmj_launch_log_line '酒馆目录检查通过。'
   return 0
 }
@@ -898,19 +2154,13 @@ xmj_launch_detect_command() {
   local node_entry_file=''
 
   package_json="$repo_path/package.json"
-  node_entry_file="$(xmj_launch_detect_node_entry_file || true)"
 
-  if [ -n "$node_entry_file" ]; then
-    if ! command -v node >/dev/null 2>&1; then
-      xmj_launch_fail 'env' '未检测到 Node.js' "检测到 ${node_entry_file}，但当前环境无法执行 node。"
-      return 1
-    fi
-
-    XMJ_LAUNCH_METHOD='node_entry'
-    XMJ_LAUNCH_METHOD_TEXT="node ./${node_entry_file}"
-    XMJ_LAUNCH_COMMAND="node ./${node_entry_file}"
-    XMJ_LAUNCH_ENTRY_FILE="$node_entry_file"
-    xmj_launch_log_line "检测到 ${node_entry_file}，本次优先直启 Node 主入口，减少额外启动壳层。"
+  if [ -f "$repo_path/start.sh" ]; then
+    XMJ_LAUNCH_METHOD='start_sh'
+    XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
+    XMJ_LAUNCH_COMMAND='bash ./start.sh'
+    XMJ_LAUNCH_ENTRY_FILE='start.sh'
+    xmj_launch_log_line '检测到 start.sh，本次按酒馆原生启动方式执行。'
     return 0
   fi
 
@@ -924,16 +2174,22 @@ xmj_launch_detect_command() {
     XMJ_LAUNCH_METHOD_TEXT='npm run start'
     XMJ_LAUNCH_COMMAND='npm run start'
     XMJ_LAUNCH_ENTRY_FILE='package.json'
-    xmj_launch_log_line '检测到 package.json 的 start 脚本，准备使用 npm run start 启动喵~'
+    xmj_launch_log_line '检测到 package.json 的 start 脚本，本次按酒馆原生启动方式执行。'
     return 0
   fi
 
-  if [ -f "$repo_path/start.sh" ]; then
-    XMJ_LAUNCH_METHOD='start_sh'
-    XMJ_LAUNCH_METHOD_TEXT='bash ./start.sh'
-    XMJ_LAUNCH_COMMAND='bash ./start.sh'
-    XMJ_LAUNCH_ENTRY_FILE='start.sh'
-    xmj_launch_log_line '未找到可直启的 Node 主入口，回退使用 bash ./start.sh 启动。'
+  node_entry_file="$(xmj_launch_detect_node_entry_file || true)"
+  if [ -n "$node_entry_file" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      xmj_launch_fail 'env' '未检测到 Node.js' "检测到 ${node_entry_file}，但当前环境无法执行 node。"
+      return 1
+    fi
+
+    XMJ_LAUNCH_METHOD='node_entry'
+    XMJ_LAUNCH_METHOD_TEXT="node ./${node_entry_file}"
+    XMJ_LAUNCH_COMMAND="node ./${node_entry_file}"
+    XMJ_LAUNCH_ENTRY_FILE="$node_entry_file"
+    xmj_launch_log_line "未找到酒馆原生启动脚本，回退使用 node ./${node_entry_file}。"
     return 0
   fi
 
@@ -1064,6 +2320,10 @@ xmj_launch_wait_process() {
 
   wait "$pid" 2>/dev/null
   exit_code=$?
+  if [ -n "${XMJ_LAUNCH_STREAM_PID:-}" ]; then
+    wait "${XMJ_LAUNCH_STREAM_PID}" 2>/dev/null || true
+    XMJ_LAUNCH_STREAM_PID=''
+  fi
   XMJ_LAUNCH_EXIT_CODE="$exit_code"
   XMJ_LAUNCH_WAITED='1'
   printf '%s' "$exit_code"
@@ -1072,6 +2332,7 @@ xmj_launch_wait_process() {
 xmj_launch_start_process() {
   local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
   local merged_node_options=''
+  local output_target=''
 
   if [ -z "${XMJ_LAUNCH_COMMAND:-}" ]; then
     xmj_launch_fail 'boot' '缺少启动命令' '当前还没有识别出可用的酒馆启动方式。'
@@ -1088,12 +2349,17 @@ xmj_launch_start_process() {
   else
     xmj_launch_log_line '当前未附加额外的 Node 内存参数。'
   fi
+  xmj_launch_start_runtime_stream_forwarder
+  output_target="$(xmj_launch_runtime_output_target)"
 
   if command -v setsid >/dev/null 2>&1; then
     (
       cd "$repo_path" || exit 1
       if [ -n "$merged_node_options" ]; then
         export NODE_OPTIONS="$merged_node_options"
+      fi
+      if command -v script >/dev/null 2>&1; then
+        exec setsid script -qefc "${XMJ_LAUNCH_COMMAND}" "${output_target}" >/dev/null 2>&1 </dev/null
       fi
       case "${XMJ_LAUNCH_METHOD:-}" in
         node_entry)
@@ -1109,14 +2375,21 @@ xmj_launch_start_process() {
           exec setsid bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
           ;;
       esac
-    ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
+    ) >>"${output_target}" 2>&1 &
     XMJ_LAUNCH_USE_PGID='1'
-    xmj_launch_log_line '已使用 setsid 创建独立进程组。'
+    if command -v script >/dev/null 2>&1; then
+      xmj_launch_log_line '已使用 script + setsid 保留运行期原生终端输出。'
+    else
+      xmj_launch_log_line '已使用 setsid 创建独立进程组。'
+    fi
   else
     (
       cd "$repo_path" || exit 1
       if [ -n "$merged_node_options" ]; then
         export NODE_OPTIONS="$merged_node_options"
+      fi
+      if command -v script >/dev/null 2>&1; then
+        exec script -qefc "${XMJ_LAUNCH_COMMAND}" "${output_target}" >/dev/null 2>&1 </dev/null
       fi
       case "${XMJ_LAUNCH_METHOD:-}" in
         node_entry)
@@ -1132,8 +2405,12 @@ xmj_launch_start_process() {
           exec bash -lc "exec ${XMJ_LAUNCH_COMMAND}" </dev/null
           ;;
       esac
-    ) >>"$XMJ_LAUNCH_LOG_FILE" 2>&1 &
-    xmj_launch_log_line '当前环境未检测到 setsid，已退回普通后台启动。'
+    ) >>"${output_target}" 2>&1 &
+    if command -v script >/dev/null 2>&1; then
+      xmj_launch_log_line '当前环境未检测到 setsid，已使用 script 保留运行期原生终端输出。'
+    else
+      xmj_launch_log_line '当前环境未检测到 setsid，已退回普通后台启动。'
+    fi
   fi
 
   XMJ_LAUNCH_PID="$!"
@@ -1211,9 +2488,22 @@ xmj_launch_stop_process() {
   return 1
 }
 
+xmj_launch_display_log_file() {
+  if [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ] && [ -f "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
+    printf '%s' "${XMJ_LAUNCH_RUNTIME_FILE}"
+    return 0
+  fi
+
+  printf '%s' "${XMJ_LAUNCH_LOG_FILE:-}"
+}
+
 xmj_launch_log_line_count() {
-  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local file="${1:-}"
   local count='0'
+
+  if [ -z "$file" ]; then
+    file="$(xmj_launch_display_log_file)"
+  fi
 
   if [ -z "$file" ] || [ ! -f "$file" ]; then
     printf '%s' '0'
@@ -1235,8 +2525,12 @@ xmj_launch_log_line_count() {
 xmj_launch_print_log_lines() {
   local start_line="${1:-1}"
   local end_line="${2:-0}"
-  local file="${XMJ_LAUNCH_LOG_FILE:-}"
+  local file="${3:-}"
   local line=''
+
+  if [ -z "$file" ]; then
+    file="$(xmj_launch_display_log_file)"
+  fi
 
   if [ -z "$file" ] || [ ! -f "$file" ]; then
     return 0
@@ -1248,17 +2542,20 @@ xmj_launch_print_log_lines() {
 
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
-    printf '  %b%s%b\n' "$XMJ_WHITE" "$line" "$XMJ_RESET"
+    printf '  %s%b\n' "$line" "$XMJ_RESET"
   done < <(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null)
 }
 
 xmj_launch_render_log_snapshot() {
   local snapshot_size="${1:-18}"
+  local file=''
   local total_lines='0'
   local start_line='1'
   local runtime_start="${XMJ_LAUNCH_RUNTIME_LOG_START:-0}"
 
-  total_lines="$(xmj_launch_log_line_count)"
+  file="$(xmj_launch_display_log_file)"
+
+  total_lines="$(xmj_launch_log_line_count "$file")"
   if [ "$snapshot_size" -lt 1 ]; then
     snapshot_size='18'
   fi
@@ -1278,7 +2575,7 @@ xmj_launch_render_log_snapshot() {
   fi
 
   if [ "$total_lines" -ge "$start_line" ]; then
-    xmj_launch_print_log_lines "$start_line" "$total_lines"
+    xmj_launch_print_log_lines "$start_line" "$total_lines" "$file"
   elif [ "$runtime_start" -gt 0 ]; then
     printf '  %b酒馆已经在运行，等待新的后台输出。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   else
@@ -1288,13 +2585,54 @@ xmj_launch_render_log_snapshot() {
   XMJ_LAUNCH_LOG_CURSOR="$total_lines"
 }
 
+xmj_launch_render_boot_log_snapshot() {
+  local snapshot_size="${1:-18}"
+  local file=''
+  local total_lines='0'
+  local start_line='1'
+  local end_line='0'
+  local runtime_start="${XMJ_LAUNCH_RUNTIME_LOG_START:-0}"
+
+  file="$(xmj_launch_display_log_file)"
+  total_lines="$(xmj_launch_log_line_count "$file")"
+  if [ "$snapshot_size" -lt 1 ]; then
+    snapshot_size='18'
+  fi
+
+  case "$runtime_start" in
+    ''|*[!0-9]*)
+      runtime_start='0'
+      ;;
+  esac
+
+  if [ "$runtime_start" -gt 1 ]; then
+    end_line=$((runtime_start - 1))
+  else
+    end_line="$total_lines"
+  fi
+
+  if [ "$end_line" -lt 1 ]; then
+    XMJ_LAUNCH_LOG_CURSOR='0'
+    return 0
+  fi
+
+  if [ "$end_line" -gt "$snapshot_size" ]; then
+    start_line=$((end_line - snapshot_size + 1))
+  fi
+
+  xmj_launch_print_log_lines "$start_line" "$end_line" "$file"
+  XMJ_LAUNCH_LOG_CURSOR="$end_line"
+}
+
 xmj_launch_print_new_log_lines() {
+  local file=''
   local total_lines='0'
   local start_line='1'
   local cursor="${XMJ_LAUNCH_LOG_CURSOR:-0}"
   local runtime_start="${XMJ_LAUNCH_RUNTIME_LOG_START:-0}"
 
-  total_lines="$(xmj_launch_log_line_count)"
+  file="$(xmj_launch_display_log_file)"
+  total_lines="$(xmj_launch_log_line_count "$file")"
 
   case "$runtime_start" in
     ''|*[!0-9]*)
@@ -1315,7 +2653,7 @@ xmj_launch_print_new_log_lines() {
   fi
 
   start_line=$((cursor + 1))
-  xmj_launch_print_log_lines "$start_line" "$total_lines"
+  xmj_launch_print_log_lines "$start_line" "$total_lines" "$file"
   XMJ_LAUNCH_LOG_CURSOR="$total_lines"
 }
 
@@ -1324,11 +2662,7 @@ xmj_launch_wait_for_running() {
   local wait_limit=''
   local slow_notice_at=''
   local slow_notice_shown='0'
-  local probe_fallback_at='0'
-  local should_probe='0'
-  local candidate_url=''
   local detected_url=''
-  local logged_probe_urls='|'
 
   wait_limit="$(xmj_launch_wait_limit_seconds)"
   case "$wait_limit" in
@@ -1348,41 +2682,7 @@ xmj_launch_wait_for_running() {
     slow_notice_at='0'
   fi
 
-  probe_fallback_at="$(xmj_launch_probe_fallback_seconds)"
-  case "$probe_fallback_at" in
-    ''|*[!0-9]*)
-      probe_fallback_at='240'
-      ;;
-  esac
-  if [ "$probe_fallback_at" -ge "$wait_limit" ]; then
-    probe_fallback_at=$((wait_limit - 1))
-  fi
-
   XMJ_LAUNCH_ENTRY_URL="$(xmj_launch_entry_url)"
-  if xmj_launch_can_probe_url; then
-    should_probe='1'
-    while IFS= read -r candidate_url || [ -n "$candidate_url" ]; do
-      if [ -z "$candidate_url" ]; then
-        continue
-      fi
-
-      case "$logged_probe_urls" in
-        *"|$candidate_url|"*)
-          continue
-          ;;
-      esac
-
-      if [ "$logged_probe_urls" = '|' ]; then
-        xmj_launch_log_line "准备检测酒馆入口：${candidate_url}"
-      else
-        xmj_launch_log_line "补充检测入口：${candidate_url}"
-      fi
-
-      logged_probe_urls="${logged_probe_urls}${candidate_url}|"
-    done < <(xmj_launch_probe_candidate_urls)
-  else
-    xmj_launch_log_line '当前环境未检测到 curl 或 wget，将按进程存活判定启动完成。'
-  fi
 
   for ((step = 1; step <= wait_limit; step += 1)); do
     if [ "${XMJ_LAUNCH_INTERRUPT:-0}" = '1' ]; then
@@ -1407,48 +2707,15 @@ xmj_launch_wait_for_running() {
     detected_url="$(xmj_launch_detect_runtime_entry_url_from_log || true)"
     if [ -n "$detected_url" ]; then
       if [ "$detected_url" != "${XMJ_LAUNCH_ENTRY_URL:-}" ]; then
-        xmj_launch_log_line "已从后台日志识别到入口：${detected_url}"
+        xmj_launch_log_line "已从后台日志识别到监听地址：${detected_url}"
       fi
       XMJ_LAUNCH_ENTRY_URL="$detected_url"
-      xmj_launch_log_line '后台日志已显示酒馆入口，按日志判定进入运行阶段。'
+      xmj_launch_log_line '后台日志已显示酒馆监听地址，按监听行判定进入运行阶段。'
       xmj_launch_mark_runtime_log_start
       return 0
     fi
 
-    if [ "$should_probe" = '1' ]; then
-      if [ "$step" -lt "$probe_fallback_at" ]; then
-        sleep 1 || true
-        continue
-      fi
-
-      while IFS= read -r candidate_url || [ -n "$candidate_url" ]; do
-        if [ -z "$candidate_url" ]; then
-          continue
-        fi
-
-        case "$logged_probe_urls" in
-          *"|$candidate_url|"*)
-            ;;
-          *)
-            xmj_launch_log_line "补充检测入口：${candidate_url}"
-            logged_probe_urls="${logged_probe_urls}${candidate_url}|"
-            ;;
-        esac
-
-        if xmj_launch_endpoint_available "$candidate_url"; then
-          XMJ_LAUNCH_ENTRY_URL="$candidate_url"
-          xmj_launch_log_line "酒馆入口已可访问：${XMJ_LAUNCH_ENTRY_URL}"
-          xmj_launch_log_line '后台日志暂未出现 Go to，已按入口可访问判定进入运行阶段。'
-          xmj_launch_mark_runtime_log_start
-          return 0
-        fi
-      done < <(xmj_launch_probe_candidate_urls)
-    elif [ "$step" -ge 2 ]; then
-      xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
-      xmj_launch_log_line "进入链接：${XMJ_LAUNCH_ENTRY_URL}"
-      xmj_launch_mark_runtime_log_start
-      return 0
-    fi
+    xmj_launch_print_new_log_lines
 
     sleep 1 || true
   done
@@ -1459,16 +2726,9 @@ xmj_launch_wait_for_running() {
     return 1
   fi
 
-  if [ "$should_probe" = '1' ]; then
-    xmj_launch_fail 'boot' '启动超时' '后台进程仍在运行，但酒馆入口暂时还无法访问，可温和查看日志。'
-    return 1
-  fi
-
-  xmj_launch_log_line '已按后台进程存活判定进入运行阶段。'
-  xmj_launch_mark_runtime_log_start
-  return 0
+  xmj_launch_fail 'boot' '启动超时' '后台日志一直没出现 SillyTavern is listening on 这一行，可温和查看日志。'
+  return 1
 }
-
 xmj_launch_handle_interrupt() {
   local summary='已停止酒馆'
   local detail='₍˄·͈༝·͈˄₎◞ 猫猫已经把这次启动的酒馆收好了，正在回到首页喵~'
@@ -1487,7 +2747,12 @@ xmj_launch_handle_interrupt() {
 xmj_launch_follow_running_log() {
   if [ "${XMJ_LAUNCH_LOG_VIEW_STARTED:-0}" != '1' ]; then
     xmj_render_launch_running_screen
-    xmj_launch_render_log_snapshot '18'
+    xmj_launch_render_boot_log_snapshot '18'
+    if xmj_launch_runtime_stream_enabled; then
+      xmj_launch_enable_frontend_stream_output
+    else
+      xmj_launch_print_new_log_lines
+    fi
     XMJ_LAUNCH_LOG_VIEW_STARTED='1'
   fi
 
@@ -1497,7 +2762,11 @@ xmj_launch_follow_running_log() {
     fi
 
     if ! xmj_launch_process_alive; then
-      xmj_launch_print_new_log_lines
+      if xmj_launch_runtime_stream_enabled; then
+        xmj_launch_flush_pending_runtime_output
+      else
+        xmj_launch_print_new_log_lines
+      fi
       return 0
     fi
 
@@ -1507,7 +2776,11 @@ xmj_launch_follow_running_log() {
       return 130
     fi
 
-    xmj_launch_print_new_log_lines
+    if xmj_launch_runtime_stream_enabled; then
+      xmj_launch_flush_pending_runtime_output
+    else
+      xmj_launch_print_new_log_lines
+    fi
   done
 }
 
@@ -1525,6 +2798,7 @@ xmj_launch_monitor_running() {
 
   exit_code="$(xmj_launch_wait_process)"
   xmj_launch_log_line "酒馆进程已结束，退出码：$exit_code"
+  xmj_keepalive_auto_release_after_stop || true
 
   if [ "$exit_code" = '0' ]; then
     xmj_render_launch_result \
@@ -1550,7 +2824,7 @@ xmj_launch_monitor_attached_session() {
       return 0
     fi
 
-    if ! xmj_launch_process_alive; then
+    if ! xmj_launch_session_running; then
       xmj_launch_print_new_log_lines
       XMJ_LAUNCH_EXIT_CODE='0'
       XMJ_LAUNCH_WAITED='1'
@@ -1580,7 +2854,7 @@ xmj_run_backend_display_page() {
     return 0
   fi
 
-  if [ -n "${XMJ_LAUNCH_PID:-}" ] && xmj_launch_process_alive; then
+  if xmj_launch_session_running; then
     xmj_launch_install_int_trap
     xmj_render_backend_display_screen 'running'
     xmj_launch_render_log_snapshot '18'
@@ -1667,6 +2941,7 @@ xmj_run_tavern_launch() {
     fi
 
     if xmj_launch_wait_for_running; then
+      xmj_keepalive_auto_apply_after_launch || true
       break
     fi
 
@@ -1697,5 +2972,319 @@ xmj_run_tavern_launch() {
 
   xmj_launch_monitor_running
   xmj_launch_restore_int_trap
+  return 0
+}
+
+xmj_launch_runtime_stream_enabled() {
+  return 1
+}
+
+xmj_launch_cleanup_old_logs_on_launch() {
+  local current_file="${1:-}"
+  local keep_count="${XMJ_LOG_KEEP_COUNT:-20}"
+  local keep_old_count='0'
+  local log_dir=''
+  local file=''
+  local total='0'
+  local index='0'
+  local removed='0'
+  local failed='0'
+
+  declare -a log_files=()
+
+  if [ "${XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH:-1}" != '1' ]; then
+    return 0
+  fi
+
+  case "$keep_count" in
+    ''|*[!0-9]*)
+      keep_count='20'
+      ;;
+  esac
+
+  if [ "$keep_count" -lt 1 ]; then
+    keep_count='1'
+  fi
+
+  keep_old_count=$((keep_count - 1))
+  if [ "$keep_old_count" -lt 0 ]; then
+    keep_old_count='0'
+  fi
+
+  log_dir="${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+  if [ ! -d "$log_dir" ]; then
+    return 0
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if [ -n "$current_file" ] && [ "$file" = "$current_file" ]; then
+      continue
+    fi
+    log_files+=("$file")
+  done < <(ls -1t "$log_dir"/launch-*.log 2>/dev/null || true)
+
+  total="${#log_files[@]}"
+  if [ "$total" -le "$keep_old_count" ]; then
+    return 0
+  fi
+
+  for ((index = keep_old_count; index < total; index += 1)); do
+    file="${log_files[$index]}"
+    [ -n "$file" ] || continue
+    if [ ! -f "$file" ]; then
+      continue
+    fi
+
+    if rm -f "$file" 2>/dev/null; then
+      removed=$((removed + 1))
+    else
+      failed=$((failed + 1))
+      xmj_launch_log_line "启动前自动清理旧后台日志失败：$(xmj_display_path "$file")"
+    fi
+  done
+
+  if [ "$removed" -gt 0 ]; then
+    xmj_launch_log_line "启动前已自动清理 ${removed} 份旧后台日志，当前策略保留最新 ${keep_count} 份。"
+  fi
+
+  if [ "$failed" -gt 0 ]; then
+    xmj_launch_log_line "启动前自动清理旧后台日志时有 ${failed} 份处理失败。"
+  fi
+
+  return 0
+}
+
+xmj_launch_prepare_log_file() {
+  local stamp=''
+
+  if [ -z "${XMJ_LOG_DIR:-}" ]; then
+    XMJ_LOG_DIR="${XMJ_ROOT_DIR:-.}/logs"
+  fi
+
+  if ! mkdir -p "$XMJ_LOG_DIR" 2>/dev/null; then
+    return 1
+  fi
+
+  stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='manual'
+  fi
+
+  XMJ_LAUNCH_LOG_FILE="$XMJ_LOG_DIR/launch-$stamp.log"
+  if ! : >"$XMJ_LAUNCH_LOG_FILE" 2>/dev/null; then
+    return 1
+  fi
+
+  XMJ_LAUNCH_RUNTIME_FILE="$XMJ_LAUNCH_LOG_FILE"
+  XMJ_LAUNCH_RUNTIME_PENDING_FILE=''
+  XMJ_LAUNCH_STREAM_PIPE=''
+  XMJ_LAUNCH_STREAM_PID=''
+  XMJ_LAUNCH_STREAM_READY_FILE=''
+  XMJ_LAUNCH_STREAM_FRONTEND_FILE=''
+  XMJ_LAUNCH_STREAM_DIRECT='0'
+  XMJ_LAUNCH_LOG_CURSOR='0'
+  XMJ_LAUNCH_RUNTIME_LOG_START='0'
+  XMJ_LAUNCH_READY_SCAN_LINE='1'
+
+  xmj_launch_log_line '启动状态日志已创建。'
+  xmj_launch_cleanup_old_logs_on_launch "${XMJ_LAUNCH_LOG_FILE:-}"
+  xmj_launch_log_line "目标目录：${XMJ_SILLYTAVERN_PATH:-未设置}"
+  return 0
+}
+
+xmj_launch_runtime_output_target() {
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '%s' "${XMJ_LAUNCH_LOG_FILE}"
+    return 0
+  fi
+
+  printf '%s' '/dev/null'
+}
+
+xmj_launch_extract_runtime_file_from_log() {
+  local log_file="${1:-}"
+
+  printf '%s' "$log_file"
+}
+
+xmj_launch_display_log_file() {
+  printf '%s' "${XMJ_LAUNCH_LOG_FILE:-}"
+}
+
+xmj_launch_mark_runtime_log_start() {
+  local total_lines='0'
+
+  total_lines="$(xmj_launch_log_line_count "${XMJ_LAUNCH_LOG_FILE:-}")"
+  XMJ_LAUNCH_RUNTIME_LOG_START=$((total_lines + 1))
+  XMJ_LAUNCH_LOG_CURSOR="$total_lines"
+  XMJ_LAUNCH_READY_SCAN_LINE="$XMJ_LAUNCH_RUNTIME_LOG_START"
+}
+
+xmj_launch_print_log_lines() {
+  local start_line="${1:-1}"
+  local end_line="${2:-0}"
+  local file="${3:-}"
+  local line=''
+
+  if [ -z "$file" ]; then
+    file="$(xmj_launch_display_log_file)"
+  fi
+
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    return 0
+  fi
+
+  if [ "$end_line" -lt "$start_line" ]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    printf '%s\n' "$line"
+  done < <(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null)
+}
+
+xmj_launch_any_node_process_running() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep node >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v ps >/dev/null 2>&1; then
+    ps 2>/dev/null | grep -E '(^|[[:space:]])node([[:space:]]|$)' >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
+xmj_launch_run_pkill_node() {
+  if ! command -v pkill >/dev/null 2>&1; then
+    return 127
+  fi
+
+  pkill node >/dev/null 2>&1 || true
+  sleep 1 2>/dev/null || true
+  return 0
+}
+
+xmj_launch_stop_process() {
+  local reason="${1:-manual}"
+  local step=''
+  local pkill_status='127'
+
+  XMJ_LAUNCH_STOP_NOTE=''
+  xmj_launch_log_line "收到停止请求：${reason}"
+
+  if xmj_launch_process_alive; then
+    xmj_launch_send_signal 'TERM' || true
+    for step in 1 2 3 4 5; do
+      if ! xmj_launch_process_alive; then
+        xmj_launch_wait_process >/dev/null 2>&1 || true
+        break
+      fi
+      sleep 1 || true
+    done
+
+    if xmj_launch_process_alive; then
+      xmj_launch_log_line '常规 TERM 后仍未结束，准备继续发送 KILL。'
+      xmj_launch_send_signal 'KILL' || true
+      for step in 1 2 3; do
+        if ! xmj_launch_process_alive; then
+          xmj_launch_wait_process >/dev/null 2>&1 || true
+          break
+        fi
+        sleep 1 || true
+      done
+    fi
+  else
+    xmj_launch_wait_process >/dev/null 2>&1 || true
+  fi
+
+  pkill_status='127'
+  if xmj_launch_run_pkill_node; then
+    pkill_status='0'
+    xmj_launch_log_line '已执行 pkill node 兜底清理。'
+    XMJ_LAUNCH_STOP_NOTE='已补跑 pkill node 兜底清理。'
+  else
+    pkill_status=$?
+    xmj_launch_log_line '当前环境没有 pkill，跳过 pkill node 兜底。'
+    XMJ_LAUNCH_STOP_NOTE='当前环境没有 pkill，未执行 pkill node 兜底。'
+  fi
+
+  for step in 1 2 3; do
+    if ! xmj_launch_process_alive && ! xmj_launch_any_node_process_running; then
+      xmj_launch_wait_process >/dev/null 2>&1 || true
+      if [ "$pkill_status" = '0' ]; then
+        xmj_launch_log_line '已确认 node 进程结束。'
+      else
+        xmj_launch_log_line '已确认酒馆进程结束。'
+      fi
+      xmj_keepalive_auto_release_after_stop || true
+      return 0
+    fi
+    sleep 1 || true
+  done
+
+  xmj_launch_log_line '停止请求已发出，但还没确认 node 进程完全结束。'
+  return 1
+}
+
+xmj_run_tavern_close_page() {
+  local had_session='0'
+  local summary_text='酒馆已关闭'
+  local detail_text=''
+  local title_text='关闭完成'
+
+  xmj_launch_reset_state
+  XMJ_LAUNCH_STOP_NOTE=''
+
+  if xmj_launch_attach_latest_session; then
+    had_session='1'
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['06']}" 'close tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card \
+    '正在关闭酒馆' \
+    '猫猫会先按当前记录到的 PID / 进程组尝试正常关闭，再补跑一次 pkill node 兜底。' \
+    '这个入口现在专门用于停服，不再显示后台输出。'
+  printf '\n'
+  if [ "$had_session" = '1' ] && [ -n "${XMJ_LAUNCH_PID:-}" ]; then
+    xmj_render_fact_line '最近 PID' "${XMJ_LAUNCH_PID}"
+  fi
+  if [ "$had_session" = '1' ] && [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    xmj_render_fact_line '启动日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
+  fi
+  printf '\n'
+  xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+
+  if xmj_launch_stop_process 'menu_close'; then
+    detail_text='本次停止流程已经执行完成。'
+    if [ -n "${XMJ_LAUNCH_STOP_NOTE:-}" ]; then
+      detail_text="${detail_text} ${XMJ_LAUNCH_STOP_NOTE}"
+    fi
+  else
+    title_text='关闭未确认'
+    summary_text='停止请求已发出'
+    detail_text='猫猫已经尝试常规停止，并额外补跑了 pkill node，但还没确认 node 进程完全结束。'
+    if [ -n "${XMJ_LAUNCH_STOP_NOTE:-}" ]; then
+      detail_text="${detail_text} ${XMJ_LAUNCH_STOP_NOTE}"
+    fi
+  fi
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "${XMJ_MENU_LABEL['06']}" 'close tavern' 'update'
+  printf '\n'
+  xmj_render_setting_card "$title_text" "$summary_text" "$detail_text"
+  if [ "$had_session" = '1' ] && [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ]; then
+    printf '\n'
+    xmj_render_fact_line '启动日志' "$(xmj_display_path "${XMJ_LAUNCH_LOG_FILE}")"
+  fi
+  xmj_render_page_footer '按回车返回首页'
   return 0
 }

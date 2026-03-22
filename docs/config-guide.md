@@ -172,6 +172,46 @@ XMJ_SILLYTAVERN_PATH="$HOME/SillyTavern"
 # 可以写相对路径，例如 backups；相对路径会自动以脚本根目录为基准。
 XMJ_BACKUP_DIR="backups"
 
+# 日志目录。
+# 启动 / 更新日志等详细输出会写到这里，避免直接刷满前台。
+XMJ_LOG_DIR="logs"
+
+# 日志自动清理时保留的数量。
+# 设为正整数；在日志查看页里可以按这个数量执行清理。
+XMJ_LOG_KEEP_COUNT="20"
+
+# 启动时是否自动按保留数量清理旧后台日志。
+# 只会整理旧的 launch-*.log，不会删除本次刚创建的日志。
+# 可选值：0 / 1
+XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH="1"
+
+# 酒馆前台访问地址。
+# 用于启动成功判定，以及运行中页面里的进入链接。
+# 如果服务监听的是 0.0.0.0，这里仍建议填写 127.0.0.1。
+XMJ_TAVERN_HOST="127.0.0.1"
+XMJ_TAVERN_PORT="8000"
+XMJ_TAVERN_ENTRY_PATH="/"
+
+# 启动酒馆时额外附加的 Node 内存上限，单位 MB。
+# 设为 0 表示不额外覆盖，走酒馆默认启动内存。
+XMJ_TAVERN_NODE_MEMORY_MB="0"
+
+# Termux 保活：启动酒馆成功后，是否自动申请唤醒锁。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK="1"
+
+# Termux 保活：酒馆停止后，是否自动释放脚本自动申请的唤醒锁。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK="1"
+
+# Termux 保活：启动酒馆成功后，是否自动开启静音音频循环。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP="0"
+
+# Termux 保活：酒馆停止后，是否自动停止脚本自动开启的静音音频循环。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP="1"
+
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -360,6 +400,64 @@ XMJ_BACKUP_DIR="$HOME/xmj-backups"
 XMJ_BACKUP_DIR="backups"
 XMJ_BACKUP_DIR="$HOME/xmj-backups"
 XMJ_BACKUP_DIR="/data/data/com.termux/files/home/storage/shared/xmj-backups"
+```
+
+### 6.5.1 [`XMJ_LOG_DIR`](config/xiaomaojuan.conf)
+
+```bash
+XMJ_LOG_DIR="logs"
+```
+
+作用：
+
+- 指定启动日志和设置中心后台显示页使用的日志目录；
+- 当前日志管理页主要读取这个目录下的 `launch-*.log`；
+- 目录不存在时，脚本启动会尝试自动创建。
+
+常见写法：
+
+```bash
+XMJ_LOG_DIR="logs"
+XMJ_LOG_DIR="$HOME/xmj-logs"
+```
+
+### 6.5.2 [`XMJ_LOG_KEEP_COUNT`](config/xiaomaojuan.conf)
+
+```bash
+XMJ_LOG_KEEP_COUNT="20"
+```
+
+作用：
+
+- 控制日志页“按保留数量清理旧后台”时最终保留几份；
+- 也会作为启动自动清理旧后台日志时的保留上限；
+- 只能填写正整数，至少是 `1`。
+
+常见写法：
+
+```bash
+XMJ_LOG_KEEP_COUNT="10"
+XMJ_LOG_KEEP_COUNT="20"
+XMJ_LOG_KEEP_COUNT="50"
+```
+
+### 6.5.3 [`XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH`](config/xiaomaojuan.conf)
+
+```bash
+XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH="1"
+```
+
+作用：
+
+- 控制每次启动前，是否按 [`XMJ_LOG_KEEP_COUNT`](config/xiaomaojuan.conf) 自动整理旧后台日志；
+- `1` 表示开启，`0` 表示关闭；
+- 只会整理旧的 `launch-*.log`，不会删除本次刚创建的日志。
+
+可选值：
+
+```bash
+XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH="1"
+XMJ_LOG_AUTO_CLEANUP_ON_LAUNCH="0"
 ```
 
 ### 6.6 [`XMJ_THEME_MODE`](config/xiaomaojuan.conf:24)

@@ -1161,7 +1161,7 @@ xmj_render_startup_notice() {
     printf '\n'
   fi
 
-  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在可以直接查看酒馆后台，扩展脚本入口仍保留占位结构。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b说明%b：%b目前 01 - 14 的更新、备份与依赖环境功能都已接入真实流程；06 现在改成直接关闭酒馆，并会补跑 pkill node 兜底。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET" "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '─' 68
   XMJ_BOOT_NOTICE_SHOWN=1
@@ -1234,17 +1234,26 @@ xmj_setting_view_title() {
     autostart)
       printf '%s' '是否自启动'
       ;;
+    keepalive)
+      printf '%s' '保活设置'
+      ;;
     script_update)
       printf '%s' '脚本更新'
+      ;;
+    script_branch)
+      printf '%s' '脚本分支'
       ;;
     script_version)
       printf '%s' '脚本版本'
       ;;
     logs)
-      printf '%s' '后台显示'
+      printf '%s' '日志管理'
       ;;
     logs_keep_count)
       printf '%s' '日志保留数量'
+      ;;
+    logs_auto_cleanup)
+      printf '%s' '启动清理开关'
       ;;
     logs_delete_confirm)
       printf '%s' '删除日志确认'
@@ -1268,23 +1277,32 @@ xmj_setting_view_id() {
     autostart)
       printf '%s' '19-2'
       ;;
-    script_update)
+    keepalive)
       printf '%s' '19-3'
       ;;
-    script_version)
+    script_update)
       printf '%s' '19-4'
       ;;
-    logs)
+    script_branch)
       printf '%s' '19-5'
       ;;
+    script_version)
+      printf '%s' '19-6'
+      ;;
+    logs)
+      printf '%s' '19-7'
+      ;;
     logs_keep_count)
-      printf '%s' '19-5-1'
+      printf '%s' '19-7-1'
+      ;;
+    logs_auto_cleanup)
+      printf '%s' '19-7-4'
       ;;
     logs_delete_confirm)
-      printf '%s' '19-5-2'
+      printf '%s' '19-7-2'
       ;;
     logs_cleanup_confirm)
-      printf '%s' '19-5-3'
+      printf '%s' '19-7-3'
       ;;
     *)
       printf '%s' '19'
@@ -1451,8 +1469,14 @@ xmj_render_setting_center_page() {
     autostart)
       xmj_render_setting_autostart_page
       ;;
+    keepalive)
+      xmj_render_setting_keepalive_page
+      ;;
     script_update)
       xmj_render_setting_script_update_page
+      ;;
+    script_branch)
+      xmj_render_setting_script_branch_page
       ;;
     script_version)
       xmj_render_setting_script_version_page
@@ -1462,6 +1486,9 @@ xmj_render_setting_center_page() {
       ;;
     logs_keep_count)
       xmj_render_setting_logs_keep_count_page
+      ;;
+    logs_auto_cleanup)
+      xmj_render_setting_logs_auto_cleanup_page
       ;;
     logs_delete_confirm)
       xmj_render_setting_logs_delete_confirm_page
@@ -1744,6 +1771,9 @@ xmj_render_launch_progress() {
 
   printf '\n'
   xmj_rule_line "$XMJ_BORDER" '鈹€' 68
+  if [ -n "${XMJ_LAUNCH_LOG_FILE:-}" ] || [ -n "${XMJ_LAUNCH_RUNTIME_FILE:-}" ]; then
+    xmj_launch_render_boot_log_snapshot '18'
+  fi
 }
 
 xmj_render_launch_running_screen() {
@@ -1755,7 +1785,7 @@ xmj_render_launch_running_screen() {
   printf '\n'
   xmj_render_setting_card \
     '运行中' \
-    '已经等到 Go to 后切进运行页，下面只继续显示运行期后台输出。' \
+    '已经等到 SillyTavern is listening on 这行后切进运行页，下面会先保留启动尾部，再继续显示运行期后台输出。' \
     '按 Ctrl+C 会结束这次启动的酒馆，并回到首页。'
   printf '\n'
   printf '  %b♡ 启动小进度%b\n' "$XMJ_PINK" "$XMJ_RESET"
@@ -1924,11 +1954,7 @@ xmj_render_about_status_page() {
 }
 
 xmj_render_setting_overview_page() {
-  local log_count='0'
-
   xmj_setting_refresh_script_repo_state
-  xmj_setting_refresh_log_files
-  log_count="${#XMJ_SETTING_LOG_FILES[@]}"
 
   xmj_clear_screen
   xmj_render_header
@@ -1940,20 +1966,26 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_setting_card '2 · 是否自启动' '' "当前：$(xmj_setting_autostart_status_text)"
   printf '\n'
-  xmj_render_setting_card '3 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
+  xmj_render_setting_card '3 · 保活设置' '' "自动申请：$(xmj_keepalive_auto_apply_status_text)"
   printf '\n'
-  xmj_render_setting_card '4 · 脚本版本' '' "分支：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_setting_card '4 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
   printf '\n'
-  xmj_render_setting_card '5 · 后台显示' '' "当前：${log_count} 份后台日志"
+  xmj_render_setting_card '5 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  printf '\n'
+  xmj_render_setting_card '6 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  printf '\n'
+  xmj_render_setting_card '7 · 日志管理' '' "启动清理：$(xmj_log_auto_cleanup_on_launch_status_text)；保留：$(xmj_setting_log_keep_count) 份"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入字体管理'
   xmj_render_action_item '2' '查看是否自启动'
-  xmj_render_action_item '3' '检查脚本更新'
-  xmj_render_action_item '4' '查看脚本版本'
-  xmj_render_action_item '5' '查看后台'
+  xmj_render_action_item '3' '查看保活设置'
+  xmj_render_action_item '4' '检查脚本更新'
+  xmj_render_action_item '5' '切换脚本分支'
+  xmj_render_action_item '6' '查看脚本版本'
+  xmj_render_action_item '7' '进入日志管理'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 0 就好喵'
 }
 
 xmj_render_setting_font_page() {
@@ -2014,6 +2046,50 @@ xmj_render_setting_autostart_page() {
   xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
 }
 
+xmj_render_setting_keepalive_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'keepalive')" 'termux keep alive' 'setting'
+  printf '\n'
+  printf '  %b这里把唤醒锁和静音音频都接进来了；你可以单开，也可以双开做双保险。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b脚本会在酒馆进入运行后再按你的配置自动接管，停服后也只回收脚本自己自动开启的那部分。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '唤醒锁能力' "$(xmj_keepalive_capability_text)"
+  xmj_render_fact_line '唤醒锁自动申请' "$(xmj_keepalive_auto_apply_status_text)"
+  xmj_render_fact_line '唤醒锁自动释放' "$(xmj_keepalive_auto_release_status_text)"
+  xmj_render_fact_line '唤醒锁状态' "$(xmj_keepalive_runtime_status_text)"
+  xmj_render_fact_line '音频能力' "$(xmj_keepalive_audio_capability_text)"
+  xmj_render_fact_line '音频自动开启' "$(xmj_keepalive_audio_auto_apply_status_text)"
+  xmj_render_fact_line '音频自动停止' "$(xmj_keepalive_audio_auto_release_status_text)"
+  xmj_render_fact_line '音频状态' "$(xmj_keepalive_audio_runtime_status_text)"
+  xmj_render_fact_line '推荐方案' '唤醒锁 + 静音音频 + 电池不优化 + 最近任务锁定'
+  if ! xmj_keepalive_wake_lock_supported; then
+    xmj_render_fact_line '唤醒锁缺少什么' '先装 termux-api 包，并安装 Termux:API 应用'
+  fi
+  if ! xmj_keepalive_audio_supported; then
+    xmj_render_fact_line '音频缺少什么' '需要 termux-api 包 + Termux:API 应用'
+    xmj_render_fact_line '音频应用 GitHub' 'https://github.com/termux/termux-api'
+    xmj_render_fact_line '音频命令包说明' 'https://github.com/termux/termux-packages/tree/master/packages/termux-api-package'
+    xmj_render_fact_line '装好后怎么做' '下载安装后回到这里确认，再重新启动 Termux / 脚本'
+  fi
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '开启启动后自动申请唤醒锁'
+  xmj_render_action_item '2' '关闭启动后自动申请唤醒锁'
+  xmj_render_action_item '3' '开启停服后自动释放唤醒锁'
+  xmj_render_action_item '4' '关闭停服后自动释放唤醒锁'
+  xmj_render_action_item '5' '立即申请一次唤醒锁'
+  xmj_render_action_item '6' '立即释放一次唤醒锁'
+  xmj_render_action_item '7' '开启启动后自动开启静音音频循环'
+  xmj_render_action_item '8' '关闭启动后自动开启静音音频循环'
+  xmj_render_action_item '9' '开启停服后自动停止静音音频循环'
+  xmj_render_action_item '10' '关闭停服后自动停止静音音频循环'
+  xmj_render_action_item '11' '立即开启一次静音音频循环'
+  xmj_render_action_item '12' '立即停止一次静音音频循环'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 0 就好喵'
+}
+
 xmj_render_setting_script_update_page() {
   local action_label=''
   local action_hint='输入 0 返回设置中心'
@@ -2024,13 +2100,12 @@ xmj_render_setting_script_update_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'script_update')" 'script update' 'setting'
   printf '\n'
-  printf '  %b这里会先检查当前分支是不是最新版本；确认需要更新后，会对齐到 origin/%s 再执行 git pull --ff-only。%b\n' "$XMJ_WHITE" "$(xmj_setting_script_release_branch)" "$XMJ_RESET"
-  printf '  %b如果只有 config/xiaomaojuan.conf 有本地改动，猫猫会先临时护住它；拉到新代码后会自动重开小猫卷。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里会先检查当前分支是不是最新版本。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b如果已经是最新版本，就不用继续更新；只有检测到远端新版本时，才由你自己决定要不要更新。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '当前版本' "$(xmj_setting_script_current_version_text)"
   xmj_render_fact_line '当前更新日志' "$(xmj_setting_script_current_changelog_text)"
   xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
-  xmj_render_fact_line '更新分支' "$(xmj_setting_script_release_branch)"
   xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
   xmj_render_fact_line '检查结果' "${XMJ_SETTING_SCRIPT_UPDATE_STATUS_TEXT:-还没检查远端版本}"
   xmj_render_fact_line '远端分支' "${XMJ_SETTING_SCRIPT_UPDATE_REMOTE_BRANCH:-未识别}"
@@ -2080,6 +2155,30 @@ xmj_render_setting_script_update_page() {
   xmj_render_action_footer "$action_hint"
 }
 
+xmj_render_setting_script_branch_page() {
+  xmj_setting_refresh_script_repo_state
+
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'script_branch')" 'script branch' 'setting'
+  printf '\n'
+  printf '  %b这里切的是小猫卷脚本自己的 Git 分支，不是酒馆分支。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b切完会自动重开脚本，避免界面还停在旧代码上。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '当前分支' "${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_fact_line '当前提交' "${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_fact_line '脚本版本' "${XMJ_SETTING_SCRIPT_VERSION:-未识别}"
+  xmj_render_fact_line '上游分支' "${XMJ_SETTING_SCRIPT_UPSTREAM:-未配置}"
+  xmj_render_fact_line '工作区' "$(xmj_setting_script_worktree_text)"
+  xmj_render_fact_line '远程仓库' "${XMJ_SETTING_SCRIPT_REMOTE:-未配置}"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '切到 main'
+  xmj_render_action_item '2' '切到 test'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
+}
+
 xmj_render_setting_script_version_page() {
   xmj_setting_refresh_script_repo_state
 
@@ -2120,14 +2219,15 @@ xmj_render_setting_logs_page() {
   xmj_clear_screen
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'logs')" 'log viewer' 'setting'
-  printf '\n'
-  printf '  %b01 启动酒馆后就算退出了前台，也可以回到 06 继续看酒馆后台输出。%b\n' "$XMJ_BLUE_SOFT" "$XMJ_RESET"
-  printf '  %b这里现在只显示 launch 后台日志，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b更新日志和脚本更新日志不会在这页出现；删单个和按保留数量清理也只处理后台日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里集中放日志查看、删除、手动清理，还有启动时自动整理旧后台日志。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b当前页面只看 launch 启动日志和最近记录，点序号就能看尾部预览。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b更新日志和脚本更新日志不会在这里出现；这里只处理 launch-*.log。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b启动自动清理如果开启，会按保留数量整理旧日志，但不会删除本次刚创建的日志。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '日志目录' "$(xmj_display_path "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}")"
   xmj_render_fact_line '后台数量' "${#XMJ_SETTING_LOG_FILES[@]}"
   xmj_render_fact_line '保留策略' "保留最新 $(xmj_setting_log_keep_count) 份"
+  xmj_render_fact_line '启动清理' "$(xmj_log_auto_cleanup_on_launch_status_text)"
 
   if [ "$display_count" -gt 0 ]; then
     xmj_render_fact_line '当前查看' "$selected_name"
@@ -2156,12 +2256,13 @@ xmj_render_setting_logs_page() {
     xmj_render_action_item 'a' '按保留数量清理旧后台'
   fi
   xmj_render_action_item 'k' '修改后台保留数量'
+  xmj_render_action_item 'c' '修改启动自动清理开关'
   xmj_render_action_item 'r' '刷新后台列表'
   xmj_render_action_item '0' '返回设置中心'
   if [ "$display_count" -gt 0 ]; then
-    xmj_render_action_footer '输入后台序号 / d / a / k / r / 0 就好喵'
+    xmj_render_action_footer '输入后台序号 / d / a / k / c / r / 0 就好喵'
   else
-    xmj_render_action_footer '输入 k / r / 0 就好喵'
+    xmj_render_action_footer '输入 k / c / r / 0 就好喵'
   fi
 }
 
@@ -2183,6 +2284,28 @@ xmj_render_setting_logs_keep_count_page() {
   xmj_render_action_item '正整数' '直接改成新的后台保留数量'
   xmj_render_action_item '0' '返回后台显示'
   xmj_render_action_footer '输入新的保留数量 / 0 返回后台显示'
+}
+
+xmj_render_setting_logs_auto_cleanup_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'logs_auto_cleanup')" 'log viewer' 'setting'
+  printf '\n'
+  xmj_render_setting_card \
+    '这里改的是每次启动前要不要自动整理旧后台日志' \
+    '开启后会按当前保留数量处理旧的 launch-*.log。' \
+    '不会删除本次刚创建的日志；想完全不自动整理，就直接关闭。'
+  printf '\n'
+  xmj_render_fact_line '项目编号' "$(xmj_setting_view_id 'logs_auto_cleanup')"
+  xmj_render_fact_line '当前状态' "$(xmj_log_auto_cleanup_on_launch_status_text)"
+  xmj_render_fact_line '保留策略' "保留最新 $(xmj_setting_log_keep_count) 份"
+  xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '开启启动时自动清理旧后台日志'
+  xmj_render_action_item '2' '关闭启动时自动清理旧后台日志'
+  xmj_render_action_item '0' '返回日志管理'
+  xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
 }
 
 xmj_render_setting_logs_delete_confirm_page() {
@@ -3087,6 +3210,8 @@ xmj_render_tavern_setting_backup_keep_count_page() {
 }
 
 xmj_render_script_password_page() {
+  return 0
+
   local mode="${1:-first_open}"
   local title='安装密码'
   local summary='首次打开小猫卷前，要先过一下安装密码。'
@@ -3095,6 +3220,10 @@ xmj_render_script_password_page() {
     script_update)
       title='脚本更新验证'
       summary='更新小猫卷脚本前，要先输入安装密码。'
+      ;;
+    script_branch)
+      title='脚本分支切换验证'
+      summary='切换小猫卷脚本分支前，要先输入安装密码。'
       ;;
   esac
 
