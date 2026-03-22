@@ -1613,18 +1613,22 @@ xmj_handle_script_setting_action() {
           ;;
         3)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='script_update'
+          XMJ_SETTING_NEXT_VIEW='keepalive'
           ;;
         4)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='script_branch'
+          XMJ_SETTING_NEXT_VIEW='script_update'
           ;;
         5)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='script_branch'
+          ;;
+        6)
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='script_version'
           ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
           ;;
       esac
       ;;
@@ -1642,6 +1646,35 @@ xmj_handle_script_setting_action() {
           ;;
         *)
           xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 0。'
+          ;;
+      esac
+      ;;
+    keepalive)
+      case "$input" in
+        ''|0)
+          xmj_font_clear_notice
+          XMJ_SETTING_NEXT_VIEW='home'
+          ;;
+        1)
+          xmj_keepalive_set_auto_apply_flag '1'
+          ;;
+        2)
+          xmj_keepalive_set_auto_apply_flag '0'
+          ;;
+        3)
+          xmj_keepalive_set_auto_release_flag '1'
+          ;;
+        4)
+          xmj_keepalive_set_auto_release_flag '0'
+          ;;
+        5)
+          xmj_keepalive_request_manual_apply
+          ;;
+        6)
+          xmj_keepalive_request_manual_release
+          ;;
+        *)
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
           ;;
       esac
       ;;

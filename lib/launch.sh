@@ -57,6 +57,327 @@ xmj_launch_log_line() {
   printf '[%s] %s\n' "$(xmj_launch_timestamp)" "$line" >>"$XMJ_LAUNCH_LOG_FILE"
 }
 
+xmj_keepalive_state_file() {
+  printf '%s/keepalive.state' "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+}
+
+xmj_keepalive_reset_runtime_state_vars() {
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+}
+
+xmj_keepalive_load_runtime_state() {
+  local state_file=''
+  local load_status='0'
+
+  xmj_keepalive_reset_runtime_state_vars
+  state_file="$(xmj_keepalive_state_file)"
+
+  if [ ! -f "$state_file" ]; then
+    return 0
+  fi
+
+  set +u
+  # shellcheck disable=SC1090
+  source "$state_file" 2>/dev/null || load_status=$?
+  set -u
+
+  if [ "$load_status" -ne 0 ]; then
+    xmj_keepalive_reset_runtime_state_vars
+    return 1
+  fi
+
+  case "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" in
+    active|idle)
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" in
+    auto|manual|'')
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+      ;;
+  esac
+
+  return 0
+}
+
+xmj_keepalive_write_runtime_state() {
+  local state="${1:-idle}"
+  local owner="${2:-}"
+  local state_file=''
+  local state_dir=''
+  local temp_file=''
+
+  state_file="$(xmj_keepalive_state_file)"
+  state_dir="$(dirname "$state_file")"
+
+  if [ -n "$state_dir" ] && [ ! -d "$state_dir" ]; then
+    if ! mkdir -p "$state_dir" 2>/dev/null; then
+      return 1
+    fi
+  fi
+
+  temp_file="${state_file}.tmp.$$"
+  if ! {
+    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_STATE=%q\n' "$state"
+    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=%q\n' "$owner"
+  } >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$state_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE="$state"
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER="$owner"
+  return 0
+}
+
+xmj_keepalive_clear_runtime_state() {
+  local state_file=''
+
+  state_file="$(xmj_keepalive_state_file)"
+  rm -f "$state_file" 2>/dev/null || true
+  xmj_keepalive_reset_runtime_state_vars
+  return 0
+}
+
+xmj_keepalive_wake_lock_supported() {
+  command -v termux-wake-lock >/dev/null 2>&1 && command -v termux-wake-unlock >/dev/null 2>&1
+}
+
+xmj_keepalive_bool_status_text() {
+  case "${1:-0}" in
+    1)
+      printf '%s' '已开启'
+      ;;
+    *)
+      printf '%s' '已关闭'
+      ;;
+  esac
+}
+
+xmj_keepalive_auto_apply_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:-0}"
+}
+
+xmj_keepalive_auto_release_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:-0}"
+}
+
+xmj_keepalive_capability_text() {
+  if xmj_keepalive_wake_lock_supported; then
+    printf '%s' '已就绪'
+    return 0
+  fi
+
+  printf '%s' '未就绪'
+}
+
+xmj_keepalive_runtime_status_text() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  case "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}:${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" in
+    active:auto)
+      printf '%s' '按记录：脚本自动申请中'
+      ;;
+    active:manual)
+      printf '%s' '按记录：手动申请中'
+      ;;
+    *)
+      if xmj_keepalive_wake_lock_supported; then
+        printf '%s' '当前未记录'
+      else
+        printf '%s' '当前环境不可用'
+      fi
+      ;;
+  esac
+}
+
+xmj_keepalive_set_auto_apply_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '启动后自动申请唤醒锁只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK' "$enabled"; then
+    xmj_font_set_notice 'warn' "启动后自动申请唤醒锁写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}启动后自动申请唤醒锁。"
+  return 0
+}
+
+xmj_keepalive_set_auto_release_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '停服后自动释放唤醒锁只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK' "$enabled"; then
+    xmj_font_set_notice 'warn' "停服后自动释放唤醒锁写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}停服后自动释放唤醒锁。"
+  return 0
+}
+
+xmj_keepalive_apply_wake_lock() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local output=''
+  local status='0'
+  local owner_text='手动'
+
+  if ! xmj_keepalive_wake_lock_supported; then
+    xmj_launch_log_line '未检测到 termux-wake-lock / termux-wake-unlock，无法申请唤醒锁。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到唤醒锁命令；先安装 termux-api 包，并确认已安装 Termux:API 应用。'
+    fi
+    return 127
+  fi
+
+  output="$(termux-wake-lock 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "申请唤醒锁失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '申请唤醒锁失败；请确认 termux-api 包和 Termux:API 应用都已就绪。'
+    fi
+    return "$status"
+  fi
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  if ! xmj_keepalive_write_runtime_state 'active' "$owner"; then
+    xmj_launch_log_line '唤醒锁已申请，但状态文件写入失败。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '唤醒锁已经申请，但状态记录没写稳；建议稍后再看一次保活设置。'
+    fi
+    return 0
+  fi
+
+  xmj_launch_log_line "已${owner_text}申请 Termux 唤醒锁。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已申请 Termux 唤醒锁。'
+  fi
+  return 0
+}
+
+xmj_keepalive_release_wake_lock() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local output=''
+  local status='0'
+  local owner_text='手动'
+
+  if ! xmj_keepalive_wake_lock_supported; then
+    xmj_launch_log_line '未检测到 termux-wake-unlock，无法释放唤醒锁。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到唤醒锁命令；现在没法直接释放。'
+    fi
+    return 127
+  fi
+
+  output="$(termux-wake-unlock 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "释放唤醒锁失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '释放唤醒锁失败；请确认当前 Termux API 能力可用。'
+    fi
+    return "$status"
+  fi
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  if ! xmj_keepalive_clear_runtime_state; then
+    xmj_launch_log_line '唤醒锁已释放，但状态文件清理失败。'
+  fi
+
+  xmj_launch_log_line "已${owner_text}释放 Termux 唤醒锁。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已释放 Termux 唤醒锁。'
+  fi
+  return 0
+}
+
+xmj_keepalive_request_manual_apply() {
+  xmj_keepalive_apply_wake_lock 'manual' '1'
+}
+
+xmj_keepalive_request_manual_release() {
+  xmj_keepalive_release_wake_lock 'manual' '1'
+}
+
+xmj_keepalive_auto_apply_after_launch() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：启动后不自动申请唤醒锁。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" = 'active' ] && [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" = 'manual' ]; then
+    xmj_launch_log_line '检测到已有手动唤醒锁记录，本次启动后不改成自动持有。'
+    return 0
+  fi
+
+  xmj_keepalive_apply_wake_lock 'auto' '0'
+}
+
+xmj_keepalive_auto_release_after_stop() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：停服后不自动释放唤醒锁。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" != 'active' ] || [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" != 'auto' ]; then
+    xmj_launch_log_line '当前没有脚本自动申请的唤醒锁记录，跳过自动释放。'
+    return 0
+  fi
+
+  xmj_keepalive_release_wake_lock 'auto' '0'
+}
+
 xmj_launch_runtime_stream_enabled() {
   if [ "${XMJ_LAUNCH_STREAM_DIRECT:-0}" != '1' ]; then
     return 1
@@ -1826,6 +2147,7 @@ xmj_launch_monitor_running() {
 
   exit_code="$(xmj_launch_wait_process)"
   xmj_launch_log_line "酒馆进程已结束，退出码：$exit_code"
+  xmj_keepalive_auto_release_after_stop || true
 
   if [ "$exit_code" = '0' ]; then
     xmj_render_launch_result \
@@ -1968,6 +2290,7 @@ xmj_run_tavern_launch() {
     fi
 
     if xmj_launch_wait_for_running; then
+      xmj_keepalive_auto_apply_after_launch || true
       break
     fi
 
@@ -2170,6 +2493,7 @@ xmj_launch_stop_process() {
       else
         xmj_launch_log_line '已确认酒馆进程结束。'
       fi
+      xmj_keepalive_auto_release_after_stop || true
       return 0
     fi
     sleep 1 || true

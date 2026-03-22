@@ -172,6 +172,14 @@ XMJ_TAVERN_NODE_MEMORY_MB="0"
 # 会影响卡顿修复、聊天加载卡死修复、美化卡死修复这几项读取的 settings.json。
 XMJ_TAVERN_SETTING_USER_NAME="default-user"
 
+# Termux 保活：启动酒馆成功后，是否自动申请唤醒锁。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK="1"
+
+# Termux 保活：酒馆停止后，是否自动释放脚本自动申请的唤醒锁。
+# 可选值：0 / 1
+XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK="1"
+
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -244,6 +252,8 @@ xmj_apply_config_defaults() {
   : "${XMJ_TAVERN_ENTRY_PATH:=/}"
   : "${XMJ_TAVERN_NODE_MEMORY_MB:=0}"
   : "${XMJ_TAVERN_SETTING_USER_NAME:=default-user}"
+  : "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:=1}"
+  : "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:=1}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
@@ -300,6 +310,24 @@ xmj_validate_non_negative_int_value() {
 
   case "$current_value" in
     ''|*[!0-9]*)
+      printf -v "$var_name" '%s' "$fallback"
+      xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
+      return 0
+      ;;
+  esac
+}
+
+xmj_validate_bool_flag_value() {
+  local var_name="${1:-}"
+  local label="${2:-开关}"
+  local fallback="${3:-0}"
+  local current_value="${!var_name-}"
+
+  case "$current_value" in
+    0|1)
+      return 0
+      ;;
+    *)
       printf -v "$var_name" '%s' "$fallback"
       xmj_add_boot_warning "${label}无效，已自动回退为默认值：$fallback"
       return 0
@@ -372,6 +400,8 @@ xmj_validate_config() {
   xmj_normalize_web_path_value 'XMJ_TAVERN_ENTRY_PATH' '酒馆入口路径'
   xmj_validate_non_negative_int_value 'XMJ_TAVERN_NODE_MEMORY_MB' '酒馆 Node 内存上限' '0'
   xmj_validate_required_text 'XMJ_TAVERN_SETTING_USER_NAME' '酒馆默认文件夹' 'default-user'
+  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK' '启动后自动申请唤醒锁' '1'
+  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK' '停服后自动释放唤醒锁' '1'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 

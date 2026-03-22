@@ -1234,6 +1234,9 @@ xmj_setting_view_title() {
     autostart)
       printf '%s' '是否自启动'
       ;;
+    keepalive)
+      printf '%s' '保活设置'
+      ;;
     script_update)
       printf '%s' '脚本更新'
       ;;
@@ -1271,26 +1274,29 @@ xmj_setting_view_id() {
     autostart)
       printf '%s' '19-2'
       ;;
-    script_update)
+    keepalive)
       printf '%s' '19-3'
       ;;
-    script_branch)
+    script_update)
       printf '%s' '19-4'
       ;;
-    script_version)
+    script_branch)
       printf '%s' '19-5'
       ;;
-    logs)
+    script_version)
       printf '%s' '19-6'
       ;;
+    logs)
+      printf '%s' '19-7'
+      ;;
     logs_keep_count)
-      printf '%s' '19-6-1'
+      printf '%s' '19-7-1'
       ;;
     logs_delete_confirm)
-      printf '%s' '19-6-2'
+      printf '%s' '19-7-2'
       ;;
     logs_cleanup_confirm)
-      printf '%s' '19-6-3'
+      printf '%s' '19-7-3'
       ;;
     *)
       printf '%s' '19'
@@ -1456,6 +1462,9 @@ xmj_render_setting_center_page() {
       ;;
     autostart)
       xmj_render_setting_autostart_page
+      ;;
+    keepalive)
+      xmj_render_setting_keepalive_page
       ;;
     script_update)
       xmj_render_setting_script_update_page
@@ -1948,20 +1957,23 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_setting_card '2 · 是否自启动' '' "当前：$(xmj_setting_autostart_status_text)"
   printf '\n'
-  xmj_render_setting_card '3 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
+  xmj_render_setting_card '3 · 保活设置' '' "自动申请：$(xmj_keepalive_auto_apply_status_text)"
   printf '\n'
-  xmj_render_setting_card '4 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_setting_card '4 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
   printf '\n'
-  xmj_render_setting_card '5 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
+  xmj_render_setting_card '5 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  printf '\n'
+  xmj_render_setting_card '6 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入字体管理'
   xmj_render_action_item '2' '查看是否自启动'
-  xmj_render_action_item '3' '检查脚本更新'
-  xmj_render_action_item '4' '切换脚本分支'
-  xmj_render_action_item '5' '查看脚本版本'
+  xmj_render_action_item '3' '查看保活设置'
+  xmj_render_action_item '4' '检查脚本更新'
+  xmj_render_action_item '5' '切换脚本分支'
+  xmj_render_action_item '6' '查看脚本版本'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
 }
 
 xmj_render_setting_font_page() {
@@ -2020,6 +2032,34 @@ xmj_render_setting_autostart_page() {
   xmj_render_action_item '2' '关闭打开 Termux 自启动'
   xmj_render_action_item '0' '返回设置中心'
   xmj_render_action_footer '输入 1 / 2 / 0 就好喵'
+}
+
+xmj_render_setting_keepalive_page() {
+  xmj_clear_screen
+  xmj_render_header
+  xmj_render_page_title "$(xmj_setting_view_title 'keepalive')" 'termux keep alive' 'setting'
+  printf '\n'
+  printf '  %b这里主推的是 Termux 唤醒锁，不默认走静音音频那种更重的保活。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b脚本会在酒馆进入运行后再申请，停服后按你的设置决定要不要释放。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '\n'
+  xmj_render_fact_line '唤醒锁能力' "$(xmj_keepalive_capability_text)"
+  xmj_render_fact_line '启动后自动申请' "$(xmj_keepalive_auto_apply_status_text)"
+  xmj_render_fact_line '停服后自动释放' "$(xmj_keepalive_auto_release_status_text)"
+  xmj_render_fact_line '当前状态' "$(xmj_keepalive_runtime_status_text)"
+  xmj_render_fact_line '推荐方案' '唤醒锁 + 电池不优化 + 最近任务锁定'
+  if ! xmj_keepalive_wake_lock_supported; then
+    xmj_render_fact_line '缺少什么' '先装 termux-api 包，并安装 Termux:API 应用'
+  fi
+  xmj_render_notice_line
+  printf '\n'
+  xmj_render_action_item '1' '开启启动后自动申请唤醒锁'
+  xmj_render_action_item '2' '关闭启动后自动申请唤醒锁'
+  xmj_render_action_item '3' '开启停服后自动释放唤醒锁'
+  xmj_render_action_item '4' '关闭停服后自动释放唤醒锁'
+  xmj_render_action_item '5' '立即申请一次唤醒锁'
+  xmj_render_action_item '6' '立即释放一次唤醒锁'
+  xmj_render_action_item '0' '返回设置中心'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
 }
 
 xmj_render_setting_script_update_page() {
