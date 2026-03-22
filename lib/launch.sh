@@ -61,9 +61,92 @@ xmj_keepalive_state_file() {
   printf '%s/keepalive.state' "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
 }
 
+xmj_keepalive_audio_dir() {
+  printf '%s/keepalive-audio' "${XMJ_LOG_DIR:-${XMJ_ROOT_DIR:-.}/logs}"
+}
+
+xmj_keepalive_audio_file() {
+  printf '%s/silence-loop.wav' "$(xmj_keepalive_audio_dir)"
+}
+
+xmj_keepalive_emit_le16() {
+  local value="${1:-0}"
+
+  printf '%b' "$(printf '\\%03o\\%03o' "$((value & 255))" "$(((value >> 8) & 255))")"
+}
+
+xmj_keepalive_emit_le32() {
+  local value="${1:-0}"
+
+  printf '%b' "$(printf '\\%03o\\%03o\\%03o\\%03o' \
+    "$((value & 255))" \
+    "$(((value >> 8) & 255))" \
+    "$(((value >> 16) & 255))" \
+    "$(((value >> 24) & 255))")"
+}
+
+xmj_keepalive_prepare_audio_file() {
+  local audio_dir=''
+  local audio_file=''
+  local temp_file=''
+  local sample_rate='8000'
+  local sample_seconds='30'
+  local data_size='0'
+  local riff_size='0'
+
+  audio_dir="$(xmj_keepalive_audio_dir)"
+  audio_file="$(xmj_keepalive_audio_file)"
+  if [ -s "$audio_file" ]; then
+    printf '%s' "$audio_file"
+    return 0
+  fi
+
+  if [ ! -d "$audio_dir" ] && ! mkdir -p "$audio_dir" 2>/dev/null; then
+    return 1
+  fi
+
+  data_size=$((sample_rate * sample_seconds))
+  riff_size=$((36 + data_size))
+  temp_file="${audio_file}.tmp.$$"
+
+  if ! {
+    printf '%s' 'RIFF'
+    xmj_keepalive_emit_le32 "$riff_size"
+    printf '%s' 'WAVEfmt '
+    xmj_keepalive_emit_le32 '16'
+    xmj_keepalive_emit_le16 '1'
+    xmj_keepalive_emit_le16 '1'
+    xmj_keepalive_emit_le32 "$sample_rate"
+    xmj_keepalive_emit_le32 "$sample_rate"
+    xmj_keepalive_emit_le16 '1'
+    xmj_keepalive_emit_le16 '8'
+    printf '%s' 'data'
+    xmj_keepalive_emit_le32 "$data_size"
+  } >"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! dd if=/dev/zero bs=1 count="$data_size" 2>/dev/null | tr '\000' '\200' >>"$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  if ! xmj_replace_file_with_temp "$temp_file" "$audio_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  printf '%s' "$audio_file"
+}
+
 xmj_keepalive_reset_runtime_state_vars() {
   XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
   XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
 }
 
 xmj_keepalive_load_runtime_state() {
@@ -103,18 +186,59 @@ xmj_keepalive_load_runtime_state() {
       ;;
   esac
 
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" in
+    active|idle)
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE='idle'
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" in
+    auto|manual|'')
+      ;;
+    *)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=''
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" in
+    ''|*[!0-9]*)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+      ;;
+  esac
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}" in
+    ''|*[!A-Za-z0-9_-]*)
+      XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+      ;;
+  esac
+
+  if [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" ] || [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}" ]; then
+    XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+    XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+  fi
+
   return 0
 }
 
-xmj_keepalive_write_runtime_state() {
-  local state="${1:-idle}"
-  local owner="${2:-}"
+xmj_keepalive_persist_runtime_state() {
   local state_file=''
   local state_dir=''
   local temp_file=''
 
   state_file="$(xmj_keepalive_state_file)"
   state_dir="$(dirname "$state_file")"
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}" = 'idle' ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}" ] \
+    && [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" = 'idle' ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" ] \
+    && [ -z "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}" ]; then
+    rm -f "$state_file" 2>/dev/null || true
+    return 0
+  fi
 
   if [ -n "$state_dir" ] && [ ! -d "$state_dir" ]; then
     if ! mkdir -p "$state_dir" 2>/dev/null; then
@@ -124,8 +248,12 @@ xmj_keepalive_write_runtime_state() {
 
   temp_file="${state_file}.tmp.$$"
   if ! {
-    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_STATE=%q\n' "$state"
-    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=%q\n' "$owner"
+    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_STATE=%q\n' "${XMJ_KEEPALIVE_RUNTIME_LOCK_STATE:-idle}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=%q\n' "${XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER:-}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}"
+    printf 'XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=%q\n' "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}"
   } >"$temp_file"; then
     rm -f "$temp_file" 2>/dev/null || true
     return 1
@@ -136,22 +264,51 @@ xmj_keepalive_write_runtime_state() {
     return 1
   fi
 
-  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE="$state"
-  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER="$owner"
   return 0
 }
 
-xmj_keepalive_clear_runtime_state() {
-  local state_file=''
+xmj_keepalive_write_runtime_state() {
+  local state="${1:-idle}"
+  local owner="${2:-}"
 
-  state_file="$(xmj_keepalive_state_file)"
-  rm -f "$state_file" 2>/dev/null || true
-  xmj_keepalive_reset_runtime_state_vars
-  return 0
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE="$state"
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER="$owner"
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_clear_runtime_state() {
+  XMJ_KEEPALIVE_RUNTIME_LOCK_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_LOCK_OWNER=''
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_write_audio_runtime_state() {
+  local state="${1:-idle}"
+  local owner="${2:-}"
+  local loop_pid="${3:-}"
+  local loop_marker="${4:-}"
+
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE="$state"
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER="$owner"
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID="$loop_pid"
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER="$loop_marker"
+  xmj_keepalive_persist_runtime_state
+}
+
+xmj_keepalive_clear_audio_runtime_state() {
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE='idle'
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID=''
+  XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER=''
+  xmj_keepalive_persist_runtime_state
 }
 
 xmj_keepalive_wake_lock_supported() {
   command -v termux-wake-lock >/dev/null 2>&1 && command -v termux-wake-unlock >/dev/null 2>&1
+}
+
+xmj_keepalive_audio_supported() {
+  command -v termux-media-player >/dev/null 2>&1
 }
 
 xmj_keepalive_bool_status_text() {
@@ -173,6 +330,14 @@ xmj_keepalive_auto_release_status_text() {
   xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:-0}"
 }
 
+xmj_keepalive_audio_auto_apply_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP:-0}"
+}
+
+xmj_keepalive_audio_auto_release_status_text() {
+  xmj_keepalive_bool_status_text "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:-0}"
+}
+
 xmj_keepalive_capability_text() {
   if xmj_keepalive_wake_lock_supported; then
     printf '%s' '已就绪'
@@ -180,6 +345,97 @@ xmj_keepalive_capability_text() {
   fi
 
   printf '%s' '未就绪'
+}
+
+xmj_keepalive_audio_capability_text() {
+  if xmj_keepalive_audio_supported; then
+    printf '%s' '已就绪'
+    return 0
+  fi
+
+  printf '%s' '未就绪'
+}
+
+xmj_keepalive_build_audio_loop_marker() {
+  local stamp=''
+  local salt='0'
+
+  stamp="$(date '+%Y%m%d%H%M%S' 2>/dev/null || true)"
+  if [ -z "$stamp" ]; then
+    stamp='unknown'
+  fi
+
+  salt="${RANDOM:-0}"
+  printf 'xmj-audio-loop-%s-%s-%s' "$stamp" "$$" "$salt"
+}
+
+xmj_keepalive_audio_loop_pid_matches() {
+  local pid="${1:-}"
+  local marker="${2:-}"
+  local command_line=''
+
+  case "$pid" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+
+  case "$marker" in
+    ''|*[!A-Za-z0-9_-]*)
+      return 1
+      ;;
+  esac
+
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+
+  if [ -r "/proc/$pid/cmdline" ]; then
+    command_line="$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+  elif command -v ps >/dev/null 2>&1; then
+    command_line="$(ps -o args= -p "$pid" 2>/dev/null || true)"
+  fi
+
+  case "$command_line" in
+    *termux-media-player*)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$command_line" in
+    *"$marker"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+xmj_keepalive_audio_loop_process_alive() {
+  xmj_keepalive_audio_loop_pid_matches \
+    "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}" \
+    "${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}"
+}
+
+xmj_keepalive_audio_playing_now() {
+  local output=''
+
+  if ! xmj_keepalive_audio_supported; then
+    return 1
+  fi
+
+  output="$(termux-media-player info 2>/dev/null || true)"
+  case "$output" in
+    *'"playing":true'*|*'"playing": true'*|*'"isPlaying":true'*|*'"isPlaying": true'*|*'"status":"playing"'*|*'"status": "playing"'*|*'"status":"PLAYING"'*|*'"status": "PLAYING"'*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 xmj_keepalive_runtime_status_text() {
@@ -194,6 +450,34 @@ xmj_keepalive_runtime_status_text() {
       ;;
     *)
       if xmj_keepalive_wake_lock_supported; then
+        printf '%s' '当前未记录'
+      else
+        printf '%s' '当前环境不可用'
+      fi
+      ;;
+  esac
+}
+
+xmj_keepalive_audio_runtime_status_text() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  case "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}:${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" in
+    active:auto)
+      if xmj_keepalive_audio_loop_process_alive || xmj_keepalive_audio_playing_now; then
+        printf '%s' '按记录：脚本自动循环中'
+      else
+        printf '%s' '按记录：自动循环待恢复'
+      fi
+      ;;
+    active:manual)
+      if xmj_keepalive_audio_loop_process_alive || xmj_keepalive_audio_playing_now; then
+        printf '%s' '按记录：手动循环中'
+      else
+        printf '%s' '按记录：手动循环待恢复'
+      fi
+      ;;
+    *)
+      if xmj_keepalive_audio_supported; then
         printf '%s' '当前未记录'
       else
         printf '%s' '当前环境不可用'
@@ -251,6 +535,58 @@ xmj_keepalive_set_auto_release_flag() {
   fi
 
   xmj_font_set_notice 'success' "已${action_text}停服后自动释放唤醒锁。"
+  return 0
+}
+
+xmj_keepalive_set_auto_audio_apply_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '启动后自动开启静音音频循环只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP' "$enabled"; then
+    xmj_font_set_notice 'warn' "启动后自动开启静音音频循环写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}启动后自动开启静音音频循环。"
+  return 0
+}
+
+xmj_keepalive_set_auto_audio_release_flag() {
+  local enabled="${1:-}"
+  local action_text='关闭'
+
+  case "$enabled" in
+    0|1)
+      ;;
+    *)
+      xmj_font_set_notice 'warn' '停服后自动停止静音音频循环只支持 0 或 1。'
+      return 1
+      ;;
+  esac
+
+  if [ "$enabled" = '1' ]; then
+    action_text='开启'
+  fi
+
+  if ! xmj_config_upsert_value 'XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP' "$enabled"; then
+    xmj_font_set_notice 'warn' "停服后自动停止静音音频循环写回失败：$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
+    return 1
+  fi
+
+  xmj_font_set_notice 'success' "已${action_text}停服后自动停止静音音频循环。"
   return 0
 }
 
@@ -346,7 +682,246 @@ xmj_keepalive_request_manual_release() {
   xmj_keepalive_release_wake_lock 'manual' '1'
 }
 
-xmj_keepalive_auto_apply_after_launch() {
+xmj_keepalive_spawn_audio_loop_guard() {
+  local audio_file="${1:-}"
+  local loop_marker="${2:-}"
+  local loop_pid=''
+
+  if [ -z "$audio_file" ] || [ ! -f "$audio_file" ]; then
+    return 1
+  fi
+
+  case "$loop_marker" in
+    ''|*[!A-Za-z0-9_-]*)
+      return 1
+      ;;
+  esac
+
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh -c '
+      marker="$1"
+      audio_file="$2"
+      if [ -z "$marker" ] || [ -z "$audio_file" ]; then
+        exit 1
+      fi
+      while :; do
+        info="$(termux-media-player info 2>/dev/null || true)"
+        case "$info" in
+          *"\"playing\":true"*|*"\"playing\": true"*|*"\"isPlaying\":true"*|*"\"isPlaying\": true"*|*"\"status\":\"playing\""*|*"\"status\": \"playing\""*|*"\"status\":\"PLAYING\""*|*"\"status\": \"PLAYING\""*)
+            ;;
+          *)
+            termux-media-player play "$audio_file" >/dev/null 2>&1 || true
+            ;;
+        esac
+        sleep 5 2>/dev/null || true
+      done
+    ' sh "$loop_marker" "$audio_file" >/dev/null 2>&1 < /dev/null &
+  else
+    sh -c '
+      marker="$1"
+      audio_file="$2"
+      if [ -z "$marker" ] || [ -z "$audio_file" ]; then
+        exit 1
+      fi
+      while :; do
+        info="$(termux-media-player info 2>/dev/null || true)"
+        case "$info" in
+          *"\"playing\":true"*|*"\"playing\": true"*|*"\"isPlaying\":true"*|*"\"isPlaying\": true"*|*"\"status\":\"playing\""*|*"\"status\": \"playing\""*|*"\"status\":\"PLAYING\""*|*"\"status\": \"PLAYING\""*)
+            ;;
+          *)
+            termux-media-player play "$audio_file" >/dev/null 2>&1 || true
+            ;;
+        esac
+        sleep 5 2>/dev/null || true
+      done
+    ' sh "$loop_marker" "$audio_file" >/dev/null 2>&1 < /dev/null &
+  fi
+
+  loop_pid="$!"
+  case "$loop_pid" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+
+  printf '%s' "$loop_pid"
+}
+
+xmj_keepalive_start_audio_loop() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local audio_file=''
+  local loop_pid=''
+  local loop_marker=''
+  local active_loop_pid=''
+  local active_loop_marker=''
+  local output=''
+  local status='0'
+  local owner_text='手动'
+
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if ! xmj_keepalive_audio_supported; then
+    xmj_launch_log_line '未检测到 termux-media-player，无法开启静音音频循环。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；先安装 termux-api 包，并确认已安装 Termux:API 应用。'
+    fi
+    return 127
+  fi
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  if xmj_keepalive_audio_loop_process_alive; then
+    active_loop_pid="${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}"
+    active_loop_marker="${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_MARKER:-}"
+  fi
+
+  if [ -n "$active_loop_pid" ] || xmj_keepalive_audio_playing_now; then
+    if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" "$active_loop_pid" "$active_loop_marker"; then
+      xmj_launch_log_line '静音音频循环已存在，但状态文件写入失败。'
+    fi
+    xmj_launch_log_line "静音音频循环已在运行，当前按${owner_text}持有。"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'success' '静音音频循环已经在运行，已更新当前持有方式。'
+    fi
+    return 0
+  fi
+
+  audio_file="$(xmj_keepalive_prepare_audio_file 2>/dev/null || true)"
+  if [ -z "$audio_file" ] || [ ! -f "$audio_file" ]; then
+    xmj_launch_log_line '静音音频文件准备失败，无法开启音频循环。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频资源没准备好，这次无法开启音频保活。'
+    fi
+    return 1
+  fi
+
+  output="$(termux-media-player play "$audio_file" 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "开启静音音频失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频启动失败；请确认 termux-api 包和 Termux:API 应用都已就绪。'
+    fi
+    return "$status"
+  fi
+
+  loop_marker="$(xmj_keepalive_build_audio_loop_marker)"
+  loop_pid="$(xmj_keepalive_spawn_audio_loop_guard "$audio_file" "$loop_marker" 2>/dev/null || true)"
+  case "$loop_pid" in
+    ''|*[!0-9]*)
+      loop_marker=''
+      if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" '' ''; then
+        xmj_launch_log_line '静音音频已启动，但状态文件写入失败。'
+      fi
+      xmj_launch_log_line '静音音频已启动，但循环守护进程未成功挂上。'
+      if [ "$with_notice" = '1' ]; then
+        xmj_font_set_notice 'warn' '静音音频已经开始播放，但循环守护没挂上，保活强度会弱一些。'
+      fi
+      return 0
+      ;;
+  esac
+
+  if ! xmj_keepalive_audio_loop_pid_matches "$loop_pid" "$loop_marker"; then
+    loop_pid=''
+    loop_marker=''
+  fi
+
+  if [ -z "$loop_pid" ]; then
+    if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" '' ''; then
+      xmj_launch_log_line '静音音频已启动，但状态文件写入失败。'
+    fi
+    xmj_launch_log_line '静音音频已启动，但循环守护进程校验失败。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频已经开始播放，但循环守护校验失败，保活强度会弱一些。'
+    fi
+    return 0
+  fi
+
+  if ! xmj_keepalive_write_audio_runtime_state 'active' "$owner" "$loop_pid" "$loop_marker"; then
+    xmj_launch_log_line '静音音频循环已启动，但状态文件写入失败。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '静音音频已经启动，但状态记录没写稳；建议稍后再看一次保活设置。'
+    fi
+    return 0
+  fi
+
+  xmj_launch_log_line "已${owner_text}开启静音音频循环。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已开启静音音频循环。'
+  fi
+  return 0
+}
+
+xmj_keepalive_stop_audio_loop() {
+  local owner="${1:-manual}"
+  local with_notice="${2:-0}"
+  local output=''
+  local status='0'
+  local owner_text='手动'
+  local loop_pid=''
+
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "$owner" = 'auto' ]; then
+    owner_text='自动'
+  fi
+
+  loop_pid="${XMJ_KEEPALIVE_RUNTIME_AUDIO_LOOP_PID:-}"
+  case "$loop_pid" in
+    ''|*[!0-9]*)
+      ;;
+    *)
+      if xmj_keepalive_audio_loop_process_alive; then
+        kill "$loop_pid" 2>/dev/null || true
+        sleep 1 2>/dev/null || true
+        if xmj_keepalive_audio_loop_process_alive; then
+          kill -9 "$loop_pid" 2>/dev/null || true
+        fi
+      fi
+      ;;
+  esac
+
+  if ! xmj_keepalive_audio_supported; then
+    xmj_launch_log_line '未检测到 termux-media-player，无法停止静音音频循环。'
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '当前没检测到 termux-media-player；现在没法直接停止静音音频。'
+    fi
+    return 127
+  fi
+
+  output="$(termux-media-player stop 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    xmj_launch_log_line "停止静音音频失败：${output:-未返回输出}"
+    if [ "$with_notice" = '1' ]; then
+      xmj_font_set_notice 'warn' '停止静音音频失败；请确认当前 Termux API 能力可用。'
+    fi
+    return "$status"
+  fi
+
+  if ! xmj_keepalive_clear_audio_runtime_state; then
+    xmj_launch_log_line '静音音频已停止，但状态文件清理失败。'
+  fi
+
+  xmj_launch_log_line "已${owner_text}停止静音音频循环。"
+  if [ "$with_notice" = '1' ]; then
+    xmj_font_set_notice 'success' '已停止静音音频循环。'
+  fi
+  return 0
+}
+
+xmj_keepalive_request_manual_audio_start() {
+  xmj_keepalive_start_audio_loop 'manual' '1'
+}
+
+xmj_keepalive_request_manual_audio_stop() {
+  xmj_keepalive_stop_audio_loop 'manual' '1'
+}
+
+xmj_keepalive_auto_apply_wake_lock_after_launch() {
   xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
 
   if [ "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:-0}" != '1' ]; then
@@ -362,7 +937,7 @@ xmj_keepalive_auto_apply_after_launch() {
   xmj_keepalive_apply_wake_lock 'auto' '0'
 }
 
-xmj_keepalive_auto_release_after_stop() {
+xmj_keepalive_auto_release_wake_lock_after_stop() {
   xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
 
   if [ "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:-0}" != '1' ]; then
@@ -376,6 +951,52 @@ xmj_keepalive_auto_release_after_stop() {
   fi
 
   xmj_keepalive_release_wake_lock 'auto' '0'
+}
+
+xmj_keepalive_auto_apply_audio_loop_after_launch() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：启动后不自动开启静音音频循环。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" = 'active' ] && [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" = 'manual' ]; then
+    if xmj_keepalive_audio_loop_process_alive || xmj_keepalive_audio_playing_now; then
+      xmj_launch_log_line '检测到已有手动静音音频记录，本次启动后不改成自动持有。'
+      return 0
+    fi
+  fi
+
+  xmj_keepalive_start_audio_loop 'auto' '0'
+}
+
+xmj_keepalive_auto_release_audio_loop_after_stop() {
+  xmj_keepalive_load_runtime_state >/dev/null 2>&1 || true
+
+  if [ "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:-0}" != '1' ]; then
+    xmj_launch_log_line '保活设置已关闭：停服后不自动停止静音音频循环。'
+    return 0
+  fi
+
+  if [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_STATE:-idle}" != 'active' ] || [ "${XMJ_KEEPALIVE_RUNTIME_AUDIO_OWNER:-}" != 'auto' ]; then
+    xmj_launch_log_line '当前没有脚本自动开启的静音音频记录，跳过自动停止。'
+    return 0
+  fi
+
+  xmj_keepalive_stop_audio_loop 'auto' '0'
+}
+
+xmj_keepalive_auto_apply_after_launch() {
+  xmj_keepalive_auto_apply_wake_lock_after_launch || true
+  xmj_keepalive_auto_apply_audio_loop_after_launch || true
+  return 0
+}
+
+xmj_keepalive_auto_release_after_stop() {
+  xmj_keepalive_auto_release_wake_lock_after_stop || true
+  xmj_keepalive_auto_release_audio_loop_after_stop || true
+  return 0
 }
 
 xmj_launch_runtime_stream_enabled() {

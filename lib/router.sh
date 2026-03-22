@@ -1673,8 +1673,26 @@ xmj_handle_script_setting_action() {
         6)
           xmj_keepalive_request_manual_release
           ;;
+        7)
+          xmj_keepalive_set_auto_audio_apply_flag '1'
+          ;;
+        8)
+          xmj_keepalive_set_auto_audio_apply_flag '0'
+          ;;
+        9)
+          xmj_keepalive_set_auto_audio_release_flag '1'
+          ;;
+        10)
+          xmj_keepalive_set_auto_audio_release_flag '0'
+          ;;
+        11)
+          xmj_keepalive_request_manual_audio_start
+          ;;
+        12)
+          xmj_keepalive_request_manual_audio_stop
+          ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 0。'
           ;;
       esac
       ;;
