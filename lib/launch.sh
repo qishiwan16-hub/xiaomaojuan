@@ -1700,6 +1700,165 @@ xmj_launch_update_tavern_state() {
   return 0
 }
 
+xmj_tavern_version_for_ref() {
+  local repo_path="${1:-}"
+  local ref_name="${2:-HEAD}"
+  local log_file="${3:-}"
+  local shell_log='/dev/null'
+  local exact_tag=''
+  local describe_name=''
+  local commit_name=''
+
+  if [ -n "$log_file" ]; then
+    shell_log="$log_file"
+  fi
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    printf '%s' '未知'
+    return 0
+  fi
+
+  exact_tag="$(git -C "$repo_path" describe --tags --exact-match "$ref_name" 2>>"$shell_log" || true)"
+  if [ -n "$exact_tag" ]; then
+    printf '%s' "$exact_tag"
+    return 0
+  fi
+
+  describe_name="$(git -C "$repo_path" describe --tags --always "$ref_name" 2>>"$shell_log" || true)"
+  if [ -n "$describe_name" ]; then
+    printf '%s' "$describe_name"
+    return 0
+  fi
+
+  commit_name="$(git -C "$repo_path" rev-parse --short "$ref_name" 2>>"$shell_log" || true)"
+  if [ -n "$commit_name" ]; then
+    printf '%s' "$commit_name"
+    return 0
+  fi
+
+  printf '%s' '未知'
+}
+
+xmj_refresh_home_tavern_update_status() {
+  local repo_path="${XMJ_SILLYTAVERN_PATH:-}"
+  local shell_log='/dev/null'
+  local repo_flag=''
+  local branch_name=''
+  local upstream_ref=''
+  local remote_name='origin'
+  local remote_branch=''
+  local remote_ref=''
+  local fetch_refspec=''
+  local counts=''
+  local ahead_count='0'
+  local behind_count='0'
+
+  XMJ_HOME_TAVERN_CURRENT_VERSION='未识别'
+  XMJ_HOME_TAVERN_LATEST_VERSION='未检查'
+  XMJ_HOME_TAVERN_UPDATE_TEXT='暂时无法确认'
+  XMJ_HOME_TAVERN_UPDATE_STATE='blocked'
+  XMJ_HOME_TAVERN_REMOTE_BRANCH='未配置'
+
+  if [ -z "$repo_path" ] || [ ! -d "$repo_path" ]; then
+    XMJ_HOME_TAVERN_CURRENT_VERSION='未找到酒馆目录'
+    XMJ_HOME_TAVERN_UPDATE_TEXT='无法判断（请先配置酒馆目录）'
+    return 0
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    XMJ_HOME_TAVERN_CURRENT_VERSION='未检测到 Git'
+    XMJ_HOME_TAVERN_UPDATE_TEXT='无法判断（当前环境没检测到 Git）'
+    return 0
+  fi
+
+  repo_flag="$(git -C "$repo_path" rev-parse --is-inside-work-tree 2>>"$shell_log" || true)"
+  if [ "$repo_flag" != 'true' ]; then
+    XMJ_HOME_TAVERN_CURRENT_VERSION='当前目录不是 Git 仓库'
+    XMJ_HOME_TAVERN_UPDATE_TEXT='无法判断（当前目录不是 Git 仓库）'
+    return 0
+  fi
+
+  XMJ_HOME_TAVERN_CURRENT_VERSION="$(xmj_maintenance_repo_version "$repo_path" "$shell_log")"
+  branch_name="$(git -C "$repo_path" symbolic-ref --quiet --short HEAD 2>>"$shell_log" || true)"
+  upstream_ref="$(git -C "$repo_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>>"$shell_log" || true)"
+
+  case "$upstream_ref" in
+    */*)
+      remote_name="${upstream_ref%%/*}"
+      remote_branch="${upstream_ref#*/}"
+      ;;
+    *)
+      remote_branch="$branch_name"
+      ;;
+  esac
+
+  if [ -z "$remote_branch" ]; then
+    XMJ_HOME_TAVERN_UPDATE_TEXT='无法判断（当前分支未绑定远端）'
+    return 0
+  fi
+
+  if ! git -C "$repo_path" remote get-url "$remote_name" >/dev/null 2>&1; then
+    XMJ_HOME_TAVERN_UPDATE_TEXT="无法判断（未配置远端 ${remote_name}）"
+    return 0
+  fi
+
+  remote_ref="refs/remotes/$remote_name/$remote_branch"
+  fetch_refspec="+refs/heads/$remote_branch:${remote_ref}"
+  XMJ_HOME_TAVERN_REMOTE_BRANCH="${remote_name}/${remote_branch}"
+
+  if ! git -C "$repo_path" fetch --quiet --prune "$remote_name" "$fetch_refspec" >/dev/null 2>&1; then
+    XMJ_HOME_TAVERN_UPDATE_STATE='check_failed'
+    XMJ_HOME_TAVERN_LATEST_VERSION='检查失败'
+    XMJ_HOME_TAVERN_UPDATE_TEXT='无法判断（远端版本检查失败）'
+    return 0
+  fi
+
+  if ! git -C "$repo_path" rev-parse --verify "$remote_ref" >/dev/null 2>&1; then
+    XMJ_HOME_TAVERN_LATEST_VERSION='未找到远端分支'
+    XMJ_HOME_TAVERN_UPDATE_TEXT="无法判断（远端分支 ${remote_name}/${remote_branch} 不存在）"
+    return 0
+  fi
+
+  XMJ_HOME_TAVERN_LATEST_VERSION="$(xmj_tavern_version_for_ref "$repo_path" "$remote_ref" "$shell_log")"
+
+  counts="$(git -C "$repo_path" rev-list --left-right --count "HEAD...$remote_ref" 2>>"$shell_log" || true)"
+  ahead_count="${counts%%[[:space:]]*}"
+  behind_count="${counts##*[[:space:]]}"
+
+  case "$ahead_count" in
+    ''|*[!0-9]*)
+      ahead_count='0'
+      ;;
+  esac
+  case "$behind_count" in
+    ''|*[!0-9]*)
+      behind_count='0'
+      ;;
+  esac
+
+  if [ "$ahead_count" = '0' ] && [ "$behind_count" = '0' ]; then
+    XMJ_HOME_TAVERN_UPDATE_STATE='latest'
+    XMJ_HOME_TAVERN_UPDATE_TEXT='否（当前已经是最新版本）'
+    return 0
+  fi
+
+  if [ "$ahead_count" = '0' ] && [ "$behind_count" != '0' ]; then
+    XMJ_HOME_TAVERN_UPDATE_STATE='behind'
+    XMJ_HOME_TAVERN_UPDATE_TEXT="是（远端有 ${behind_count} 个新提交）"
+    return 0
+  fi
+
+  if [ "$ahead_count" != '0' ] && [ "$behind_count" = '0' ]; then
+    XMJ_HOME_TAVERN_UPDATE_STATE='ahead'
+    XMJ_HOME_TAVERN_UPDATE_TEXT="否（本地领先远端 ${ahead_count} 个提交）"
+    return 0
+  fi
+
+  XMJ_HOME_TAVERN_UPDATE_STATE='diverged'
+  XMJ_HOME_TAVERN_UPDATE_TEXT="无法直接判断（本地 ${ahead_count} / 远端 ${behind_count}）"
+  return 0
+}
+
 xmj_launch_file_has_legacy_import_assertion() {
   local file_path="${1:-}"
   local line=''

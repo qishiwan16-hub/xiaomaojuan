@@ -1066,6 +1066,13 @@ xmj_render_setting_home_block() {
   printf '\n'
 }
 
+xmj_render_home_tavern_update_block() {
+  printf '  %b♡ 酒馆版本状态%b\n' "$XMJ_PINK" "$XMJ_RESET"
+  xmj_render_fact_line '当前酒馆版本' "${XMJ_HOME_TAVERN_CURRENT_VERSION:-未识别}"
+  xmj_render_fact_line '最新酒馆版本' "${XMJ_HOME_TAVERN_LATEST_VERSION:-未检查}"
+  xmj_render_fact_line '是否需要更新' "${XMJ_HOME_TAVERN_UPDATE_TEXT:-暂时无法确认}"
+}
+
 xmj_render_menu_block() {
   local section="${1:-}"
   local ids=()
@@ -1078,6 +1085,11 @@ xmj_render_menu_block() {
   fi
 
   xmj_render_section_title "$section"
+
+  if [ "$section" = 'update' ]; then
+    printf '\n'
+    xmj_render_home_tavern_update_block
+  fi
 
   for id in "${XMJ_MENU_IDS[@]}"; do
     if [ "${XMJ_MENU_SECTION[$id]}" = "$section" ]; then
@@ -1112,6 +1124,8 @@ xmj_render_home() {
   xmj_clear_screen
   xmj_render_header
   printf '\n'
+
+  xmj_refresh_home_tavern_update_status >/dev/null 2>&1 || true
 
   for section in "${XMJ_SECTION_ORDER[@]}"; do
     xmj_render_menu_block "$section"
