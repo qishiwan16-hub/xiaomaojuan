@@ -210,15 +210,6 @@ XMJ_THEME_MODE="pastel"
 
 # 当前运行环境说明，会显示在首页信息区。
 XMJ_RUNTIME_ENV="Termux / Android / Bash"
-
-# 内置 Termux 字体预设名称。
-XMJ_TERMUX_FONT_PRESET_NAME="霞鹜文楷等宽"
-
-# 内置 Termux 字体预设下载地址。
-XMJ_TERMUX_FONT_PRESET_URL="https://raw.githubusercontent.com/lxgw/LxgwWenKai/main/fonts/TTF/LXGWWenKaiMono-Regular.ttf"
-
-# 内置 Termux 字体预设 MD5，用于校验下载结果。
-XMJ_TERMUX_FONT_PRESET_MD5="612c16a3b40d91695635749c1493e02f"
 ```
 
 ### 复制时注意
@@ -500,49 +491,6 @@ XMJ_RUNTIME_ENV="Termux / Android / Bash"
 XMJ_RUNTIME_ENV="Termux / Android 14 / Bash"
 XMJ_RUNTIME_ENV="Termux / Samsung / Bash"
 ```
-
-### 6.8 [`XMJ_TERMUX_FONT_PRESET_NAME`](config/xiaomaojuan.conf:30)
-
-```bash
-XMJ_TERMUX_FONT_PRESET_NAME="霞鹜文楷等宽"
-```
-
-作用：
-
-- 用来显示设置中心 > 字体管理里的内置字体名称；
-- 当前默认预设是霞鹜文楷等宽。
-
-### 6.9 [`XMJ_TERMUX_FONT_PRESET_URL`](config/xiaomaojuan.conf:33)
-
-```bash
-XMJ_TERMUX_FONT_PRESET_URL="https://raw.githubusercontent.com/lxgw/LxgwWenKai/main/fonts/TTF/LXGWWenKaiMono-Regular.ttf"
-```
-
-作用：
-
-- 作为内置字体下载地址；
-- 在设置中心 > 字体管理里选择安装内置字体时会用到这个地址。
-
-说明：
-
-- 这里最好填可直接下载 `.ttf` 的直链；
-- 如果你后面想切别的字体，可以只改这一项和对应的 MD5。
-
-### 6.10 [`XMJ_TERMUX_FONT_PRESET_MD5`](config/xiaomaojuan.conf:36)
-
-```bash
-XMJ_TERMUX_FONT_PRESET_MD5="612c16a3b40d91695635749c1493e02f"
-```
-
-作用：
-
-- 用来校验下载下来的字体文件；
-- 防止把错误页面或失效链接当成字体写进 `~/.termux/font.ttf`。
-
-说明：
-
-- 如果你替换了 `XMJ_TERMUX_FONT_PRESET_URL`，记得一起改这里的 MD5；
-- 如果 MD5 对不上，脚本会拒绝应用该字体。
 
 ---
 

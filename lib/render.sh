@@ -1242,9 +1242,6 @@ xmj_setting_view_title() {
   local view="${1:-home}"
 
   case "$view" in
-    font)
-      printf '%s' '字体管理'
-      ;;
     autostart)
       printf '%s' '是否自启动'
       ;;
@@ -1285,38 +1282,35 @@ xmj_setting_view_id() {
   local view="${1:-home}"
 
   case "$view" in
-    font)
+    autostart)
       printf '%s' '19-1'
       ;;
-    autostart)
+    keepalive)
       printf '%s' '19-2'
       ;;
-    keepalive)
+    script_update)
       printf '%s' '19-3'
       ;;
-    script_update)
+    script_branch)
       printf '%s' '19-4'
       ;;
-    script_branch)
+    script_version)
       printf '%s' '19-5'
       ;;
-    script_version)
+    logs)
       printf '%s' '19-6'
       ;;
-    logs)
-      printf '%s' '19-7'
-      ;;
     logs_keep_count)
-      printf '%s' '19-7-1'
+      printf '%s' '19-6-1'
       ;;
     logs_auto_cleanup)
-      printf '%s' '19-7-4'
+      printf '%s' '19-6-4'
       ;;
     logs_delete_confirm)
-      printf '%s' '19-7-2'
+      printf '%s' '19-6-2'
       ;;
     logs_cleanup_confirm)
-      printf '%s' '19-7-3'
+      printf '%s' '19-6-3'
       ;;
     *)
       printf '%s' '19'
@@ -1332,7 +1326,6 @@ xmj_render_setting_overview_page() {
   xmj_render_page_identity "$(xmj_setting_view_id 'home')" "$(xmj_setting_view_title 'home')"
   printf '\n'
   xmj_render_fact_line '当前主题' "$(xmj_theme_label)"
-  xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
   xmj_render_fact_line '配置状态' "$(xmj_config_status_text)"
   xmj_render_fact_line '配置文件' "$(xmj_display_path "${XMJ_CONFIG_FILE:-未生成}")"
   printf '\n'
@@ -1340,17 +1333,14 @@ xmj_render_setting_overview_page() {
   printf '\n'
   xmj_render_setting_card '2 · 主题 / 外观' '' "当前：$(xmj_theme_label)"
   printf '\n'
-  xmj_render_setting_card '3 · 字体管理' '' "当前：$(xmj_termux_font_status_text)"
-  printf '\n'
-  xmj_render_setting_card '4 · 高级项预留' '' '功能预留'
+  xmj_render_setting_card '3 · 高级项预留' '' '功能预留'
   xmj_render_notice_line
   printf '\n'
   xmj_render_action_item '1' '进入基础设置'
   xmj_render_action_item '2' '进入主题 / 外观'
-  xmj_render_action_item '3' '进入字体管理'
-  xmj_render_action_item '4' '查看高级项预留'
+  xmj_render_action_item '3' '查看高级项预留'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 0。'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 0。'
 }
 
 xmj_render_setting_basic_page() {
@@ -1400,50 +1390,6 @@ xmj_render_setting_theme_page() {
   xmj_render_action_footer '输入 0 返回设置中心。'
 }
 
-xmj_render_setting_font_page() {
-  local font_file
-  local backup_file
-  local backup_state='未生成'
-  local preset_format='未知'
-
-  font_file="$(xmj_termux_font_file)"
-  backup_file="$(xmj_termux_font_backup_file)"
-  if [ -f "$backup_file" ]; then
-    backup_state='已存在'
-  fi
-
-  case "$(xmj_termux_font_extension "${XMJ_TERMUX_FONT_PRESET_URL:-}")" in
-    ttf)
-      preset_format='TTF'
-      ;;
-    otf)
-      preset_format='OTF'
-      ;;
-  esac
-
-  xmj_clear_screen
-  xmj_render_header
-  xmj_render_section_title 'setting'
-  printf '\n'
-  xmj_render_page_identity "$(xmj_setting_view_id 'font')" "$(xmj_setting_view_title 'font')"
-  printf '\n'
-  xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
-  xmj_render_fact_line '字体路径' "$(xmj_display_path "$font_file")"
-  xmj_render_fact_line '备份状态' "$backup_state"
-  xmj_render_fact_line '内置预设' "${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
-  xmj_render_fact_line '下载来源' "$(xmj_termux_font_source_host)"
-  xmj_render_fact_line '资源格式' "$preset_format"
-  printf '\n'
-  xmj_render_page_intro '字体操作会影响整个 Termux。' '自定义预设请编辑 config/xiaomaojuan.conf。'
-  xmj_render_notice_line
-  printf '\n'
-  xmj_render_action_item '1' "安装内置字体：${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
-  xmj_render_action_item '2' '恢复默认字体'
-  xmj_render_action_item '3' '重新加载 Termux 设置'
-  xmj_render_action_item '0' '返回设置中心'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 0。'
-}
-
 xmj_render_setting_advanced_page() {
   xmj_clear_screen
   xmj_render_header
@@ -1477,9 +1423,6 @@ xmj_render_setting_center_page() {
   local view="${1:-home}"
 
   case "$view" in
-    font)
-      xmj_render_setting_font_page
-      ;;
     autostart)
       xmj_render_setting_autostart_page
       ;;
@@ -1976,57 +1919,27 @@ xmj_render_setting_overview_page() {
   printf '\n'
   printf '  %b想调哪里就点哪里，猫猫把说明都压短啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
   printf '\n'
-  xmj_render_setting_card '1 · 字体管理' '' "当前：$(xmj_termux_font_status_text)"
+  xmj_render_setting_card '1 · 是否自启动' '' "当前：$(xmj_setting_autostart_status_text)"
   printf '\n'
-  xmj_render_setting_card '2 · 是否自启动' '' "当前：$(xmj_setting_autostart_status_text)"
+  xmj_render_setting_card '2 · 保活设置' '' "自动申请：$(xmj_keepalive_auto_apply_status_text)"
   printf '\n'
-  xmj_render_setting_card '3 · 保活设置' '' "自动申请：$(xmj_keepalive_auto_apply_status_text)"
+  xmj_render_setting_card '3 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
   printf '\n'
-  xmj_render_setting_card '4 · 脚本更新' '' "当前：$(xmj_setting_script_current_version_text)"
+  xmj_render_setting_card '4 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
   printf '\n'
-  xmj_render_setting_card '5 · 脚本分支' '' "当前：${XMJ_SETTING_SCRIPT_BRANCH:-未识别}"
+  xmj_render_setting_card '5 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
   printf '\n'
-  xmj_render_setting_card '6 · 脚本版本' '' "提交：${XMJ_SETTING_SCRIPT_COMMIT:-未识别}"
-  printf '\n'
-  xmj_render_setting_card '7 · 日志管理' '' "启动清理：$(xmj_log_auto_cleanup_on_launch_status_text)；保留：$(xmj_setting_log_keep_count) 份"
+  xmj_render_setting_card '6 · 日志管理' '' "启动清理：$(xmj_log_auto_cleanup_on_launch_status_text)；保留：$(xmj_setting_log_keep_count) 份"
   xmj_render_notice_line
   printf '\n'
-  xmj_render_action_item '1' '进入字体管理'
-  xmj_render_action_item '2' '查看是否自启动'
-  xmj_render_action_item '3' '查看保活设置'
-  xmj_render_action_item '4' '检查脚本更新'
-  xmj_render_action_item '5' '切换脚本分支'
-  xmj_render_action_item '6' '查看脚本版本'
-  xmj_render_action_item '7' '进入日志管理'
+  xmj_render_action_item '1' '查看是否自启动'
+  xmj_render_action_item '2' '查看保活设置'
+  xmj_render_action_item '3' '检查脚本更新'
+  xmj_render_action_item '4' '切换脚本分支'
+  xmj_render_action_item '5' '查看脚本版本'
+  xmj_render_action_item '6' '进入日志管理'
   xmj_render_action_item '0' '返回首页'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 0 就好喵'
-}
-
-xmj_render_setting_font_page() {
-  local backup_file
-  local backup_state='未生成'
-
-  backup_file="$(xmj_termux_font_backup_file)"
-  if [ -f "$backup_file" ]; then
-    backup_state='已存在'
-  fi
-
-  xmj_clear_screen
-  xmj_render_header
-  xmj_render_page_title "$(xmj_setting_view_title 'font')" 'font manager' 'setting'
-  printf '\n'
-  printf '  %b字体这边猫猫也帮你收得很短啦。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '\n'
-  xmj_render_fact_line '当前字体' "$(xmj_termux_font_status_text)"
-  xmj_render_fact_line '备份状态' "$backup_state"
-  xmj_render_fact_line '内置预设' "${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
-  xmj_render_notice_line
-  printf '\n'
-  xmj_render_action_item '1' "安装内置字体：${XMJ_TERMUX_FONT_PRESET_NAME:-未设置}"
-  xmj_render_action_item '2' '恢复默认字体'
-  xmj_render_action_item '3' '重新加载 Termux 设置'
-  xmj_render_action_item '0' '返回设置中心'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
 }
 
 xmj_render_setting_autostart_page() {

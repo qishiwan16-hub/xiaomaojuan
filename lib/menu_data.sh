@@ -121,7 +121,7 @@ xmj_load_menu_data() {
   XMJ_MENU_LABEL['18']='敬请期待'
   XMJ_MENU_LABEL['19']='设置中心'
   XMJ_MENU_LABEL['20']='酒馆设置'
-  XMJ_MENU_LABEL['21']='字体管理'
+  XMJ_MENU_LABEL['21']='保活设置'
   XMJ_MENU_LABEL['22']='是否自启动'
   XMJ_MENU_LABEL['23']='版本信息'
   XMJ_MENU_LABEL['24']='关于面板'

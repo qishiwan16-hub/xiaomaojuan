@@ -1605,34 +1605,30 @@ xmj_handle_script_setting_action() {
           ;;
         1)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='font'
+          XMJ_SETTING_NEXT_VIEW='autostart'
           ;;
         2)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='autostart'
+          XMJ_SETTING_NEXT_VIEW='keepalive'
           ;;
         3)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='keepalive'
+          XMJ_SETTING_NEXT_VIEW='script_update'
           ;;
         4)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='script_update'
+          XMJ_SETTING_NEXT_VIEW='script_branch'
           ;;
         5)
           xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='script_branch'
-          ;;
-        6)
-          xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='script_version'
           ;;
-        7)
+        6)
           xmj_font_clear_notice
           XMJ_SETTING_NEXT_VIEW='logs'
           ;;
         *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 0。'
+          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
           ;;
       esac
       ;;
@@ -1679,26 +1675,6 @@ xmj_handle_script_setting_action() {
           ;;
         *)
           xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 4 / 5 / 6 / 0。'
-          ;;
-      esac
-      ;;
-    font)
-      case "$input" in
-        ''|0)
-          xmj_font_clear_notice
-          XMJ_SETTING_NEXT_VIEW='home'
-          ;;
-        1)
-          xmj_install_termux_font_preset
-          ;;
-        2)
-          xmj_restore_termux_default_font
-          ;;
-        3)
-          xmj_manual_reload_termux_settings
-          ;;
-        *)
-          xmj_font_set_notice 'warn' '仅支持输入 1 / 2 / 3 / 0。'
           ;;
       esac
       ;;
