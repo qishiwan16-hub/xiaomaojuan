@@ -204,14 +204,6 @@ XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK="1"
 # 可选值：0 / 1
 XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK="1"
 
-# Termux 保活：启动酒馆成功后，是否自动开启静音音频循环。
-# 可选值：0 / 1
-XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP="0"
-
-# Termux 保活：酒馆停止后，是否自动停止脚本自动开启的静音音频循环。
-# 可选值：0 / 1
-XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP="1"
-
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"

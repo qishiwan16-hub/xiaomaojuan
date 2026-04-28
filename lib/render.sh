@@ -2065,26 +2065,16 @@ xmj_render_setting_keepalive_page() {
   xmj_render_header
   xmj_render_page_title "$(xmj_setting_view_title 'keepalive')" 'termux keep alive' 'setting'
   printf '\n'
-  printf '  %b这里把唤醒锁和静音音频都接进来了；你可以单开，也可以双开做双保险。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
-  printf '  %b脚本会在酒馆进入运行后再按你的配置自动接管，停服后也只回收脚本自己自动开启的那部分。%b\n' "$XMJ_MIST" "$XMJ_RESET"
+  printf '  %b这里现在只保留唤醒锁保活，避免静音音频方案导致后台异常断开。%b\n' "$XMJ_WHITE" "$XMJ_RESET"
+  printf '  %b脚本会在酒馆进入运行后按你的配置自动接管，停服后也只回收脚本自己自动开启的那部分。%b\n' "$XMJ_MIST" "$XMJ_RESET"
   printf '\n'
   xmj_render_fact_line '唤醒锁能力' "$(xmj_keepalive_capability_text)"
   xmj_render_fact_line '唤醒锁自动申请' "$(xmj_keepalive_auto_apply_status_text)"
   xmj_render_fact_line '唤醒锁自动释放' "$(xmj_keepalive_auto_release_status_text)"
   xmj_render_fact_line '唤醒锁状态' "$(xmj_keepalive_runtime_status_text)"
-  xmj_render_fact_line '音频能力' "$(xmj_keepalive_audio_capability_text)"
-  xmj_render_fact_line '音频自动开启' "$(xmj_keepalive_audio_auto_apply_status_text)"
-  xmj_render_fact_line '音频自动停止' "$(xmj_keepalive_audio_auto_release_status_text)"
-  xmj_render_fact_line '音频状态' "$(xmj_keepalive_audio_runtime_status_text)"
-  xmj_render_fact_line '推荐方案' '唤醒锁 + 静音音频 + 电池不优化 + 最近任务锁定'
+  xmj_render_fact_line '推荐方案' '唤醒锁 + 电池不优化 + 最近任务锁定'
   if ! xmj_keepalive_wake_lock_supported; then
     xmj_render_fact_line '唤醒锁缺少什么' '先装 termux-api 包，并安装 Termux:API 应用'
-  fi
-  if ! xmj_keepalive_audio_supported; then
-    xmj_render_fact_line '音频缺少什么' '需要 termux-api 包 + Termux:API 应用'
-    xmj_render_fact_line '音频应用 GitHub' 'https://github.com/termux/termux-api'
-    xmj_render_fact_line '音频命令包说明' 'https://github.com/termux/termux-packages/tree/master/packages/termux-api-package'
-    xmj_render_fact_line '装好后怎么做' '下载安装后回到这里确认，再重新启动 Termux / 脚本'
   fi
   xmj_render_notice_line
   printf '\n'
@@ -2094,14 +2084,8 @@ xmj_render_setting_keepalive_page() {
   xmj_render_action_item '4' '关闭停服后自动释放唤醒锁'
   xmj_render_action_item '5' '立即申请一次唤醒锁'
   xmj_render_action_item '6' '立即释放一次唤醒锁'
-  xmj_render_action_item '7' '开启启动后自动开启静音音频循环'
-  xmj_render_action_item '8' '关闭启动后自动开启静音音频循环'
-  xmj_render_action_item '9' '开启停服后自动停止静音音频循环'
-  xmj_render_action_item '10' '关闭停服后自动停止静音音频循环'
-  xmj_render_action_item '11' '立即开启一次静音音频循环'
-  xmj_render_action_item '12' '立即停止一次静音音频循环'
   xmj_render_action_item '0' '返回设置中心'
-  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 / 12 / 0 就好喵'
+  xmj_render_action_footer '输入 1 / 2 / 3 / 4 / 5 / 6 / 0 就好喵'
 }
 
 xmj_render_setting_script_update_page() {

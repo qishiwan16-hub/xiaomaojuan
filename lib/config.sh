@@ -185,14 +185,6 @@ XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK="1"
 # 可选值：0 / 1
 XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK="1"
 
-# Termux 保活：启动酒馆成功后，是否自动开启静音音频循环。
-# 可选值：0 / 1
-XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP="0"
-
-# Termux 保活：酒馆停止后，是否自动停止脚本自动开启的静音音频循环。
-# 可选值：0 / 1
-XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP="1"
-
 # 主题模式。
 # 可选值：pastel / moonlight
 XMJ_THEME_MODE="pastel"
@@ -268,8 +260,6 @@ xmj_apply_config_defaults() {
   : "${XMJ_TAVERN_SETTING_USER_NAME:=default-user}"
   : "${XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK:=1}"
   : "${XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK:=1}"
-  : "${XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP:=0}"
-  : "${XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP:=1}"
   : "${XMJ_THEME_MODE:=pastel}"
   : "${XMJ_RUNTIME_ENV:=Termux / Android / Bash}"
   : "${XMJ_TERMUX_FONT_PRESET_NAME:=霞鹜文楷等宽}"
@@ -419,8 +409,6 @@ xmj_validate_config() {
   xmj_validate_required_text 'XMJ_TAVERN_SETTING_USER_NAME' '酒馆默认文件夹' 'default-user'
   xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_APPLY_WAKE_LOCK' '启动后自动申请唤醒锁' '1'
   xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_RELEASE_WAKE_LOCK' '停服后自动释放唤醒锁' '1'
-  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_APPLY_AUDIO_LOOP' '启动后自动开启静音音频循环' '0'
-  xmj_validate_bool_flag_value 'XMJ_KEEPALIVE_AUTO_RELEASE_AUDIO_LOOP' '停服后自动停止静音音频循环' '1'
   xmj_validate_required_text 'XMJ_RUNTIME_ENV' '运行环境说明' 'Termux / Android / Bash'
   xmj_validate_theme_mode
 
